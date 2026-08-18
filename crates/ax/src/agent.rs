@@ -309,7 +309,10 @@ fn record_fields(
     intern: &crate::intern::Interner,
 ) -> Vec<(String, Type)> {
     let bare = match ty {
-        Type::Ref { inner, .. } | Type::Own(inner) => (**inner).clone(),
+        Type::Ref { inner, .. }
+        | Type::Own(inner)
+        | Type::Untrusted(inner)
+        | Type::Secret(inner) => (**inner).clone(),
         other => other.clone(),
     };
     match &bare {

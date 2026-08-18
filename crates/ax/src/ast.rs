@@ -205,6 +205,10 @@ pub enum TypeExprKind {
         inner: Box<TypeExpr>,
     },
     Own(Box<TypeExpr>),
+    /// Lattice annotation: data that crossed an IO boundary (§4.4).
+    Untrusted(Box<TypeExpr>),
+    /// Lattice annotation: secret that cannot be logged / formatted / FFI'd.
+    Secret(Box<TypeExpr>),
     Fn {
         params: Vec<TypeExpr>,
         ret: Box<TypeExpr>,
@@ -316,6 +320,13 @@ pub enum ExprKind {
         arms: Vec<Arm>,
     },
     Attempt(Box<Expr>),
+    /// Postfix `?` — Rust `Result` propagation (v0.3). Distinct from a
+    /// primary-position hole.
+    Try(Box<Expr>),
+    /// `f"hello {name}"` interpolation.
+    Interpolate {
+        parts: Vec<InterpPart>,
+    },
     Region {
         name: Ident,
         body: Box<Expr>,
@@ -327,6 +338,12 @@ pub enum ExprKind {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub enum InterpPart {
+    Lit(String),
+    Expr(Expr),
 }
 
 #[derive(Clone, Debug)]
@@ -551,7 +568,16 @@ fn number_expr(e: &mut Expr, n: &mut u32) {
                 number_expr(i, n);
             }
         }
-        ExprKind::Raise(inner) | ExprKind::Attempt(inner) => number_expr(inner, n),
+        ExprKind::Raise(inner) | ExprKind::Attempt(inner) | ExprKind::Try(inner) => {
+            number_expr(inner, n)
+        }
+        ExprKind::Interpolate { parts } => {
+            for p in parts {
+                if let InterpPart::Expr(ex) = p {
+                    number_expr(ex, n);
+                }
+            }
+        }
         ExprKind::Region { body, .. } => number_expr(body, n),
         ExprKind::Par { bindings } => {
             for l in bindings {

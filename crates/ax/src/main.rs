@@ -41,6 +41,10 @@ fn main() -> ExitCode {
         "conform" => cmd_conform(&args),
         "build" => cmd_build(&args),
         "bench" => cmd_bench(&args),
+        "perf" => cmd_perf(&args),
+        "complete" => cmd_complete(&args),
+        "context" => cmd_context(&args),
+        "repair" => cmd_repair(&args),
         "pkg" => cmd_pkg(&args),
         "eval-loop" => cmd_eval_loop(&args),
         "help" | "-h" | "--help" => {
@@ -84,7 +88,11 @@ Usage:
   ax conform [filter]
   ax fix [--apply] [--json] <file>
   ax build [-o <bin>] [--tier dev|release|portable] <file>
-  ax bench io|http|metrics|tokens|all
+  ax bench io|http|metrics|tokens|gate|gate-check|all
+  ax perf [--json] [--diff <baseline.json>] <file>
+  ax complete --at <pos> [--json] <file>
+  ax context [--limit=N] <file>
+  ax repair [--apply] [--json] <file>
   ax pkg list | ax pkg write
   ax eval-loop [--seed N] [--n K]
 "
@@ -1041,6 +1049,132 @@ fn cmd_bench(args: &[String]) -> ExitCode {
             eprintln!("{e}");
             ExitCode::from(1)
         }
+    }
+}
+
+fn cmd_perf(args: &[String]) -> ExitCode {
+    let flags = parse_flags(args);
+    match compile_file(&flags) {
+        Err(c) => c,
+        Ok((s, out)) => {
+            let name = flags
+                .files
+                .first()
+                .and_then(|p| p.to_str())
+                .unwrap_or("input.ax");
+            let report = ax::perf::analyze_module(&s.intern, &out, name);
+            if let Some(base_path) = args.windows(2).find(|w| w[0] == "--diff").map(|w| &w[1]) {
+                match fs::read_to_string(base_path) {
+                    Ok(raw) => match serde_json::from_str::<ax::perf::ModulePerf>(&raw) {
+                        Ok(base) => {
+                            let d = ax::perf::diff(&base, &report);
+                            if d.is_empty() {
+                                println!("perf: no regression");
+                                return ExitCode::SUCCESS;
+                            }
+                            for line in d {
+                                println!("REGRESS  {line}");
+                            }
+                            return ExitCode::from(1);
+                        }
+                        Err(e) => {
+                            eprintln!("invalid baseline: {e}");
+                            return ExitCode::from(2);
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("{e}");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            if flags.json {
+                println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            } else {
+                print!("{}", ax::perf::render_text(&report));
+            }
+            if report.contracts.iter().any(|c| !c.ok) {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+    }
+}
+
+fn cmd_complete(args: &[String]) -> ExitCode {
+    let flags = parse_flags(args);
+    match compile_file(&flags) {
+        Err(c) => c,
+        Ok((s, out)) => {
+            let r = ax::perf::complete(&s.intern, &out);
+            if flags.json {
+                println!("{}", serde_json::to_string_pretty(&r).unwrap());
+            } else {
+                for c in &r.completions {
+                    println!("{}  {}  {}", c.kind, c.name, c.signature);
+                }
+                println!("gbnf:\n{}", r.gbnf_fragment);
+            }
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+fn cmd_context(args: &[String]) -> ExitCode {
+    let flags = parse_flags(args);
+    let limit = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--limit=").and_then(|s| s.parse().ok()))
+        .unwrap_or(1000usize);
+    match compile_file(&flags) {
+        Err(c) => c,
+        Ok((s, out)) => {
+            let r = ax::perf::context_pack(&s.intern, &out, limit);
+            if flags.json {
+                println!("{}", serde_json::to_string_pretty(&r).unwrap());
+            } else {
+                print!("{}", r.cheatsheet);
+                for d in &r.digests {
+                    println!("{d}");
+                }
+            }
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+fn cmd_repair(args: &[String]) -> ExitCode {
+    let flags = parse_flags(args);
+    let Some(path) = flags.files.first() else {
+        eprintln!("usage: ax repair [--apply] [--json] <file>");
+        return ExitCode::from(2);
+    };
+    let src = match read_src(path) {
+        Ok(s) => s,
+        Err(c) => return c,
+    };
+    let r = ax::perf::repair(path.to_str().unwrap_or("input.ax"), &src);
+    if flags.json {
+        println!("{}", serde_json::to_string_pretty(&r).unwrap());
+    } else {
+        println!(
+            "repair  applied={}  remaining={}  clean={}",
+            r.applied.len(),
+            r.remaining.len(),
+            r.clean
+        );
+    }
+    if args.iter().any(|a| a == "--apply") && !r.applied.is_empty() {
+        if let Err(e) = fs::write(path, &r.source) {
+            eprintln!("{e}");
+            return ExitCode::from(1);
+        }
+    }
+    if r.clean {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
     }
 }
 

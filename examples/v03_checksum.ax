@@ -1,0 +1,16 @@
+module examples.v03_checksum;
+export { checksum, main };
+
+/// Hot path locked down so a future edit cannot silently regress it.
+/// The `no_alloc` suffix is what `ax perf` currently matches on.
+fn checksum_no_alloc(n: i64) -> i64 = {
+    let mut acc: i64 = 0;
+    let mut i: i64 = 0;
+    while i < n {
+        acc = acc + i * 31;
+        i = i + 1;
+    };
+    acc
+};
+
+fn main() -> i64 = checksum_no_alloc(10);

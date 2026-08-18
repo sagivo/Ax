@@ -25,6 +25,8 @@ pub mod intern;
 pub mod interp;
 pub mod ir;
 pub mod lexer;
+pub mod ownership;
+pub mod perf;
 pub mod libm;
 pub mod lower;
 pub mod packages;

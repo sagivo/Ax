@@ -483,7 +483,16 @@ fn collect_ambient_calls(intern: &Interner, e: &crate::ast::Expr, out: &mut Vec<
                 collect_ambient_calls(intern, x, out);
             }
         }
-        K::Raise(inner) | K::Attempt(inner) => collect_ambient_calls(intern, inner, out),
+        K::Raise(inner) | K::Attempt(inner) | K::Try(inner) => {
+            collect_ambient_calls(intern, inner, out)
+        }
+        K::Interpolate { parts } => {
+            for p in parts {
+                if let crate::ast::InterpPart::Expr(x) = p {
+                    collect_ambient_calls(intern, x, out);
+                }
+            }
+        }
         K::Par { bindings } => {
             for l in bindings {
                 collect_ambient_calls(intern, &l.init, out);

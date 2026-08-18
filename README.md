@@ -7,11 +7,12 @@ normative interpreter to check itself against is worth more to an agent than any
 surface-level cleverness.
 
 ```
-.ax → lexer → parser (×3 surfaces) → AST
-    → check (types, effects, regions) + independent effect/region oracles
+.ax → lexer → parser (Rust subset + accept-and-elide; terse rewrite still works)
+    → check (types, effects, regions, Untrusted/Secret/own)
+    → ownership ladder + ax perf --json
     → typed SSA IR
     → ├─ Cranelift      (in-process: compile and run in 0.3 ms, no cc)
-      ├─ C11 backend    (dev / release / portable, via cc)
+      ├─ C11 backend    (dev / release / portable, via cc — the LLVM-class path)
       └─ oracle interpreter (normative)
 ```
 
@@ -60,9 +61,12 @@ test "add" = assert(add(1, 2) == 3);
 
 Full card: `ax card` or `spec/card.md`. Normative grammar: `spec/grammar.ebnf`.
 
-**Not in v1**, and rejected rather than half-supported: `par` (no disjointness
-proof yet), `own T` (no move checker, so uniqueness would be unenforced),
-`Map`/`SortedMap`, capturing closures.
+**v0.3 additions:** Rust-shaped `fn f() { … }` / `struct` / `enum` parse;
+postfix `?` is `Result` propagation; `f"…"` interpolates; `own T` is affine
+(use exactly once); `Untrusted[T]` / `Secret[T]` are lattice annotations;
+`ax perf --json` reports the ownership ladder and surviving checks.
+`par` is still rejected until disjointness is proven. `Map`/`SortedMap` and
+capturing closures remain out of v1.
 
 ## Protocol
 
@@ -79,6 +83,8 @@ ax conform [filter]             conformance suite, every tier
 ax build [-o bin] [--tier dev|release|portable]
 ax bench io|http|metrics|tokens|all  |  ax eval-loop [--seed N] [--n K]
 ax merge --semantic | label | card | pkg list | pkg write
+ax perf [--json] [--diff baseline.json] | complete | context | repair
+ax bench gate | gate-check
 ```
 
 `ax hole --fills` is the piece that matters. It synthesises candidate

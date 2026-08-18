@@ -76,3 +76,12 @@ jobs:
 
       - name: the card is emittable
         run: cargo run -p ax -- card
+
+      - name: v0.3 perf report and completion
+        run: |
+          cargo run -p ax -- perf --json examples/hello.ax
+          cargo run -p ax -- complete --json examples/hello.ax
+          cargo run -p ax -- context examples/hello.ax
+
+      - name: §5.6 gate programs compile and agree with C and Rust
+        run: cargo run -p ax -- bench gate-check

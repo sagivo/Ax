@@ -688,6 +688,10 @@ impl<'a> Checker<'a> {
             TypeExprKind::Prim(p) => Type::Prim(*p),
             TypeExprKind::Hole => Type::Hole,
             TypeExprKind::Own(inner) => Type::Own(Box::new(self.lower_type(inner, env_region))),
+            TypeExprKind::Untrusted(inner) => {
+                Type::Untrusted(Box::new(self.lower_type(inner, env_region)))
+            }
+            TypeExprKind::Secret(inner) => Type::Secret(Box::new(self.lower_type(inner, env_region))),
             TypeExprKind::Ref {
                 region,
                 mutable,
@@ -1151,6 +1155,50 @@ impl<'a> Checker<'a> {
                 });
                 self.caught.insert(e.id, caught.clone());
                 builtins::result_type(&self.b, t, caught)
+            }
+            ExprKind::Try(inner) => {
+                // v0.3: postfix `?` is Result propagation. The inner type is
+                // Result[T, E]; the expression yields T and admits err[E].
+                let t = self.check_expr(inner, None, env);
+                match peel_result(&t, &self.b) {
+                    Some((ok, err)) => {
+                        env.inferred.insert(crate::effects::EffectAtom::Err(err));
+                        ok
+                    }
+                    None => {
+                        // Accept-and-elide: `?` on a non-Result is a no-op with
+                        // an informational diagnostic, matching "never reject
+                        // a generator for a missing conversion".
+                        self.diags.push(crate::diag::Diagnostic::warn(
+                            "A0109",
+                            e.span,
+                            "`?` on a non-Result is ignored; Ax already returns the value",
+                        ));
+                        t
+                    }
+                }
+            }
+            ExprKind::Interpolate { parts } => {
+                for p in parts {
+                    if let crate::ast::InterpPart::Expr(x) = p {
+                        let t = self.check_expr(x, None, env);
+                        if matches!(t, Type::Secret(_)) {
+                            self.err(
+                                "A5102",
+                                x.span,
+                                "Secret[T] cannot be interpolated / formatted",
+                            );
+                        }
+                        if matches!(t, Type::Untrusted(_)) {
+                            self.err(
+                                "A5101",
+                                x.span,
+                                "Untrusted[T] cannot reach an f-string sink without declassify",
+                            );
+                        }
+                    }
+                }
+                builtins::string_type(&self.b)
             }
             ExprKind::Region { name, body } => {
                 let rid = RegionId {
@@ -1788,7 +1836,9 @@ impl<'a> Checker<'a> {
         // Peel references: `xs.len()` works through `&Vec[T]` and `&mut Vec[T]`.
         let (bare, recv_mut) = match recv {
             Type::Ref { inner, mutable, .. } => ((**inner).clone(), *mutable),
-            Type::Own(inner) => ((**inner).clone(), true),
+            Type::Own(inner) | Type::Untrusted(inner) | Type::Secret(inner) => {
+                ((**inner).clone(), true)
+            }
             other => (other.clone(), place_mut),
         };
         let kind = match &bare {
@@ -2145,7 +2195,10 @@ impl<'a> Checker<'a> {
             UnOp::Deref => {
                 let t = self.check_expr(expr, None, env);
                 match t {
-                    Type::Ref { inner, .. } | Type::Own(inner) => *inner,
+                    Type::Ref { inner, .. }
+                    | Type::Own(inner)
+                    | Type::Untrusted(inner)
+                    | Type::Secret(inner) => *inner,
                     other => {
                         self.err(
                             "E0101",
@@ -2310,7 +2363,10 @@ impl<'a> Checker<'a> {
     /// list, so they still require a `_` arm to be total.
     fn check_exhaustive(&mut self, scrut: &Type, arms: &[Arm], span: Span, def_id: &str) {
         let bare = match scrut {
-            Type::Ref { inner, .. } | Type::Own(inner) => (**inner).clone(),
+            Type::Ref { inner, .. }
+            | Type::Own(inner)
+            | Type::Untrusted(inner)
+            | Type::Secret(inner) => (**inner).clone(),
             other => other.clone(),
         };
         let Type::Named { def, .. } = &bare else { return };
@@ -2563,7 +2619,10 @@ impl<'a> Checker<'a> {
     /// committing to an error.
     fn try_field_type(&mut self, base: &Type, field: &Ident) -> Option<Type> {
         let base = match base {
-            Type::Ref { inner, .. } | Type::Own(inner) => inner.as_ref(),
+            Type::Ref { inner, .. }
+            | Type::Own(inner)
+            | Type::Untrusted(inner)
+            | Type::Secret(inner) => inner.as_ref(),
             other => other,
         };
         match base {
@@ -2596,7 +2655,10 @@ impl<'a> Checker<'a> {
 
     fn field_type(&mut self, base: &Type, field: &Ident, span: Span) -> Type {
         let base = match base {
-            Type::Ref { inner, .. } | Type::Own(inner) => inner.as_ref(),
+            Type::Ref { inner, .. }
+            | Type::Own(inner)
+            | Type::Untrusted(inner)
+            | Type::Secret(inner) => inner.as_ref(),
             other => other,
         };
         match base {
@@ -3103,6 +3165,18 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// Peel `Result[T, E]` (and the same type wrapped in Untrusted/Secret/Ref/Own).
+fn peel_result(ty: &Type, b: &builtins::Builtins) -> Option<(Type, Type)> {
+    match ty {
+        Type::Named { def, args } if *def == b.result && args.len() == 2 => {
+            Some((args[0].clone(), args[1].clone()))
+        }
+        Type::Untrusted(inner) | Type::Secret(inner) | Type::Own(inner) => peel_result(inner, b),
+        Type::Ref { inner, .. } => peel_result(inner, b),
+        _ => None,
+    }
+}
+
 fn path_str(p: &Path, intern: &Interner) -> String {
     p.segs
         .iter()
@@ -3114,7 +3188,7 @@ fn path_str(p: &Path, intern: &Interner) -> String {
 fn type_mentions_region(ty: &Type, r: RegionId) -> bool {
     match ty {
         Type::Ref { region, inner, .. } => region.name == r.name || type_mentions_region(inner, r),
-        Type::Own(t) => type_mentions_region(t, r),
+        Type::Own(t) | Type::Untrusted(t) | Type::Secret(t) => type_mentions_region(t, r),
         Type::Named { args, .. } => args.iter().any(|a| type_mentions_region(a, r)),
         Type::Tuple(ts) => ts.iter().any(|t| type_mentions_region(t, r)),
         Type::Record(fs) => fs.iter().any(|(_, t)| type_mentions_region(t, r)),
@@ -3162,7 +3236,10 @@ fn type_mentions_param(t: &Type) -> bool {
     match t {
         Type::Param(_) => true,
         Type::Named { args, .. } | Type::Tuple(args) => args.iter().any(type_mentions_param),
-        Type::Ref { inner, .. } | Type::Own(inner) => type_mentions_param(inner),
+        Type::Ref { inner, .. }
+        | Type::Own(inner)
+        | Type::Untrusted(inner)
+        | Type::Secret(inner) => type_mentions_param(inner),
         Type::Record(fs) => fs.iter().any(|(_, x)| type_mentions_param(x)),
         Type::Fn { params, ret, .. } => {
             params.iter().any(type_mentions_param) || type_mentions_param(ret)
@@ -3186,7 +3263,10 @@ enum SeqKind {
 fn scrutinee_def(ty: &Type) -> Option<Symbol> {
     match ty {
         Type::Named { def, .. } | Type::Variant { def, .. } => Some(*def),
-        Type::Ref { inner, .. } | Type::Own(inner) => scrutinee_def(inner),
+        Type::Ref { inner, .. }
+        | Type::Own(inner)
+        | Type::Untrusted(inner)
+        | Type::Secret(inner) => scrutinee_def(inner),
         _ => None,
     }
 }
@@ -3260,8 +3340,16 @@ fn for_each_child(e: &Expr, f: &mut impl FnMut(&Expr)) {
                 f(x);
             }
         }
-        ExprKind::Raise(inner) | ExprKind::Attempt(inner) | ExprKind::Cast { expr: inner, .. } => {
-            f(inner)
+        ExprKind::Raise(inner)
+        | ExprKind::Attempt(inner)
+        | ExprKind::Try(inner)
+        | ExprKind::Cast { expr: inner, .. } => f(inner),
+        ExprKind::Interpolate { parts } => {
+            for p in parts {
+                if let crate::ast::InterpPart::Expr(x) = p {
+                    f(x);
+                }
+            }
         }
         ExprKind::Par { bindings } => {
             for l in bindings {

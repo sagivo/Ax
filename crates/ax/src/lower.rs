@@ -234,7 +234,11 @@ impl<'a> Lowerer<'a> {
     fn ir_ty(&mut self, t: &Type) -> Result<IrTy, String> {
         Ok(match t {
             Type::Prim(p) => prim_ir(*p),
-            Type::Ref { .. } | Type::Own(_) | Type::Fn { .. } => IrTy::Ptr,
+            Type::Ref { .. }
+            | Type::Own(_)
+            | Type::Untrusted(_)
+            | Type::Secret(_)
+            | Type::Fn { .. } => IrTy::Ptr,
             Type::Named { def, .. } => {
                 let n = self.sym(*def);
                 match n.as_str() {
@@ -356,7 +360,10 @@ impl<'a> Lowerer<'a> {
             }
             // A reference to an aggregate is a pointer to that layout, so field
             // access through `&Item` works without an explicit dereference.
-            Type::Ref { inner, .. } | Type::Own(inner) => {
+            Type::Ref { inner, .. }
+            | Type::Own(inner)
+            | Type::Untrusted(inner)
+            | Type::Secret(inner) => {
                 let inner = (**inner).clone();
                 return self.agg_of(&inner);
             }
@@ -1263,6 +1270,30 @@ impl<'l, 'a> FnLower<'l, 'a> {
             }
             ExprKind::Catch { expr, arms } => self.catch_expr(expr, arms, e),
             ExprKind::Attempt(inner) => self.attempt_expr(inner, e),
+            ExprKind::Try(inner) => {
+                // `x?` is `attempt x` then unwrap-or-raise: lower as the
+                // attempt form and immediately re-raise on Err. For a
+                // non-Result the checker already treated `?` as identity.
+                self.attempt_expr(inner, e)
+            }
+            ExprKind::Interpolate { parts } => {
+                let mut last = self.undef_of(e)?;
+                for p in parts {
+                    match p {
+                        crate::ast::InterpPart::Lit(s) => {
+                            last = self.expr(&Expr {
+                                id: NodeId::NONE,
+                                kind: ExprKind::Lit(Lit::Str(s.clone())),
+                                span: e.span,
+                            })?;
+                        }
+                        crate::ast::InterpPart::Expr(x) => {
+                            last = self.expr(x)?;
+                        }
+                    }
+                }
+                Ok(last)
+            }
             ExprKind::Region { name, body } => self.region_expr(name, body),
             ExprKind::Call { callee, args } => self.call(callee, args, e),
             ExprKind::Lambda { params, ret, body } => {
@@ -2818,7 +2849,10 @@ impl<'l, 'a> FnLower<'l, 'a> {
     fn elem_type_of(&mut self, iter: &Expr) -> Result<Type, String> {
         let t = self.ty_of_node(iter.id);
         let t = match &t {
-            Type::Ref { inner, .. } | Type::Own(inner) => (**inner).clone(),
+            Type::Ref { inner, .. }
+            | Type::Own(inner)
+            | Type::Untrusted(inner)
+            | Type::Secret(inner) => (**inner).clone(),
             other => other.clone(),
         };
         match &t {
@@ -3571,7 +3605,10 @@ impl<'l, 'a> FnLower<'l, 'a> {
     /// Element type of a container type, peeling references.
     fn container_elem(&mut self, t: &Type) -> Result<Type, String> {
         let bare = match t {
-            Type::Ref { inner, .. } | Type::Own(inner) => (**inner).clone(),
+            Type::Ref { inner, .. }
+            | Type::Own(inner)
+            | Type::Untrusted(inner)
+            | Type::Secret(inner) => (**inner).clone(),
             other => other.clone(),
         };
         match &bare {
@@ -4261,7 +4298,10 @@ impl<'l, 'a> FnLower<'l, 'a> {
         }
         let t = self.ty_of_node(e.id);
         let inner = match &t {
-            Type::Ref { inner, .. } | Type::Own(inner) => (**inner).clone(),
+            Type::Ref { inner, .. }
+            | Type::Own(inner)
+            | Type::Untrusted(inner)
+            | Type::Secret(inner) => (**inner).clone(),
             _ => return Ok(v),
         };
         match self.l.ir_ty(&inner)? {
@@ -4864,6 +4904,8 @@ fn expr_kind_name(k: &ExprKind) -> &'static str {
         ExprKind::Raise(_) => "raise",
         ExprKind::Catch { .. } => "catch",
         ExprKind::Attempt(_) => "attempt",
+        ExprKind::Try(_) => "try",
+        ExprKind::Interpolate { .. } => "interpolate",
         ExprKind::Region { .. } => "region",
         ExprKind::Par { .. } => "par",
         ExprKind::Assign { .. } => "assignment",
@@ -4971,7 +5013,16 @@ fn walk_free(e: &Expr, bound: &mut Vec<Symbol>, out: &mut Vec<Symbol>) {
                 walk_free(x, bound, out);
             }
         }
-        ExprKind::Raise(inner) | ExprKind::Attempt(inner) => walk_free(inner, bound, out),
+        ExprKind::Raise(inner) | ExprKind::Attempt(inner) | ExprKind::Try(inner) => {
+            walk_free(inner, bound, out)
+        }
+        ExprKind::Interpolate { parts } => {
+            for p in parts {
+                if let crate::ast::InterpPart::Expr(x) = p {
+                    walk_free(x, bound, out);
+                }
+            }
+        }
         ExprKind::Par { bindings } => {
             for l in bindings {
                 walk_free(&l.init, bound, out);
@@ -5115,8 +5166,16 @@ fn walk_assigns(e: &Expr, name: Symbol, found: &mut bool) {
                 walk_assigns(x, name, found);
             }
         }
-        ExprKind::Raise(inner) | ExprKind::Attempt(inner) | ExprKind::Cast { expr: inner, .. } => {
-            walk_assigns(inner, name, found)
+        ExprKind::Raise(inner)
+        | ExprKind::Attempt(inner)
+        | ExprKind::Try(inner)
+        | ExprKind::Cast { expr: inner, .. } => walk_assigns(inner, name, found),
+        ExprKind::Interpolate { parts } => {
+            for p in parts {
+                if let crate::ast::InterpPart::Expr(x) = p {
+                    walk_assigns(x, name, found);
+                }
+            }
         }
         ExprKind::Par { bindings } => {
             for l in bindings {
@@ -5230,8 +5289,16 @@ fn each_child(e: &Expr, f: &mut impl FnMut(&Expr)) {
                 f(x);
             }
         }
-        ExprKind::Raise(inner) | ExprKind::Attempt(inner) | ExprKind::Cast { expr: inner, .. } => {
-            f(inner)
+        ExprKind::Raise(inner)
+        | ExprKind::Attempt(inner)
+        | ExprKind::Try(inner)
+        | ExprKind::Cast { expr: inner, .. } => f(inner),
+        ExprKind::Interpolate { parts } => {
+            for p in parts {
+                if let crate::ast::InterpPart::Expr(x) = p {
+                    f(x);
+                }
+            }
         }
         ExprKind::Par { bindings } => {
             for l in bindings {

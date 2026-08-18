@@ -243,6 +243,16 @@ fn fmt_ty(o: &mut String, t: &TypeExpr, intern: &Interner) {
             o.push_str("own ");
             fmt_ty(o, inner, intern);
         }
+        TypeExprKind::Untrusted(inner) => {
+            o.push_str("Untrusted[");
+            fmt_ty(o, inner, intern);
+            o.push(']');
+        }
+        TypeExprKind::Secret(inner) => {
+            o.push_str("Secret[");
+            fmt_ty(o, inner, intern);
+            o.push(']');
+        }
         TypeExprKind::Ref {
             region,
             mutable,
@@ -505,6 +515,26 @@ fn fmt_expr(o: &mut String, e: &Expr, intern: &Interner, indent: usize) {
         ExprKind::Attempt(e) => {
             o.push_str("attempt ");
             fmt_expr(o, e, intern, indent);
+        }
+        ExprKind::Try(e) => {
+            fmt_expr(o, e, intern, indent);
+            o.push('?');
+        }
+        ExprKind::Interpolate { parts } => {
+            o.push_str("f\"");
+            for p in parts {
+                match p {
+                    InterpPart::Lit(s) => {
+                        o.push_str(&s.replace('\\', "\\\\").replace('"', "\\\"").replace('{', "{{").replace('}', "}}"));
+                    }
+                    InterpPart::Expr(e) => {
+                        o.push('{');
+                        fmt_expr(o, e, intern, indent);
+                        o.push('}');
+                    }
+                }
+            }
+            o.push('"');
         }
         ExprKind::Region { name, body } => {
             o.push_str("region ");

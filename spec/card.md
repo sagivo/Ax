@@ -1,4 +1,9 @@
-# Ax card (research-v1)
+# Ax card (v0.3 / research-v1)
+
+Surface is a **Rust subset**. `&`/`&mut`/lifetimes/`.clone()`/`unsafe` parse
+and are elided. `Result`/`?`/`From` as in Rust. `own T` is affine.
+`Untrusted[T]`/`Secret[T]` cannot reach sinks / logs. `ax perf --json` is
+the second diagnostic loop. See `spec/v0.3.md` and `DECISIONS.md`.
 
 Compiled systems language for LLM agents. Extension `.ax`. Text is authoritative.
 
@@ -32,7 +37,7 @@ fn div(a usz, b usz) usz = { let mut x = a; while b != 0 { x = x % b }; x };
 ## Types
 `i8 i16 i32 i64 isz u8 u16 u32 u64 usz f32 f64 bool byte unit`
 `String` `&r str` `Vec[T]` `&r [T]` `&r mut [T]` `Option[T]` `Result[T,E]` `Ordering` `Alloc` `&r T` `&r mut T`
-Reserved, not in v1: `Map[K,V]` `SortedMap[K,V]` `own T`.
+`own T` is affine (use exactly once; A2020 / A2021). Reserved, not in v1: `Map[K,V]` `SortedMap[K,V]`.
 No implicit numeric conversion; `expr as T` is the only one. Mutation is `&mut`, never an effect.
 
 ## Ops

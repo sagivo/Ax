@@ -897,6 +897,36 @@ impl<'a> Interpreter<'a> {
                 Err(Flow::Raise(e)) => Ok(err_val(e)),
                 Err(other) => Err(other),
             },
+            ExprKind::Try(inner) => {
+                let v = self.eval(inner)?;
+                // Result[T,E] as a variant: Err re-raises, Ok unwraps.
+                match &v {
+                    Value::Variant { name, fields } if name == "Err" => {
+                        let err = fields
+                            .values()
+                            .next()
+                            .cloned()
+                            .unwrap_or(v.clone());
+                        Err(Flow::Raise(err))
+                    }
+                    Value::Variant { name, fields } if name == "Ok" => {
+                        Ok(fields.values().next().cloned().unwrap_or(Value::Unit))
+                    }
+                    other => Ok(other.clone()),
+                }
+            }
+            ExprKind::Interpolate { parts } => {
+                let mut out = String::new();
+                for p in parts {
+                    match p {
+                        crate::ast::InterpPart::Lit(s) => out.push_str(s),
+                        crate::ast::InterpPart::Expr(x) => {
+                            out.push_str(&self.eval(x)?.display());
+                        }
+                    }
+                }
+                Ok(Value::Str(out.into()))
+            }
             ExprKind::Region { body, .. } => self.eval(body),
             ExprKind::Par { bindings } => {
                 // Oracle: sequential, lowest lexical index wins on multi-fail.

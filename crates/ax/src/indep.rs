@@ -336,6 +336,20 @@ fn infer_expr(
             r
         }
         ExprKind::Attempt(inner) => infer_expr(inner, intern, known, facts).remove_err(),
+        ExprKind::Try(inner) => {
+            let mut r = infer_expr(inner, intern, known, facts);
+            r.insert(IndepEffect::Err("try".into()));
+            r
+        }
+        ExprKind::Interpolate { parts } => {
+            let mut r = IndepRow::default();
+            for p in parts {
+                if let crate::ast::InterpPart::Expr(x) = p {
+                    r = r.union(&infer_expr(x, intern, known, facts));
+                }
+            }
+            r
+        }
         ExprKind::Region { body, .. } => infer_expr(body, intern, known, facts),
         ExprKind::Par { bindings } => {
             let mut r = IndepRow::default();
@@ -436,7 +450,15 @@ fn walk_region(
         | ExprKind::Field { base: expr, .. }
         | ExprKind::Raise(expr)
         | ExprKind::Attempt(expr)
+        | ExprKind::Try(expr)
         | ExprKind::Loop { body: expr } => walk_region(expr, intern, stack, js),
+        ExprKind::Interpolate { parts } => {
+            for p in parts {
+                if let crate::ast::InterpPart::Expr(x) = p {
+                    walk_region(x, intern, stack, js);
+                }
+            }
+        }
         ExprKind::Call { callee, args } => {
             walk_region(callee, intern, stack, js);
             for a in args {

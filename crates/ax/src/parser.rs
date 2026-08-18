@@ -51,9 +51,19 @@ impl<'a> Parser<'a> {
 
     fn parse_file_inner(&mut self) -> Result<File, ()> {
         let start = self.cur().span;
-        self.expect(TokenKind::Module)?;
-        let module = self.parse_path()?;
-        self.expect(TokenKind::Semi)?;
+        // v0.3: a missing `module` declaration is accepted (file-based modules).
+        // v0.2 sources still write it. Either form is legal.
+        let module = if self.at(TokenKind::Module) {
+            self.bump();
+            let m = self.parse_path()?;
+            self.expect(TokenKind::Semi)?;
+            m
+        } else {
+            Path {
+                segs: Vec::new(),
+                span: start,
+            }
+        };
 
         let mut exports = Vec::new();
         if self.at(TokenKind::Export) {
@@ -113,6 +123,24 @@ impl<'a> Parser<'a> {
         while self.at(TokenKind::At) {
             meta.push(self.parse_meta()?);
         }
+        while self.at(TokenKind::Hash) {
+            meta.push(self.parse_hash_attr()?);
+        }
+        // Accept-and-elide: `pub`, `unsafe` are parsed and recorded as meta
+        // so the formatter can strip them (A0106 / visibility is file-based).
+        while self.at(TokenKind::Ident) {
+            let n = self.intern.get(self.cur().symbol);
+            if n == "pub" || n == "unsafe" {
+                let id = self.parse_ident()?;
+                meta.push(Meta {
+                    key: id.clone(),
+                    value: None,
+                    span: id.span,
+                });
+                continue;
+            }
+            break;
+        }
         let kind = if self.at(TokenKind::Contract) {
             self.bump();
             self.expect(TokenKind::Fn)?;
@@ -120,6 +148,13 @@ impl<'a> Parser<'a> {
         } else if self.at(TokenKind::Fn) {
             self.bump();
             DeclKind::Fn(self.parse_fn_rest()?)
+        } else if self.at(TokenKind::Ident)
+            && matches!(self.intern.get(self.cur().symbol), "struct" | "enum" | "impl" | "trait")
+        {
+            // Rust-shaped type declarations. `struct`/`enum` become Type decls;
+            // `impl`/`trait` are accepted and elided into a type alias so the
+            // rest of the pipeline keeps working (A0101-family).
+            DeclKind::Type(self.parse_rust_type_decl()?)
         } else if self.at(TokenKind::Type) {
             self.bump();
             DeclKind::Type(self.parse_type_decl()?)
@@ -182,6 +217,172 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// `#[no_alloc]`, `#[no_rc]`, `#[max_alloc(n)]`, `#[in(r)]`, `#[derive(…)]`.
+    fn parse_hash_attr(&mut self) -> Result<Meta, ()> {
+        let start = self.cur().span;
+        self.expect(TokenKind::Hash)?;
+        self.expect(TokenKind::LBracket)?;
+        let key = self.parse_ident()?;
+        let value = if self.at(TokenKind::LParen) {
+            self.bump();
+            let v = if self.at(TokenKind::Integer) {
+                let t = self.bump();
+                let n = parse_int_text(self.intern.get(t.symbol)).unwrap_or(0) as i64;
+                Some(MetaValue::Int(n))
+            } else if self.at(TokenKind::Ident) {
+                Some(MetaValue::Ident(self.parse_ident()?))
+            } else {
+                None
+            };
+            // Swallow a derive list: `#[derive(Debug, Clone)]`.
+            while self.at(TokenKind::Comma) {
+                self.bump();
+                if self.at(TokenKind::Ident) {
+                    let _ = self.parse_ident()?;
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+            v
+        } else {
+            None
+        };
+        self.expect(TokenKind::RBracket)?;
+        Ok(Meta {
+            key,
+            value,
+            span: start.merge(self.prev_span()),
+        })
+    }
+
+    /// `struct Rec { … }`, `enum E { … }`, `impl … { … }`, `trait … { … }`.
+    /// Mapped onto the existing `TypeDecl` so the rest of the pipeline is
+    /// unchanged. `impl`/`trait` bodies are skipped (accept-and-elide).
+    fn parse_rust_type_decl(&mut self) -> Result<TypeDecl, ()> {
+        let kw = self.parse_ident()?;
+        let which = self.intern.get(kw.name).to_string();
+        let name = if self.at(TokenKind::Ident) {
+            self.parse_ident()?
+        } else {
+            kw.clone()
+        };
+        let generics = if self.at(TokenKind::LBracket) || self.at(TokenKind::Lt) {
+            self.parse_generics()?
+        } else {
+            Vec::new()
+        };
+        if which == "impl" || which == "trait" {
+            // Skip the body. Methods inside are not yet first-class.
+            if self.at(TokenKind::LBrace) {
+                self.skip_balanced_brace()?;
+            }
+            if self.at(TokenKind::Semi) {
+                self.bump();
+            }
+            return Ok(TypeDecl {
+                name,
+                generics,
+                body: TypeBody::Alias(TypeExpr {
+                    kind: TypeExprKind::Hole,
+                    span: kw.span,
+                }),
+                injections: Vec::new(),
+            });
+        }
+        if which == "enum" {
+            self.expect(TokenKind::LBrace)?;
+            let mut variants = Vec::new();
+            while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+                let vname = self.parse_ident()?;
+                let fields = if self.at(TokenKind::LBrace) {
+                    self.parse_record_fields()?
+                } else if self.at(TokenKind::LParen) {
+                    self.bump();
+                    let mut fs = Vec::new();
+                    let mut idx = 0u32;
+                    if !self.at(TokenKind::RParen) {
+                        loop {
+                            let ty = self.parse_type()?;
+                            let fname = self.intern.intern(&format!("_{idx}"));
+                            fs.push(Field {
+                                name: Ident {
+                                    name: fname,
+                                    span: ty.span,
+                                },
+                                ty,
+                            });
+                            idx += 1;
+                            if self.at(TokenKind::Comma) {
+                                self.bump();
+                                if self.at(TokenKind::RParen) {
+                                    break;
+                                }
+                                continue;
+                            }
+                            break;
+                        }
+                    }
+                    self.expect(TokenKind::RParen)?;
+                    fs
+                } else {
+                    Vec::new()
+                };
+                variants.push(Variant {
+                    name: vname,
+                    fields,
+                });
+                if self.at(TokenKind::Comma) {
+                    self.bump();
+                }
+            }
+            self.expect(TokenKind::RBrace)?;
+            if self.at(TokenKind::Semi) {
+                self.bump();
+            }
+            return Ok(TypeDecl {
+                name,
+                generics,
+                body: TypeBody::Variants(variants),
+                injections: Vec::new(),
+            });
+        }
+        // struct
+        let fields = if self.at(TokenKind::LBrace) {
+            self.parse_record_fields()?
+        } else {
+            Vec::new()
+        };
+        if self.at(TokenKind::Semi) {
+            self.bump();
+        }
+        Ok(TypeDecl {
+            name,
+            generics,
+            body: TypeBody::Record(fields),
+            injections: Vec::new(),
+        })
+    }
+
+    fn skip_balanced_brace(&mut self) -> Result<(), ()> {
+        self.expect(TokenKind::LBrace)?;
+        let mut depth = 1u32;
+        while !self.at(TokenKind::Eof) && depth > 0 {
+            match self.cur().kind {
+                TokenKind::LBrace => {
+                    depth += 1;
+                    self.bump();
+                }
+                TokenKind::RBrace => {
+                    depth -= 1;
+                    self.bump();
+                }
+                _ => {
+                    self.bump();
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn parse_fn_rest(&mut self) -> Result<FnDecl, ()> {
         let name = self.parse_ident()?;
         let generics = if self.at(TokenKind::LBracket) {
@@ -213,9 +414,18 @@ impl<'a> Parser<'a> {
         ) {
             contracts.push(self.parse_contract()?);
         }
-        self.expect(TokenKind::Eq)?;
-        let body = self.parse_expr()?;
-        self.expect(TokenKind::Semi)?;
+        // v0.2: `= expr;`. v0.3 / Rust: `{ body }` with no `=`.
+        let body = if self.at(TokenKind::Eq) {
+            self.bump();
+            let b = self.parse_expr()?;
+            self.expect(TokenKind::Semi)?;
+            b
+        } else if self.at(TokenKind::LBrace) {
+            self.parse_block_expr()?
+        } else {
+            self.err("E0008", "expected `=` or `{` to start a function body");
+            return Err(());
+        };
         Ok(FnDecl {
             name,
             generics,
@@ -228,9 +438,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_generics(&mut self) -> Result<Vec<GParam>, ()> {
-        self.expect(TokenKind::LBracket)?;
+        let close = if self.at(TokenKind::LBracket) {
+            self.bump();
+            TokenKind::RBracket
+        } else {
+            self.expect(TokenKind::Lt)?;
+            TokenKind::Gt
+        };
         let mut gs = Vec::new();
-        if !self.at(TokenKind::RBracket) {
+        if !self.at(close) {
             loop {
                 let name = self.parse_ident()?;
                 let bound = if self.at(TokenKind::Colon) {
@@ -247,7 +463,7 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        self.expect(TokenKind::RBracket)?;
+        self.expect(close)?;
         Ok(gs)
     }
 
@@ -485,9 +701,15 @@ impl<'a> Parser<'a> {
     // ---------- types ----------
 
     fn parse_type_args(&mut self) -> Result<Vec<TypeExpr>, ()> {
-        self.expect(TokenKind::LBracket)?;
+        let close = if self.at(TokenKind::LBracket) {
+            self.bump();
+            TokenKind::RBracket
+        } else {
+            self.expect(TokenKind::Lt)?;
+            TokenKind::Gt
+        };
         let mut args = Vec::new();
-        if !self.at(TokenKind::RBracket) {
+        if !self.at(close) {
             loop {
                 args.push(self.parse_type()?);
                 if self.at(TokenKind::Comma) {
@@ -497,7 +719,7 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        self.expect(TokenKind::RBracket)?;
+        self.expect(close)?;
         Ok(args)
     }
 
@@ -651,16 +873,8 @@ impl<'a> Parser<'a> {
             });
         }
         if self.at(TokenKind::Own) {
-            // `own T` is reserved, not implemented. v1 has no introduction form
-            // for it and no move checker, so a program using it would get a
-            // unique-ownership guarantee nothing enforces. Regions plus `&mut`
-            // exclusivity carry the memory model instead.
-            self.err(
-                "E0009",
-                "`own` is reserved for a future version: v1 has no move checker, \
-                 so uniqueness would be unenforced. Use a region for ownership \
-                 with a lexical lifetime, or `&mut` for exclusive access",
-            );
+            // v0.3: `own T` is the affine resource type. Use-after-move is a
+            // hard error (A2020); that is the one place ownership rejects.
             self.bump();
             let inner = Box::new(self.parse_type()?);
             return Ok(TypeExpr {
@@ -727,15 +941,49 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        let args = if self.at(TokenKind::LBracket) {
+        let args = if self.at(TokenKind::LBracket) || self.at(TokenKind::Lt) {
             self.parse_type_args()?
         } else {
             Vec::new()
         };
-        Ok(TypeExpr {
-            kind: TypeExprKind::Named { path, args },
+        let named = TypeExpr {
+            kind: TypeExprKind::Named { path: path.clone(), args },
             span: start.merge(self.prev_span()),
-        })
+        };
+        // Lattice constructors spelled as names: Untrusted[T] / Secret[T]
+        // (and the Rust form Untrusted<T>).
+        if path.segs.len() == 1 {
+            match self.intern.get(path.segs[0].name) {
+                "Untrusted" => {
+                    let TypeExprKind::Named { args, .. } = named.kind else {
+                        unreachable!()
+                    };
+                    let inner = args.into_iter().next().unwrap_or(TypeExpr {
+                        kind: TypeExprKind::Hole,
+                        span: named.span,
+                    });
+                    return Ok(TypeExpr {
+                        kind: TypeExprKind::Untrusted(Box::new(inner)),
+                        span: named.span,
+                    });
+                }
+                "Secret" => {
+                    let TypeExprKind::Named { args, .. } = named.kind else {
+                        unreachable!()
+                    };
+                    let inner = args.into_iter().next().unwrap_or(TypeExpr {
+                        kind: TypeExprKind::Hole,
+                        span: named.span,
+                    });
+                    return Ok(TypeExpr {
+                        kind: TypeExprKind::Secret(Box::new(inner)),
+                        span: named.span,
+                    });
+                }
+                _ => {}
+            }
+        }
+        Ok(named)
     }
 
     // ---------- expressions ----------
@@ -1098,11 +1346,16 @@ impl<'a> Parser<'a> {
                 continue;
             }
             if self.at(TokenKind::Question) {
-                // `?` as postfix try-op is reserved; holes are primary.
-                // Spec lists `?` as both hole and tryop. We treat a lone `?`
-                // as a hole (primary) and postfix `?` as a hole-marker no-op
-                // for now (holes are first-class expressions).
-                break;
+                // v0.3: postfix `?` is Result propagation. A lone primary `?`
+                // remains a typed hole.
+                self.bump();
+                let span = e.span.merge(self.prev_span());
+                e = Expr {
+                    id: NodeId::NONE,
+                    kind: ExprKind::Try(Box::new(e)),
+                    span,
+                };
+                continue;
             }
             break;
         }
@@ -1134,6 +1387,16 @@ impl<'a> Parser<'a> {
                 let t = self.bump();
                 Ok(Expr { id: NodeId::NONE,
                     kind: ExprKind::Lit(Lit::Str(self.intern.get(t.symbol).to_string())),
+                    span: t.span,
+                })
+            }
+            TokenKind::FString => {
+                let t = self.bump();
+                let raw = self.intern.get(t.symbol).to_string();
+                let parts = self.split_interpolation(&raw, t.span);
+                Ok(Expr {
+                    id: NodeId::NONE,
+                    kind: ExprKind::Interpolate { parts },
                     span: t.span,
                 })
             }
@@ -1725,8 +1988,12 @@ impl<'a> Parser<'a> {
 
     fn parse_path(&mut self) -> Result<Path, ()> {
         let start = self.cur().span;
+        // Accept-and-elide: a leading `::` (crate-root) is ignored.
+        if self.at(TokenKind::ColonColon) {
+            self.bump();
+        }
         let mut segs = vec![self.parse_path_seg()?];
-        while self.at(TokenKind::Dot) {
+        while self.at(TokenKind::Dot) || self.at(TokenKind::ColonColon) {
             self.bump();
             segs.push(self.parse_path_seg()?);
         }
@@ -1805,6 +2072,7 @@ impl<'a> Parser<'a> {
                 | TokenKind::Region
                 | TokenKind::Par
                 | TokenKind::Question
+                | TokenKind::FString
                 | TokenKind::Bang
                 | TokenKind::Minus
                 | TokenKind::Amp
@@ -1839,6 +2107,65 @@ impl<'a> Parser<'a> {
             self.pos += 1;
         }
         t
+    }
+
+    /// Split `f"hello {name}"` payload into literal / expression parts.
+    fn split_interpolation(&mut self, raw: &str, span: Span) -> Vec<InterpPart> {
+        let mut parts = Vec::new();
+        let mut buf = String::new();
+        let b = raw.as_bytes();
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == b'{' {
+                if i + 1 < b.len() && b[i + 1] == b'{' {
+                    buf.push('{');
+                    i += 2;
+                    continue;
+                }
+                if !buf.is_empty() {
+                    parts.push(InterpPart::Lit(std::mem::take(&mut buf)));
+                }
+                i += 1;
+                let start = i;
+                while i < b.len() && b[i] != b'}' {
+                    i += 1;
+                }
+                let inner = raw[start..i.min(raw.len())].trim();
+                if i < b.len() {
+                    i += 1; // closing }
+                }
+                let mut segs = Vec::new();
+                for seg in inner.split('.') {
+                    if seg.is_empty() {
+                        continue;
+                    }
+                    let name = self.intern.intern(seg);
+                    segs.push(Ident { name, span });
+                }
+                if segs.is_empty() {
+                    parts.push(InterpPart::Lit(String::new()));
+                } else {
+                    parts.push(InterpPart::Expr(Expr {
+                        id: NodeId::NONE,
+                        kind: ExprKind::Path(Path { segs, span }),
+                        span,
+                    }));
+                }
+            } else if b[i] == b'}' && i + 1 < b.len() && b[i + 1] == b'}' {
+                buf.push('}');
+                i += 2;
+            } else {
+                buf.push(b[i] as char);
+                i += 1;
+            }
+        }
+        if !buf.is_empty() {
+            parts.push(InterpPart::Lit(buf));
+        }
+        if parts.is_empty() {
+            parts.push(InterpPart::Lit(String::new()));
+        }
+        parts
     }
 
     fn prev_span(&self) -> Span {

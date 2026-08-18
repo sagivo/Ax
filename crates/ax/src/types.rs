@@ -171,6 +171,10 @@ pub enum Type {
     },
     /// `own T`
     Own(Box<Type>),
+    /// `Untrusted[T]` — lattice annotation, same layout as `T`.
+    Untrusted(Box<Type>),
+    /// `Secret[T]` — lattice annotation, same layout as `T`.
+    Secret(Box<Type>),
     Fn {
         params: Vec<Type>,
         ret: Box<Type>,
@@ -274,6 +278,8 @@ impl Type {
                 }
             }
             Type::Own(t) => format!("own {}", t.display(intern)),
+            Type::Untrusted(t) => format!("Untrusted[{}]", t.display(intern)),
+            Type::Secret(t) => format!("Secret[{}]", t.display(intern)),
             Type::Fn {
                 params,
                 ret,
@@ -404,6 +410,8 @@ pub fn types_eq(a: &Type, b: &Type) -> bool {
             m1 == m2 && types_eq(i1, i2)
         }
         (Type::Own(x), Type::Own(y)) => types_eq(x, y),
+        (Type::Untrusted(x), Type::Untrusted(y)) => types_eq(x, y),
+        (Type::Secret(x), Type::Secret(y)) => types_eq(x, y),
         (
             Type::Fn {
                 params: p1,
@@ -456,6 +464,8 @@ pub fn unify_param(param: &Type, actual: &Type, out: &mut HashMap<Symbol, Type>)
         }
         (Type::Ref { inner: p, .. }, Type::Ref { inner: a, .. }) => unify_param(p, a, out),
         (Type::Own(p), Type::Own(a)) => unify_param(p, a, out),
+        (Type::Untrusted(p), Type::Untrusted(a)) => unify_param(p, a, out),
+        (Type::Secret(p), Type::Secret(a)) => unify_param(p, a, out),
         (Type::Tuple(ps), Type::Tuple(as_)) => {
             for (p, a) in ps.iter().zip(as_) {
                 unify_param(p, a, out);
@@ -508,6 +518,8 @@ pub fn subst(ty: &Type, map: &HashMap<Symbol, Type>) -> Type {
             inner: Box::new(subst(inner, map)),
         },
         Type::Own(t) => Type::Own(Box::new(subst(t, map))),
+        Type::Untrusted(t) => Type::Untrusted(Box::new(subst(t, map))),
+        Type::Secret(t) => Type::Secret(Box::new(subst(t, map))),
         Type::Fn {
             params,
             ret,

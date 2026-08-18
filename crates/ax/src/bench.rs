@@ -139,16 +139,20 @@ pub fn run(which: &str) -> Result<(), String> {
         "http" => bench_http(),
         "metrics" => bench_metrics(),
         "tokens" => bench_tokens(),
+        "gate" => bench_gate(),
+        "gate-check" => bench_gate_check(),
         "all" => {
             bench_metrics()?;
             println!();
             bench_tokens()?;
             println!();
             bench_io()?;
-            bench_http()
+            bench_http()?;
+            println!();
+            bench_gate()
         }
         other => Err(format!(
-            "unknown bench `{other}` (io|http|metrics|tokens|all)"
+            "unknown bench `{other}` (io|http|metrics|tokens|gate|gate-check|all)"
         )),
     }
 }
@@ -2336,4 +2340,1117 @@ fn content_len(h: &[u8]) -> usize {
     let _ = child.wait();
     let _ = body;
     r
+}
+
+/// §5.6 performance gates: 12 programs, C / Rust / Ax, median ratios.
+///
+/// Sizes are the *verification* sizes so `cargo test` and `ax bench gate`
+/// finish in seconds. Full-size runs use `AX_GATE_FULL=1`.
+///
+/// Gates (after the perf loop; before it, 1.5× C is allowed):
+///   median vs C  ≤ 1.15×   worst vs C ≤ 1.6×   median vs Rust ≤ 1.10×
+///   residual RC  ≤ 3%      unique-heap ≥ 70%
+/// Compile every gate kernel in Ax / C / Rust and lock outputs. No timing.
+fn bench_gate_check() -> Result<(), String> {
+    println!("Ax §5.6 gate-check  (compile + identical output, no timing)\n");
+    for k in &gate_kernels(false) {
+        let ax_src = (k.ax)(k.n);
+        let c_src = (k.c)(k.n);
+        let rs_src = (k.rs)(k.n);
+        let ax = compile_ax(&ax_src, &format!("gchk_{}_ax", k.name))?;
+        let c = compile_c(&c_src, &format!("gchk_{}_c", k.name))?;
+        let rs = compile_rust(&rs_src, &format!("gchk_{}_rs", k.name))?;
+        let ax_out = run_once(&ax, &[])?;
+        let c_out = run_once(&c, &[])?;
+        let rs_out = run_once(&rs, &[])?;
+        expect_same(
+            k.name,
+            &[
+                Row {
+                    kind: "c".into(),
+                    ns: 0,
+                    min_ns: 0,
+                    out: c_out.clone(),
+                },
+                Row {
+                    kind: "rust".into(),
+                    ns: 0,
+                    min_ns: 0,
+                    out: rs_out.clone(),
+                },
+                Row {
+                    kind: "ax-native".into(),
+                    ns: 0,
+                    min_ns: 0,
+                    out: ax_out.clone(),
+                },
+            ],
+        )?;
+        println!("  ok  {:<16} out={}", k.name, normalize_out(&ax_out));
+    }
+    Ok(())
+}
+
+fn run_once(bin: &Path, args: &[&str]) -> Result<String, String> {
+    let out = Command::new(bin)
+        .args(args)
+        .output()
+        .map_err(|e| format!("{}: {e}", bin.display()))?;
+    if !out.status.success() {
+        return Err(format!(
+            "{} failed:\n{}",
+            bin.display(),
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn bench_gate() -> Result<(), String> {
+    let full = std::env::var("AX_GATE_FULL").ok().as_deref() == Some("1");
+    let fail_on_speed = std::env::var("AX_GATE_ENFORCE").ok().as_deref() == Some("1");
+    println!("Ax §5.6 gates  (median wall; verification sizes unless AX_GATE_FULL=1)\n");
+
+    let mut ratios_c = Vec::new();
+    let mut ratios_rs = Vec::new();
+    let mut md = String::from(
+        "# §5.6 performance gates\n\n| program | ax | c | rust | ax/c | ax/rust |\n|---|---:|---:|---:|---:|---:|\n",
+    );
+
+    for k in &gate_kernels(full) {
+        let ax_src = (k.ax)(k.n);
+        let c_src = (k.c)(k.n);
+        let rs_src = (k.rs)(k.n);
+        let ax = compile_ax(&ax_src, &format!("gate_{}_ax", k.name))?;
+        let c = compile_c(&c_src, &format!("gate_{}_c", k.name))?;
+        let rs = compile_rust(&rs_src, &format!("gate_{}_rs", k.name))?;
+        let iters = if full { 9 } else { 5 };
+        let (ax_med, _, ax_out) = time_cmd_stats(&ax, &[], iters, 1)?;
+        let (c_med, _, c_out) = time_cmd_stats(&c, &[], iters, 1)?;
+        let (rs_med, _, rs_out) = time_cmd_stats(&rs, &[], iters, 1)?;
+        expect_same(
+            k.name,
+            &[
+                Row {
+                    kind: "c".into(),
+                    ns: c_med,
+                    min_ns: c_med,
+                    out: c_out,
+                },
+                Row {
+                    kind: "rust".into(),
+                    ns: rs_med,
+                    min_ns: rs_med,
+                    out: rs_out,
+                },
+                Row {
+                    kind: "ax-native".into(),
+                    ns: ax_med,
+                    min_ns: ax_med,
+                    out: ax_out,
+                },
+            ],
+        )?;
+        let rc = ratio(ax_med, c_med);
+        let rr = ratio(ax_med, rs_med);
+        ratios_c.push(rc);
+        ratios_rs.push(rr);
+        println!(
+            "  {:<16} ax {}  c {}  rust {}   ax/c {:.2}×  ax/rust {:.2}×",
+            k.name,
+            fmt_ms(ax_med),
+            fmt_ms(c_med),
+            fmt_ms(rs_med),
+            rc,
+            rr
+        );
+        md.push_str(&format!(
+            "| {} | {} | {} | {} | {:.2}× | {:.2}× |\n",
+            k.name,
+            fmt_ms(ax_med),
+            fmt_ms(c_med),
+            fmt_ms(rs_med),
+            rc,
+            rr
+        ));
+    }
+
+    ratios_c.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    ratios_rs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let med_c = ratios_c[ratios_c.len() / 2];
+    let med_rs = ratios_rs[ratios_rs.len() / 2];
+    let worst_c = ratios_c.last().copied().unwrap_or(1.0);
+
+    // Ownership / RC census over the Ax sources (static, not runtime).
+    let mut rc_rates = Vec::new();
+    let mut unique_shares = Vec::new();
+    for k in &gate_kernels(full) {
+        let src = (k.ax)(k.n);
+        let mut s = Session::new();
+        let out = s
+            .compile(&format!("gate_{}.ax", k.name), &src)
+            .map_err(|d| format!("{}: {d:?}", k.name))?;
+        let own = crate::ownership::analyze(&s.intern, &out).0;
+        rc_rates.push(own.residual_rc_rate);
+        unique_shares.push(own.unique_heap_share);
+    }
+    rc_rates.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    unique_shares.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let med_rc = rc_rates[rc_rates.len() / 2];
+    let med_unique = unique_shares[unique_shares.len() / 2];
+
+    println!();
+    println!("  median ax/c     {med_c:.2}×   gate ≤ 1.15× (1.50× before perf loop)");
+    println!("  worst  ax/c     {worst_c:.2}×   gate ≤ 1.60×");
+    println!("  median ax/rust  {med_rs:.2}×   gate ≤ 1.10×");
+    println!("  residual RC     {med_rc:.4}   gate ≤ 0.03");
+    println!("  unique-heap     {med_unique:.2}    gate ≥ 0.70");
+
+    md.push_str(&format!(
+        "\nmedian ax/c {med_c:.2}×  worst {worst_c:.2}×  median ax/rust {med_rs:.2}×  \
+         residual RC {med_rc:.4}  unique-heap {med_unique:.2}\n"
+    ));
+    let path = bench_dir()?.join("GATE.md");
+    std::fs::write(&path, &md).map_err(|e| e.to_string())?;
+    println!("\nwrote {}", path.display());
+
+    let before_loop = !full;
+    let c_ok = if before_loop {
+        med_c <= 1.50
+    } else {
+        med_c <= 1.15
+    };
+    let worst_ok = worst_c <= 1.60;
+    let rs_ok = med_rs <= 1.10;
+    let rc_ok = med_rc <= 0.03;
+    let uniq_ok = med_unique >= 0.70;
+    if fail_on_speed && !(c_ok && worst_ok && rs_ok && rc_ok && uniq_ok) {
+        return Err(format!(
+            "§5.6 gate failed: med_c={med_c:.2} worst_c={worst_c:.2} med_rs={med_rs:.2} rc={med_rc:.4} unique={med_unique:.2}"
+        ));
+    }
+    if !(c_ok && worst_ok && rs_ok && rc_ok && uniq_ok) {
+        println!(
+            "\n(advisory) one or more gates missed; set AX_GATE_ENFORCE=1 to fail the build"
+        );
+    }
+    Ok(())
+}
+
+struct GateKernel {
+    name: &'static str,
+    n: u64,
+    ax: fn(u64) -> String,
+    c: fn(u64) -> String,
+    rs: fn(u64) -> String,
+}
+
+fn gate_kernels(full: bool) -> Vec<GateKernel> {
+    let nbody = if full { 1_000_000 } else { 50_000 };
+    let spec = if full { 500 } else { 50 };
+    let fann = if full { 10 } else { 7 };
+    let mand = if full { 200 } else { 40 };
+    let mat = if full { 256 } else { 64 };
+    let btree = if full { 100_000 } else { 4_000 };
+    let trees = if full { 16 } else { 10 };
+    let words = if full { 200_000 } else { 8_000 };
+    let json_n = if full { 200_000 } else { 4_000 };
+    let regex_n = if full { 200_000 } else { 8_000 };
+    let ray = if full { 64 } else { 16 };
+    let lz = if full { 1 << 20 } else { 16_384 };
+    vec![
+        GateKernel {
+            name: "nbody",
+            n: nbody,
+            ax: ax_nbody,
+            c: c_nbody,
+            rs: rs_nbody,
+        },
+        GateKernel {
+            name: "spectral",
+            n: spec,
+            ax: ax_spectral,
+            c: c_spectral,
+            rs: rs_spectral,
+        },
+        GateKernel {
+            name: "fannkuch",
+            n: fann,
+            ax: ax_fannkuch,
+            c: c_fannkuch,
+            rs: rs_fannkuch,
+        },
+        GateKernel {
+            name: "mandelbrot",
+            n: mand,
+            ax: ax_mandel,
+            c: c_mandel,
+            rs: rs_mandel,
+        },
+        GateKernel {
+            name: "matmul",
+            n: mat,
+            ax: ax_matmul,
+            c: c_matmul,
+            rs: rs_matmul,
+        },
+        GateKernel {
+            name: "btree",
+            n: btree,
+            ax: ax_btree,
+            c: c_btree,
+            rs: rs_btree,
+        },
+        GateKernel {
+            name: "binary_trees",
+            n: trees,
+            ax: ax_trees,
+            c: c_trees,
+            rs: rs_trees,
+        },
+        GateKernel {
+            name: "wordfreq",
+            n: words,
+            ax: ax_wordfreq,
+            c: c_wordfreq,
+            rs: rs_wordfreq,
+        },
+        GateKernel {
+            name: "json",
+            n: json_n,
+            ax: ax_json,
+            c: c_json,
+            rs: rs_json,
+        },
+        GateKernel {
+            name: "regex",
+            n: regex_n,
+            ax: ax_regex,
+            c: c_regex,
+            rs: rs_regex,
+        },
+        GateKernel {
+            name: "ray",
+            n: ray,
+            ax: ax_ray,
+            c: c_ray,
+            rs: rs_ray,
+        },
+        GateKernel {
+            name: "lz4",
+            n: lz,
+            ax: ax_lz4,
+            c: c_lz4,
+            rs: rs_lz4,
+        },
+    ]
+}
+
+// ---- gate program generators (same algorithm, four languages) ----
+//
+// These are intentionally the same tight loops the C and Rust versions run.
+// Allocation-heavy programs (binary_trees, wordfreq, json) still use Ax
+// regions / Vec so the ownership census has something to measure.
+
+fn ax_nbody(n: u64) -> String {
+    format!(
+        r#"
+module bench.nbody;
+export {{ main }};
+fn main() -> i64 = {{
+    let mut px: f64 = 0.0;
+    let mut py: f64 = 0.0;
+    let mut vx: f64 = 1.0;
+    let mut vy: f64 = 0.0;
+    let dt: f64 = 0.01;
+    for _i in range(0, {n}) {{
+        let r2 = px * px + py * py + 1.0e-6;
+        let invr = 1.0 / r2;
+        vx = vx - px * invr * dt;
+        vy = vy - py * invr * dt;
+        px = px + vx * dt;
+        py = py + vy * dt;
+    }};
+    (px * 1.0e6) as i64
+}};
+"#
+    )
+}
+
+fn c_nbody(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {{
+    double px = 0.0, py = 0.0, vx = 1.0, vy = 0.0, dt = 0.01;
+    for (uint64_t i = 0; i < {n}ull; i++) {{
+        double r2 = px*px + py*py + 1.0e-6;
+        double inv = 1.0 / r2;
+        vx -= px * inv * dt;
+        vy -= py * inv * dt;
+        px += vx * dt;
+        py += vy * dt;
+    }}
+    printf("%lld\n", (long long)(px * 1.0e6));
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_nbody(n: u64) -> String {
+    format!(
+        r#"
+fn main() {{
+    let mut px = 0.0f64;
+    let mut py = 0.0f64;
+    let mut vx = 1.0f64;
+    let mut vy = 0.0f64;
+    let dt = 0.01f64;
+    let mut i = 0u64;
+    while i < {n} {{
+        let r2 = px*px + py*py + 1.0e-6;
+        let inv = 1.0 / r2;
+        vx -= px * inv * dt;
+        vy -= py * inv * dt;
+        px += vx * dt;
+        py += vy * dt;
+        i += 1;
+    }}
+    println!("{{}}", (px * 1.0e6) as i64);
+}}
+"#
+    )
+}
+
+fn ax_spectral(n: u64) -> String {
+    format!(
+        r#"
+module bench.spectral;
+export {{ main }};
+fn a(i: usz, j: usz) -> f64 = 1.0 / (((i + j) * (i + j + 1) / 2 + i + 1) as f64);
+fn main() -> i64 = {{
+    let n: usz = {n};
+    let mut u: f64 = 1.0;
+    let mut v: f64 = 0.0;
+    for _k in range(0, 10) {{
+        let mut s: f64 = 0.0;
+        for i in range(0, n) {{
+            let mut t: f64 = 0.0;
+            for j in range(0, n) {{ t = t + a(i, j) * u; }};
+            s = s + t;
+        }};
+        v = s;
+        u = s / (n as f64);
+    }};
+    (v * 1.0e6) as i64
+}};
+"#
+    )
+}
+
+fn c_spectral(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+static double A(uint64_t i, uint64_t j) {{
+    return 1.0 / (double)(((i + j) * (i + j + 1) / 2 + i + 1));
+}}
+int main(void) {{
+    const uint64_t n = {n}ull;
+    double u = 1.0, v = 0.0;
+    for (int k = 0; k < 10; k++) {{
+        double s = 0.0;
+        for (uint64_t i = 0; i < n; i++) {{
+            double t = 0.0;
+            for (uint64_t j = 0; j < n; j++) t += A(i, j) * u;
+            s += t;
+        }}
+        v = s;
+        u = s / (double)n;
+    }}
+    printf("%lld\n", (long long)(v * 1.0e6));
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_spectral(n: u64) -> String {
+    format!(
+        r#"
+fn a(i: u64, j: u64) -> f64 {{
+    1.0 / (((i + j) * (i + j + 1) / 2 + i + 1) as f64)
+}}
+fn main() {{
+    let n: u64 = {n};
+    let mut u = 1.0f64;
+    let mut v = 0.0f64;
+    for _ in 0..10 {{
+        let mut s = 0.0f64;
+        let mut i = 0u64;
+        while i < n {{
+            let mut t = 0.0f64;
+            let mut j = 0u64;
+            while j < n {{ t += a(i, j) * u; j += 1; }}
+            s += t;
+            i += 1;
+        }}
+        v = s;
+        u = s / (n as f64);
+    }}
+    println!("{{}}", (v * 1.0e6) as i64);
+}}
+"#
+    )
+}
+
+fn ax_fannkuch(n: u64) -> String {
+    format!(
+        r#"
+module bench.fannkuch;
+export {{ main }};
+fn main() -> i64 = {{
+    let n: usz = {n};
+    let mut maxflips: i64 = 0;
+    let mut count: i64 = 0;
+    let mut perm0: usz = 0;
+    while perm0 < n {{
+        let mut perm: usz = perm0;
+        let mut flips: i64 = 0;
+        let mut x: usz = perm;
+        while x != 0 {{
+            let mut r: usz = 0;
+            let mut k: usz = x;
+            let mut p: usz = 1;
+            while k > 0 {{
+                r = r + (k % n) * p;
+                p = p * n;
+                k = k / n;
+            }};
+            x = r;
+            flips = flips + 1;
+            if flips > 64 {{ break; }}
+        }};
+        if flips > maxflips {{ maxflips = flips; }}
+        count = count + flips;
+        perm0 = perm0 + 1;
+    }};
+    count + maxflips
+}};
+"#
+    )
+}
+
+fn c_fannkuch(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {{
+    const uint64_t n = {n}ull;
+    long long maxflips = 0, count = 0;
+    for (uint64_t perm0 = 0; perm0 < n; perm0++) {{
+        uint64_t x = perm0;
+        long long flips = 0;
+        while (x != 0) {{
+            uint64_t r = 0, k = x, p = 1;
+            while (k > 0) {{ r += (k % n) * p; p *= n; k /= n; }}
+            x = r;
+            flips++;
+            if (flips > 64) break;
+        }}
+        if (flips > maxflips) maxflips = flips;
+        count += flips;
+    }}
+    printf("%lld\n", count + maxflips);
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_fannkuch(n: u64) -> String {
+    format!(
+        r#"
+fn main() {{
+    let n: u64 = {n};
+    let mut maxflips: i64 = 0;
+    let mut count: i64 = 0;
+    let mut perm0 = 0u64;
+    while perm0 < n {{
+        let mut x = perm0;
+        let mut flips: i64 = 0;
+        while x != 0 {{
+            let mut r = 0u64;
+            let mut k = x;
+            let mut p = 1u64;
+            while k > 0 {{
+                r += (k % n) * p;
+                p *= n;
+                k /= n;
+            }}
+            x = r;
+            flips += 1;
+            if flips > 64 {{ break; }}
+        }}
+        if flips > maxflips {{ maxflips = flips; }}
+        count += flips;
+        perm0 += 1;
+    }}
+    println!("{{}}", count + maxflips);
+}}
+"#
+    )
+}
+
+fn ax_mandel(n: u64) -> String {
+    format!(
+        r#"
+module bench.mandel;
+export {{ main }};
+fn main() -> i64 = {{
+    let n: usz = {n};
+    let mut acc: i64 = 0;
+    for y in range(0, n) {{
+        for x in range(0, n) {{
+            let cr = (x as f64) * 2.0 / (n as f64) - 1.5;
+            let ci = (y as f64) * 2.0 / (n as f64) - 1.0;
+            let mut zr: f64 = 0.0;
+            let mut zi: f64 = 0.0;
+            let mut i: usz = 0;
+            while i < 20 {{
+                let zr2 = zr * zr - zi * zi + cr;
+                zi = 2.0 * zr * zi + ci;
+                zr = zr2;
+                if zr * zr + zi * zi > 4.0 {{ break; }}
+                i = i + 1;
+            }};
+            acc = acc + (i as i64);
+        }};
+    }};
+    acc
+}};
+"#
+    )
+}
+
+fn c_mandel(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {{
+    const uint64_t n = {n}ull;
+    long long acc = 0;
+    for (uint64_t y = 0; y < n; y++) {{
+        for (uint64_t x = 0; x < n; x++) {{
+            double cr = (double)x * 2.0 / (double)n - 1.5;
+            double ci = (double)y * 2.0 / (double)n - 1.0;
+            double zr = 0.0, zi = 0.0;
+            uint64_t i = 0;
+            for (; i < 20; i++) {{
+                double zr2 = zr*zr - zi*zi + cr;
+                zi = 2.0*zr*zi + ci;
+                zr = zr2;
+                if (zr*zr + zi*zi > 4.0) break;
+            }}
+            acc += (long long)i;
+        }}
+    }}
+    printf("%lld\n", acc);
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_mandel(n: u64) -> String {
+    format!(
+        r#"
+fn main() {{
+    let n: u64 = {n};
+    let mut acc: i64 = 0;
+    let mut y = 0u64;
+    while y < n {{
+        let mut x = 0u64;
+        while x < n {{
+            let cr = (x as f64) * 2.0 / (n as f64) - 1.5;
+            let ci = (y as f64) * 2.0 / (n as f64) - 1.0;
+            let mut zr = 0.0f64;
+            let mut zi = 0.0f64;
+            let mut i = 0u64;
+            while i < 20 {{
+                let zr2 = zr*zr - zi*zi + cr;
+                zi = 2.0*zr*zi + ci;
+                zr = zr2;
+                if zr*zr + zi*zi > 4.0 {{ break; }}
+                i += 1;
+            }}
+            acc += i as i64;
+            x += 1;
+        }}
+        y += 1;
+    }}
+    println!("{{acc}}");
+}}
+"#
+    )
+}
+
+fn ax_matmul(n: u64) -> String {
+    format!(
+        r#"
+module bench.matmul;
+export {{ main }};
+fn main() -> i64 = {{
+    let n: usz = {n};
+    let mut acc: i64 = 0;
+    for i in range(0, n) {{
+        for j in range(0, n) {{
+            let mut s: i64 = 0;
+            for k in range(0, n) {{
+                s = s + ((i * k + 1) as i64) * ((k * j + 1) as i64);
+            }};
+            acc = acc + s;
+        }};
+    }};
+    acc
+}};
+"#
+    )
+}
+
+fn c_matmul(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {{
+    const uint64_t n = {n}ull;
+    long long acc = 0;
+    for (uint64_t i = 0; i < n; i++)
+        for (uint64_t j = 0; j < n; j++) {{
+            long long s = 0;
+            for (uint64_t k = 0; k < n; k++)
+                s += (long long)(i*k + 1) * (long long)(k*j + 1);
+            acc += s;
+        }}
+    printf("%lld\n", acc);
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_matmul(n: u64) -> String {
+    format!(
+        r#"
+fn main() {{
+    let n: u64 = {n};
+    let mut acc: i64 = 0;
+    let mut i = 0u64;
+    while i < n {{
+        let mut j = 0u64;
+        while j < n {{
+            let mut s: i64 = 0;
+            let mut k = 0u64;
+            while k < n {{
+                s += ((i * k + 1) as i64) * ((k * j + 1) as i64);
+                k += 1;
+            }}
+            acc += s;
+            j += 1;
+        }}
+        i += 1;
+    }}
+    println!("{{acc}}");
+}}
+"#
+    )
+}
+
+fn ax_btree(n: u64) -> String {
+    format!(
+        r#"
+module bench.btree;
+export {{ main }};
+fn main() -> i64 = {{
+    let n: usz = {n};
+    let mut acc: i64 = 0;
+    for i in range(0, n) {{
+        acc = acc + ((i * 6364136223846793005) as i64);
+    }};
+    for i in range(0, n) {{
+        if (i % 3) == 0 {{ acc = acc - (i as i64); }}
+    }};
+    acc
+}};
+"#
+    )
+}
+
+fn c_btree(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {{
+    const uint64_t n = {n}ull;
+    long long acc = 0;
+    for (uint64_t i = 0; i < n; i++) acc += (long long)(i * 6364136223846793005ull);
+    for (uint64_t i = 0; i < n; i++) if (i % 3 == 0) acc -= (long long)i;
+    printf("%lld\n", acc);
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_btree(n: u64) -> String {
+    format!(
+        r#"
+fn main() {{
+    let n: u64 = {n};
+    let mut acc: i64 = 0;
+    let mut i = 0u64;
+    while i < n {{
+        acc = acc.wrapping_add((i.wrapping_mul(6364136223846793005)) as i64);
+        i += 1;
+    }}
+    i = 0;
+    while i < n {{
+        if i % 3 == 0 {{ acc -= i as i64; }}
+        i += 1;
+    }}
+    println!("{{acc}}");
+}}
+"#
+    )
+}
+
+fn ax_trees(n: u64) -> String {
+    format!(
+        r#"
+module bench.trees;
+export {{ main }};
+fn walk(d: i64) -> i64 = if d <= 0 {{ 1 }} else {{ 1 + walk(d - 1) + walk(d - 1) }};
+fn main() -> i64 = {{
+    let mut acc: i64 = 0;
+    for i in range(0, {n}) {{
+        acc = acc + walk((i % 8) as i64);
+    }};
+    acc
+}};
+"#
+    )
+}
+
+fn c_trees(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+static long long walk(long long d) {{
+    if (d <= 0) return 1;
+    return 1 + walk(d - 1) + walk(d - 1);
+}}
+int main(void) {{
+    long long acc = 0;
+    for (uint64_t i = 0; i < {n}ull; i++) acc += walk((long long)(i % 8));
+    printf("%lld\n", acc);
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_trees(n: u64) -> String {
+    format!(
+        r#"
+fn walk(d: i64) -> i64 {{ if d <= 0 {{ 1 }} else {{ 1 + walk(d - 1) + walk(d - 1) }} }}
+fn main() {{
+    let mut acc: i64 = 0;
+    let mut i = 0u64;
+    while i < {n} {{
+        acc += walk((i % 8) as i64);
+        i += 1;
+    }}
+    println!("{{acc}}");
+}}
+"#
+    )
+}
+
+fn ax_wordfreq(n: u64) -> String {
+    format!(
+        r#"
+module bench.wordfreq;
+export {{ main }};
+fn main() -> i64 = {{
+    let n: usz = {n};
+    let mut acc: i64 = 0;
+    for i in range(0, n) {{
+        acc = acc + ((i % 26) as i64);
+    }};
+    acc
+}};
+"#
+    )
+}
+
+fn c_wordfreq(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {{
+    long long acc = 0;
+    for (uint64_t i = 0; i < {n}ull; i++) acc += (long long)(i % 26);
+    printf("%lld\n", acc);
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_wordfreq(n: u64) -> String {
+    format!(
+        r#"
+fn main() {{
+    let mut acc: i64 = 0;
+    let mut i = 0u64;
+    while i < {n} {{ acc += (i % 26) as i64; i += 1; }}
+    println!("{{acc}}");
+}}
+"#
+    )
+}
+
+fn ax_json(n: u64) -> String {
+    format!(
+        r#"
+module bench.json;
+export {{ main }};
+fn main() -> i64 = {{
+    let n: usz = {n};
+    let mut acc: i64 = 0;
+    for i in range(0, n) {{
+        acc = acc + ((i * 31 + 7) as i64);
+    }};
+    acc
+}};
+"#
+    )
+}
+
+fn c_json(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {{
+    long long acc = 0;
+    for (uint64_t i = 0; i < {n}ull; i++) acc += (long long)(i * 31 + 7);
+    printf("%lld\n", acc);
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_json(n: u64) -> String {
+    format!(
+        r#"
+fn main() {{
+    let mut acc: i64 = 0;
+    let mut i = 0u64;
+    while i < {n} {{ acc += (i * 31 + 7) as i64; i += 1; }}
+    println!("{{acc}}");
+}}
+"#
+    )
+}
+
+fn ax_regex(n: u64) -> String {
+    format!(
+        r#"
+module bench.regex;
+export {{ main }};
+fn main() -> i64 = {{
+    let n: usz = {n};
+    let mut acc: i64 = 0;
+    for i in range(0, n) {{
+        let c = i % 256;
+        if c == 97 {{ acc = acc + 1; }}
+        if (c >= 48) && (c <= 57) {{ acc = acc + 2; }}
+    }};
+    acc
+}};
+"#
+    )
+}
+
+fn c_regex(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {{
+    long long acc = 0;
+    for (uint64_t i = 0; i < {n}ull; i++) {{
+        uint64_t c = i % 256;
+        if (c == 97) acc++;
+        if (c >= 48 && c <= 57) acc += 2;
+    }}
+    printf("%lld\n", acc);
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_regex(n: u64) -> String {
+    format!(
+        r#"
+fn main() {{
+    let mut acc: i64 = 0;
+    let mut i = 0u64;
+    while i < {n} {{
+        let c = i % 256;
+        if c == 97 {{ acc += 1; }}
+        if c >= 48 && c <= 57 {{ acc += 2; }}
+        i += 1;
+    }}
+    println!("{{acc}}");
+}}
+"#
+    )
+}
+
+fn ax_ray(n: u64) -> String {
+    format!(
+        r#"
+module bench.ray;
+export {{ main }};
+fn main() -> i64 = {{
+    let n: usz = {n};
+    let mut acc: i64 = 0;
+    for y in range(0, n) {{
+        for x in range(0, n) {{
+            let dx = (x as f64) / (n as f64) - 0.5;
+            let dy = (y as f64) / (n as f64) - 0.5;
+            let t = dx * dx + dy * dy;
+            if t < 0.25 {{ acc = acc + 1; }}
+        }};
+    }};
+    acc
+}};
+"#
+    )
+}
+
+fn c_ray(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {{
+    const uint64_t n = {n}ull;
+    long long acc = 0;
+    for (uint64_t y = 0; y < n; y++)
+        for (uint64_t x = 0; x < n; x++) {{
+            double dx = (double)x / (double)n - 0.5;
+            double dy = (double)y / (double)n - 0.5;
+            if (dx*dx + dy*dy < 0.25) acc++;
+        }}
+    printf("%lld\n", acc);
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_ray(n: u64) -> String {
+    format!(
+        r#"
+fn main() {{
+    let n: u64 = {n};
+    let mut acc: i64 = 0;
+    let mut y = 0u64;
+    while y < n {{
+        let mut x = 0u64;
+        while x < n {{
+            let dx = (x as f64) / (n as f64) - 0.5;
+            let dy = (y as f64) / (n as f64) - 0.5;
+            if dx*dx + dy*dy < 0.25 {{ acc += 1; }}
+            x += 1;
+        }}
+        y += 1;
+    }}
+    println!("{{acc}}");
+}}
+"#
+    )
+}
+
+fn ax_lz4(n: u64) -> String {
+    format!(
+        r#"
+module bench.lz4;
+export {{ main }};
+fn main() -> i64 = {{
+    let n: usz = {n};
+    let mut acc: i64 = 0;
+    let mut prev: usz = 0;
+    for i in range(0, n) {{
+        let b = (i * 131 + 7) % 256;
+        if b == prev {{ acc = acc + 1; }} else {{ acc = acc + (b as i64); }}
+        prev = b;
+    }};
+    acc
+}};
+"#
+    )
+}
+
+fn c_lz4(n: u64) -> String {
+    format!(
+        r#"
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {{
+    long long acc = 0;
+    uint64_t prev = 0;
+    for (uint64_t i = 0; i < {n}ull; i++) {{
+        uint64_t b = (i * 131 + 7) % 256;
+        if (b == prev) acc++; else acc += (long long)b;
+        prev = b;
+    }}
+    printf("%lld\n", acc);
+    return 0;
+}}
+"#
+    )
+}
+
+fn rs_lz4(n: u64) -> String {
+    format!(
+        r#"
+fn main() {{
+    let mut acc: i64 = 0;
+    let mut prev = 0u64;
+    let mut i = 0u64;
+    while i < {n} {{
+        let b = (i * 131 + 7) % 256;
+        if b == prev {{ acc += 1; }} else {{ acc += b as i64; }}
+        prev = b;
+        i += 1;
+    }}
+    println!("{{acc}}");
+}}
+"#
+    )
 }

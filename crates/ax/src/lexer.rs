@@ -51,6 +51,8 @@ pub enum TokenKind {
     Comma,
     Semi,
     Colon,
+    ColonColon,
+    Hash,
     Dot,
     Eq,
     Arrow,
@@ -84,6 +86,9 @@ pub enum TokenKind {
     Integer,
     Float,
     String,
+    /// `f"…"` interpolation opener. The lexer yields this then a sequence of
+    /// `String` / interpolated tokens reconstructed by the parser.
+    FString,
     Eof,
 }
 
@@ -168,7 +173,16 @@ impl<'a> Lexer<'a> {
             }
             b':' => {
                 self.pos += 1;
-                Ok(self.mk(TokenKind::Colon, start, self.pos, ""))
+                if self.peek() == Some(b':') {
+                    self.pos += 1;
+                    Ok(self.mk(TokenKind::ColonColon, start, self.pos, ""))
+                } else {
+                    Ok(self.mk(TokenKind::Colon, start, self.pos, ""))
+                }
+            }
+            b'#' => {
+                self.pos += 1;
+                Ok(self.mk(TokenKind::Hash, start, self.pos, ""))
             }
             b'.' => {
                 self.pos += 1;
@@ -294,6 +308,14 @@ impl<'a> Lexer<'a> {
             }
             b'"' => self.lex_string(start, b'"'),
             b'`' => self.lex_string(start, b'`'),
+            b'f' if self.peek_at(1) == Some(b'"') => {
+                // `f"…"` — consume the `f` and lex the string; the parser
+                // sees FString and splits interpolations.
+                self.pos += 1;
+                let mut t = self.lex_string(start, b'"')?;
+                t.kind = TokenKind::FString;
+                Ok(t)
+            }
             b'0'..=b'9' => self.lex_number(start),
             b'A'..=b'Z' | b'a'..=b'z' | b'_' => self.lex_ident(start),
             _ => Err(LexError {
