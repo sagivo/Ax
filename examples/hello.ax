@@ -1,5 +1,1 @@
-; Agent-canonical tree. Same program the conventional dialect used to write.
-(module examples.hello
-  (export main)
-  (fn main () i32 (+ 1 2))
-)
+#main() I = 1 + 2;

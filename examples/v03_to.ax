@@ -1,4 +1,1 @@
-(module examples.v03_to
-  (export main)
-  (fn main () i64 (+ (to_i64 40) (to_i64 2)))
-)
+#main() L = to_i64(40) + to_i64(2);

@@ -1,0 +1,17 @@
+//! expect: 15usz
+// Two vecs filled by lockstep push have equal length, so `b.at(i)` inside
+// `for i in range(0, a.len())` is in range.
+module conf.opt.bce_same_len_lockstep;
+fn main() -> usz !{alloc[a]} = {
+    let mut a: Vec[usz] = vec.new(test.alloc);
+    let mut b: Vec[usz] = vec.new(test.alloc);
+    for i in range(0, 5) {
+        a.push(i);
+        b.push(i + 1);
+    };
+    let mut s: usz = 0;
+    for i in range(0, a.len()) {
+        s = s + b.at(i);
+    };
+    s
+};

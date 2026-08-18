@@ -1,7 +1,9 @@
 # Ax tree surface
 
-This is the language. The Rust-shaped parser in `spec/grammar.ebnf` is
-the corpus dialect. See `DECISIONS.md` R-14.
+A file that opens with `(` is this surface. The language an agent
+writes by default is the short syntax in `spec/dense.md`. The
+Rust-shaped parser in `spec/grammar.ebnf` is the corpus dialect.
+See `DECISIONS.md` R-14 / R-16.
 
 ## Why a tree
 

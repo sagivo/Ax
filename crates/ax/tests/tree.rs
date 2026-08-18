@@ -221,9 +221,9 @@ fn tree_gbnf_is_a_list_grammar() {
 }
 
 #[test]
-fn session_default_is_tree() {
+fn session_default_is_short() {
     let s = Session::new();
-    assert_eq!(s.surface, Surface::Tree);
+    assert_eq!(s.surface, Surface::Dense);
 }
 
 #[test]

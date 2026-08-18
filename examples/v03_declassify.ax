@@ -1,4 +1,1 @@
-(module examples.v03_declassify
-  (export main)
-  (fn main () i64 (to_i64 (declassify 3)))
-)
+#main() L = to_i64(declassify(3));

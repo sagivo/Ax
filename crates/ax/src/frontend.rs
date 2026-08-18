@@ -13,8 +13,8 @@ use crate::span::FileId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Surface {
-    /// Agent-canonical prefix tree. Detected automatically when a file
-    /// starts with `(`. Also selected by `--surface tree`.
+    /// Prefix tree. Detected automatically when a file starts with `(`.
+    /// Also selected by `--surface tree`.
     Tree,
     Conventional,
     Terse,
@@ -572,12 +572,104 @@ pub fn looks_like_dense(src: &str) -> bool {
         .map(str::trim_start)
         .find(|l| !l.is_empty() && !l.starts_with("//") && !l.starts_with("#[") && !l.starts_with("/*"))
         .unwrap_or("");
-    // `#name(` is a dense fn. `#[attr]` is conventional meta.
+    // `#name(` is a short-syntax fn. `#[attr]` is conventional meta.
     (t.starts_with('#') && t.len() > 1 && t.as_bytes()[1].is_ascii_alphabetic())
-        || src.contains(":=")
-        || src.contains('$')
-        || src.contains('@')
+        || contains_outside_comments(src, ":=")
+        || contains_outside_comments(src, "$")
+        || dense_at_sugar(src)
         || dense_range_sugar(src)
+        || has_hash_fn(src)
+}
+
+/// `@cond{` is while-sugar. `//@` comments are not.
+fn dense_at_sugar(src: &str) -> bool {
+    let b = src.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'/' && i + 1 < b.len() && b[i + 1] == b'/' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if b[i] == b'"' {
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                if b[i] == b'\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if b[i] == b'@'
+            && (i == 0 || !is_ident_char(b[i - 1]))
+            && i + 1 < b.len()
+            && (is_ident_char(b[i + 1]) || b[i + 1] == b'(')
+        {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+fn contains_outside_comments(src: &str, needle: &str) -> bool {
+    let b = src.as_bytes();
+    let n = needle.as_bytes();
+    let mut i = 0;
+    while i + n.len() <= b.len() {
+        if b[i] == b'/' && i + 1 < b.len() && b[i + 1] == b'/' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if b[i] == b'"' {
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                if b[i] == b'\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if &b[i..i + n.len()] == n {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+fn has_hash_fn(src: &str) -> bool {
+    let b = src.as_bytes();
+    let mut i = 0;
+    while i + 1 < b.len() {
+        if b[i] == b'/' && b[i + 1] == b'/' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if b[i] == b'#' && is_ident_char(b[i + 1]) {
+            return true;
+        }
+        if b[i] == b'"' {
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                if b[i] == b'\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 fn dense_range_sugar(src: &str) -> bool {
@@ -608,7 +700,7 @@ fn dense_range_sugar(src: &str) -> bool {
     false
 }
 
-/// Expand S-dense into S-terse. Same program; more tokens; one parser.
+/// Expand short syntax into S-terse. Same program; more tokens; one parser.
 ///
 ///   `#add(a I, b I) I = a + b`     → `fn add(a i32, b i32) i32 = a + b`
 ///   `s Z:= 1`                      → `let mut s: usz = 1`
@@ -720,6 +812,7 @@ fn ensure_decl_semicolons(src: &str) -> String {
         if (body.starts_with("fn ") || looks_like_bare_fn(body))
             && !t.ends_with(';')
             && !t.ends_with('}')
+            && !t.ends_with('{')
         {
             out.push_str(t);
             out.push(';');
@@ -1277,7 +1370,7 @@ fn take_brace<'a>(b: &'a [u8], i: &mut usize) -> Option<&'a str> {
     None
 }
 
-/// Pack conventional/terse Ax into S-dense. Inverse of [`rewrite_dense_to_terse`]
+/// Pack conventional/terse Ax into the language (short syntax). Inverse of [`rewrite_dense_to_terse`]
 /// on the constructs it knows; anything else is left as terse.
 pub fn to_dense(src: &str) -> String {
     let terse = to_terse(src);

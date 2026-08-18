@@ -1,5 +1,2 @@
-(module examples.holes
-  (export distance)
-  (type Vec2 (rec (x f32) (y f32)))
-  (fn distance ((v Vec2)) f32 ?)
-)
+type Vec2 = { x: f32, y: f32 };
+#distance(v Vec2) f = ?;

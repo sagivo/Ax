@@ -2133,6 +2133,23 @@ impl<'a> Checker<'a> {
                     .insert(EffectAtom::Alloc(self.intern.intern("a")));
                 Some(Type::unit())
             }
+            "eq" => {
+                arity(1, self);
+                if kind != SeqKind::Vec && kind != SeqKind::Str {
+                    self.err(
+                        "E0108",
+                        span,
+                        format!("`eq` needs a Vec or String, got {}", recv.display(self.intern)),
+                    );
+                }
+                if let Some(a) = args.first() {
+                    let t = self.check_expr(a, Some(&bare), env);
+                    if !types_eq(&t, &bare) && !matches!(t, Type::Ref { .. }) {
+                        self.type_mismatch(a.span, &bare, &t, &env.def_id);
+                    }
+                }
+                Some(Type::bool())
+            }
             "set" => {
                 arity(2, self);
                 if !recv_mut {

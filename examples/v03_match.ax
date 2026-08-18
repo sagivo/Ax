@@ -1,5 +1,2 @@
-(module examples.v03_match
-  (export main)
-  (fn pick ((b bool)) i32 (match b (arm true 1) (arm false 0)))
-  (fn main () i32 (pick true))
-)
+#pick(b B) I = $b{1}{0};
+#main() I = pick(true);

@@ -1,10 +1,5 @@
-(module examples.effects
-  (export add boom safe)
-  (type DivError (or Zero))
-  (fn add ((a i32) (b i32)) i32 (+ a b))
-  ; `raise` is visible in the interface: the row states what can come out.
-  (fn boom ((a i32)) i32 (! (err DivError)) (raise Zero))
-  ; `catch` discharges the row, so `safe` is effect-free again.
-  (fn safe ((a i32)) i32 (catch (boom a) (arm Zero 0)))
-  (test "boom is caught" (assert (== (safe 1) 0)))
-)
+type DivError = | Zero;
+#add(a I, b I) I = a + b;
+#boom(a I) I !err[DivError] = raise Zero;
+#safe(a I) I = catch boom(a) { Zero => 0 };
+test "boom is caught" = assert(safe(1) == 0);

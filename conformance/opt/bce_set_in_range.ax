@@ -1,0 +1,12 @@
+//! expect: 7usz
+// `set` inside `for i in range(0, xs.len())` is in range.
+module conf.opt.bce_set_in_range;
+fn main() -> usz !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.push(1usz);
+    xs.push(2usz);
+    for i in range(0, xs.len()) {
+        xs.set(i, xs.at(i) + 2);
+    };
+    xs.at(0) + xs.at(1)
+};

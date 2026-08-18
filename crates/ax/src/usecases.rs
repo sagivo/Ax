@@ -125,13 +125,13 @@ pub fn render_doc() -> String {
          punctuation mark is one token except two-char operators (`->`, `:=`, `==` …); \
          a newline is one token; spaces are free. Absolute numbers are not any \
          particular model’s vocabulary; the comparison is identical across languages.\n\n\
-         **Ax-dense** is the mechanical pack of conventional Ax (`#fn`, `:=`, `$if`, \
-         type glyphs). It is the same program — `to_dense` is verified to compile \
-         and print the same value on the token bench.\n\n",
+         **Ax** is the language (short syntax). Conventional is the corpus \
+         dialect, shown only so the same idea can be compared with Rust / C / Go. \
+         `ax fmt` prints Ax.\n\n",
     );
 
     md.push_str("## Summary\n\n");
-    md.push_str("| case | rust | c | go | ax | ax-dense | dense/rust |\n");
+    md.push_str("| case | rust | c | go | ax-conv | ax | ax/rust |\n");
     md.push_str("|---|---:|---:|---:|---:|---:|---:|\n");
 
     let mut tot = [0usize; 5];
@@ -172,9 +172,8 @@ pub fn render_doc() -> String {
 
     md.push_str(
         "Read the totals as *how much text an agent pays to write the same idea*. \
-         Ax-conventional is already below Rust on most rows because there is no \
-         `fn`/`return`/`while` boilerplate once types sit in the signature. \
-         Ax-dense is the same AST with reconstructible punctuation stripped.\n\n",
+         **Ax** is the short syntax (the language). Conventional is the corpus \
+         dialect, kept so the same idea can be compared with Rust / C / Go.\n\n",
     );
 
     for c in CASES {
@@ -182,7 +181,7 @@ pub fn render_doc() -> String {
         let n = |s: &str| tokens::count(s).tokens;
         md.push_str(&format!("## {}\n\n{}\n\n", c.title, c.what));
         md.push_str(&format!(
-            "| rust | c | go | ax | ax-dense |\n|---:|---:|---:|---:|---:|\n| {} | {} | {} | {} | {} |\n\n",
+            "| rust | c | go | ax-conv | ax |\n|---:|---:|---:|---:|---:|\n| {} | {} | {} | {} | {} |\n\n",
             n(c.src.rust),
             n(c.src.c),
             n(c.src.go),
@@ -195,9 +194,9 @@ pub fn render_doc() -> String {
         md.push_str(&fence("c", c.src.c));
         md.push_str("\n\n**Go**\n\n");
         md.push_str(&fence("go", c.src.go));
-        md.push_str("\n\n**Ax (conventional)**\n\n");
+        md.push_str("\n\n**Ax (corpus / conventional)**\n\n");
         md.push_str(&fence("ax", c.src.ax));
-        md.push_str("\n\n**Ax-dense**\n\n");
+        md.push_str("\n\n**Ax**\n\n");
         md.push_str(&fence("ax", &format!("{dense}\n")));
         md.push('\n');
     }

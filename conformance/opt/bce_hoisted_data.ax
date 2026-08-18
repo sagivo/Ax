@@ -1,0 +1,14 @@
+//! expect: 6usz
+// A loop that only reads `xs.at(i)` must agree after data-pointer hoisting.
+module conf.opt.bce_hoisted_data;
+fn main() -> usz !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.push(1usz);
+    xs.push(2usz);
+    xs.push(3usz);
+    let mut s: usz = 0;
+    for i in range(0, xs.len()) {
+        s = s + xs.at(i);
+    };
+    s
+};

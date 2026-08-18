@@ -1,4 +1,5 @@
-//! Agent-canonical surface: a prefix tree (s-expression).
+//! Prefix-tree surface (s-expression). A file that opens with `(` is this
+//! surface. The default language is the short syntax in `frontend.rs`.
 //!
 //! This is Ax, not a rewrite of the Rust-shaped parser. There is no operator
 //! precedence, no infix, no accept-and-elide, and exactly one way to write

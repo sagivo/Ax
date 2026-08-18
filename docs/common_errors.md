@@ -89,3 +89,8 @@ Why: Secret cannot reach f-strings (`tests/taint/secret_fstring.ax`).
 Wrong: `|x| x + n` when `n` is a local
 Right: `|x, n| x + n` and pass `n` at the call site
 Why: v1 function values are bare pointers; they do not carry an environment.
+
+## short syntax (the language)
+Wrong: treating `#fn` / `:=` / `$if` as an opt-in dense mode
+Right: that **is** Ax; `ax fmt` prints it; a file that opens with `(` is the tree
+Why: there is no `--surface dense` an agent must pick (`spec/dense.md`).

@@ -1,4 +1,4 @@
-; Same program as examples/div.ax, written as the tree an agent should emit.
+; Prefix tree (file opens with `(`). Same program as examples/div.ax.
 (module examples.div
   (export div DivError)
   (type DivError (or Zero))

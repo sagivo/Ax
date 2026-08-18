@@ -1,8 +1,8 @@
-# S-dense — token-minimal Ax
+# Ax short syntax
 
-This **is** Ax. Same AST as the Rust-shaped corpus dialect, fewer BPE
-pieces. Default parse and `ax fmt`. A file that opens with `(` is the
-prefix tree. There is no opt-in dense flag.
+This **is** Ax. Default parse and `ax fmt`. Same AST as the Rust-shaped
+corpus dialect, fewer BPE pieces. A file that opens with `(` is the
+prefix tree (`spec/tree.md`). There is no opt-in dense flag.
 
 ## Why these glyphs
 
@@ -10,7 +10,7 @@ Proxy tokenizer (and typical BPE): letters split at `_` / case / digit
 boundaries; each punctuation mark is one token except `:=` `->` `==` …;
 newlines cost; spaces are free.
 
-| conventional | tokens (proxy) | dense | tokens |
+| corpus dialect | tokens (proxy) | Ax | tokens |
 |---|---:|---|---:|
 | `fn` | 1 | `#` | 1 (and drops a space+ident split) |
 | `i32` / `usz` / `bool` | 2 / 1 / 1 | `I` / `Z` / `B` | 1 |
@@ -29,10 +29,10 @@ newlines cost; spaces are free.
 `I`/`L`/`Z`/`B`/`S` are single ASCII letters that vocabularies already
 store as whole tokens. Spelled types (`i32`) usually become `i`+`32`.
 
-## Grammar (delta from terse)
+## Grammar
 
 ```
-#name(a T, b U) R = body          fn
+#name(a T, b U) R = body          function
 name T:= e                        let mut name: T = e
 name:= e                          let mut name = e
 i~n { … }                         for i in range(0, n)
@@ -48,7 +48,7 @@ e|d                               match e { Ok(v) => v; Err(_) => d }
 
 Type atoms: `I` i32 · `L` i64 · `Y` isz · `U` u32 · `W` u64 · `Z` usz ·
 `B` bool · `F` f64 · `f` f32 · `S` String · `O` Option · `R` Result ·
-`M` Map · `V` Vec. Everything else is terse.
+`M` Map · `V` Vec.
 
 ## Example
 
@@ -56,5 +56,5 @@ Type atoms: `I` i32 · `L` i64 · `Y` isz · `U` u32 · `W` u64 · `Z` usz ·
 #main() Z = { s Z:= 1; i~n { s = s * 6364136223846793005 + i }; s }
 ```
 
-is the int_sum kernel. `ax-dense` is derived by `to_dense` and verified
-to print the same value as conventional (`ax bench tokens`).
+is the int_sum kernel. `ax fmt` prints this form. Token counts:
+`ax bench tokens` and `docs/usecases.md`.

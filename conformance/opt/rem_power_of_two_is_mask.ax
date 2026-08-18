@@ -1,0 +1,13 @@
+//! expect: 88usz
+// Unsigned n % 2^k is n & (2^k - 1). The oracle and every backend must
+// agree; this pins that the mask rewrite does not change the value.
+module conf.opt.rem_power_of_two_is_mask;
+fn main() -> usz = {
+    let mut s: usz = 0;
+    for i in range(0, 16) {
+        s = s + (i % 2);
+        s = s + (i % 4);
+        s = s + (i % 8);
+    };
+    s
+};

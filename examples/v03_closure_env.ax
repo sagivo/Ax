@@ -1,6 +1,3 @@
-(module examples.v03_closure_env
-  (export main)
-  ; Capturing closures have no env ABI. Pass the captured value as a parameter.
-  (fn add_n ((x i32) (n i32)) i32 (+ x n))
-  (fn main () i32 (add_n 3 4))
-)
+// Capturing closures have no env ABI. Pass the captured value as a parameter.
+#add_n(x I, n I) I = x + n;
+#main() I = add_n(3, 4);

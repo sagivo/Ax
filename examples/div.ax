@@ -1,4 +1,4 @@
-; Agent-canonical tree. Same program as the former conventional examples/div.ax.
+; Prefix tree. Same program as examples/div.tree.ax.
 (module examples.div
   (export div DivError)
   (type DivError (or Zero))

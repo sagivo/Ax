@@ -1,14 +1,14 @@
 # Ax
 
 A compiled systems language whose primary consumer is a program, not a person.
-The surface is a prefix tree — no precedence, no infix, no Rust to forgive —
-because an agent samples tokens and a list cannot encode the wrong grouping
-without writing it. The bet under that is a compiler which answers questions
-in microseconds, classifies its own fixes by safety, and ships a normative
+The language is the short syntax (`#fn`, `:=`, `$if`, type glyphs) so an
+agent pays fewer tokens. A file that opens with `(` is still the prefix
+tree. The bet under that is a compiler which answers questions in
+microseconds, classifies its own fixes by safety, and ships a normative
 interpreter to check itself against.
 
 ```
-.ax → tree parser (canonical)  |  Rust-shaped corpus dialect (legacy)
+.ax → short syntax (default)  |  tree if the file opens with `(`  |  Rust-shaped corpus (legacy)
     → check (types, effects, regions, Untrusted/Secret/own)
     → ownership ladder + ax perf --json
     → typed SSA IR
@@ -40,15 +40,11 @@ optional (one benchmark column).
 ## Language
 
 ```ax
-(module app
-  (export add)
-  (fn add ((a i32) (b i32)) i32 (+ a b))
-  (fn parse ((s (ref str))) i32 (! (err ParseError)) (parse_i32 s))
-  (test "add" (assert (== (add 1 2) 3)))
-)
+#add(a I, b I) I = a + b
+#parse(s S) I !err[ParseError] = parse_i32(s)
 ```
 
-- Prefix tree. No infix, no precedence, no `;`, no `->`. Mandatory types on every top-level `fn`.
+- Short syntax is the language (`#fn`, `:=`, `$if`, type glyphs). A file that opens with `(` is still the prefix tree.
 - Effects in the signature: `(err E)`, `(io c)`, `(alloc a)`, `diverge`, `abort`.
 - Errors: `raise` / `catch` / `attempt` plus declared single-step `from`
   injections. No unwinding: a raise is a branch on a returned tag.
@@ -74,7 +70,7 @@ capturing closures remain out of v1.
 ## Protocol
 
 ```
-ax check [--json] [--allow-holes] [--strict-det] [--surface tree|conventional|terse|verbose]
+ax check [--json] [--allow-holes] [--strict-det] [--surface ax|tree|conventional|terse|verbose]
 ax hole [--fills] [--json]      ranked fills, each verified by compiling it
 ax fix [--apply]                applies only semantics_preserving fixes
 ax test [--attempts-to-green]   the north-star metric
@@ -330,7 +326,8 @@ safe ambient-io(argv io.bytesum_file)
 ## Layout
 
 ```
-spec/tree.md          agent-canonical prefix tree (the language)
+spec/dense.md         short syntax (the language; default parse + fmt)
+spec/tree.md          prefix tree (file opens with `(`)
 spec/grammar.ebnf     corpus dialect (Rust-shaped; not what agents write)
 spec/card.md          ≤ 3,000-token agent card
 std/tree/lib.ax       self-hosted tree lexer + printer

@@ -1198,6 +1198,45 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Some(Value::Unit))
             }
+            ("eq", Value::Vec(xs)) => {
+                let other = args.first();
+                let eq = match other {
+                    Some(Value::Vec(ys)) => {
+                        let a = xs.borrow();
+                        let b = ys.borrow();
+                        a.len() == b.len()
+                            && a.iter().zip(b.iter()).all(|(x, y)| match (x, y) {
+                                (
+                                    Value::Int { bits: p, .. },
+                                    Value::Int { bits: q, .. },
+                                ) => p == q,
+                                (Value::Bool(p), Value::Bool(q)) => p == q,
+                                (Value::Str(p), Value::Str(q)) => p == q,
+                                _ => false,
+                            })
+                    }
+                    Some(Value::Str(s)) => {
+                        let left: Vec<u8> = xs
+                            .borrow()
+                            .iter()
+                            .filter_map(|v| match v {
+                                Value::Int { bits, .. } => Some(*bits as u8),
+                                _ => None,
+                            })
+                            .collect();
+                        left == s.as_bytes()
+                    }
+                    _ => false,
+                };
+                Ok(Some(Value::Bool(eq)))
+            }
+            ("eq", Value::Str(s)) => {
+                let eq = match args.first() {
+                    Some(Value::Str(t)) => s == t,
+                    _ => false,
+                };
+                Ok(Some(Value::Bool(eq)))
+            }
             ("set", Value::Vec(xs)) => {
                 let i = idx();
                 let mut xs = xs.borrow_mut();

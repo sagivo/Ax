@@ -2,11 +2,11 @@
 
 Same task in Rust, C, Go, and Ax. Token counts use the **in-repo proxy** (`ax::tokens`): letters split at `_` / case / digit boundaries; each punctuation mark is one token except two-char operators (`->`, `:=`, `==` …); a newline is one token; spaces are free. Absolute numbers are not any particular model’s vocabulary; the comparison is identical across languages.
 
-**Ax-dense** is the mechanical pack of conventional Ax (`#fn`, `:=`, `$if`, type glyphs). It is the same program — `to_dense` is verified to compile and print the same value on the token bench.
+**Ax** is the language (short syntax). Conventional is the corpus dialect, shown only so the same idea can be compared with Rust / C / Go. `ax fmt` prints Ax.
 
 ## Summary
 
-| case | rust | c | go | ax | ax-dense | dense/rust |
+| case | rust | c | go | ax-conv | ax | ax/rust |
 |---|---:|---:|---:|---:|---:|---:|
 | Add two integers | 24 | 19 | 22 | 22 | 15 | 0.62× |
 | If / else | 24 | 22 | 24 | 22 | 17 | 0.71× |
@@ -18,13 +18,13 @@ Same task in Rust, C, Go, and Ax. Token counts use the **in-repo proxy** (`ax::t
 | String interpolation | 25 | 37 | 25 | 19 | 16 | 0.64× |
 | **total** | 365 | 427 | 287 | 358 | 228 | 0.62× |
 
-Read the totals as *how much text an agent pays to write the same idea*. Ax-conventional is already below Rust on most rows because there is no `fn`/`return`/`while` boilerplate once types sit in the signature. Ax-dense is the same AST with reconstructible punctuation stripped.
+Read the totals as *how much text an agent pays to write the same idea*. **Ax** is the short syntax (the language). Conventional is the corpus dialect, kept so the same idea can be compared with Rust / C / Go.
 
 ## Add two integers
 
 A named function that returns `a + b`.
 
-| rust | c | go | ax | ax-dense |
+| rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
 | 24 | 19 | 22 | 22 | 15 |
 
@@ -52,13 +52,13 @@ func add(a int32, b int32) int32 {
 }
 ```
 
-**Ax (conventional)**
+**Ax (corpus / conventional)**
 
 ```ax
 fn add(a: i32, b: i32) -> i32 = a + b;
 ```
 
-**Ax-dense**
+**Ax**
 
 ```ax
 #add(a I, b I) I = a + b;
@@ -67,7 +67,7 @@ fn add(a: i32, b: i32) -> i32 = a + b;
 
 Pick one of two integers from a boolean.
 
-| rust | c | go | ax | ax-dense |
+| rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
 | 24 | 22 | 24 | 22 | 17 |
 
@@ -99,13 +99,13 @@ func pick(b bool) int32 {
 }
 ```
 
-**Ax (conventional)**
+**Ax (corpus / conventional)**
 
 ```ax
 fn pick(b: bool) -> i32 = if b { 1 } else { 0 };
 ```
 
-**Ax-dense**
+**Ax**
 
 ```ax
 #pick(b B) I = $b{1}{0};
@@ -114,7 +114,7 @@ fn pick(b: bool) -> i32 = if b { 1 } else { 0 };
 
 Accumulate `0 + 1 + … + (n-1)`.
 
-| rust | c | go | ax | ax-dense |
+| rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
 | 59 | 53 | 43 | 45 | 28 |
 
@@ -156,7 +156,7 @@ func sum(n uint64) uint64 {
 }
 ```
 
-**Ax (conventional)**
+**Ax (corpus / conventional)**
 
 ```ax
 fn sum(n: usz) -> usz = {
@@ -166,7 +166,7 @@ fn sum(n: usz) -> usz = {
 };
 ```
 
-**Ax-dense**
+**Ax**
 
 ```ax
 #sum(n Z) Z = { s Z:= 0; i~n { s = s + i }; s };
@@ -175,7 +175,7 @@ fn sum(n: usz) -> usz = {
 
 Factorial by a single recursive call.
 
-| rust | c | go | ax | ax-dense |
+| rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
 | 34 | 31 | 34 | 32 | 26 |
 
@@ -207,13 +207,13 @@ func fac(n int32) int32 {
 }
 ```
 
-**Ax (conventional)**
+**Ax (corpus / conventional)**
 
 ```ax
 fn fac(n: i32) -> i32 = if n < 2 { 1 } else { n * fac(n - 1) };
 ```
 
-**Ax-dense**
+**Ax**
 
 ```ax
 #fac(n I) I = $n < 2{1}{n * fac(n - 1)};
@@ -222,7 +222,7 @@ fn fac(n: i32) -> i32 = if n < 2 { 1 } else { n * fac(n - 1) };
 
 Read a map entry, default to `0` when missing.
 
-| rust | c | go | ax | ax-dense |
+| rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
 | 52 | 57 | 41 | 44 | 25 |
 
@@ -258,14 +258,14 @@ func get(m map[string]int64, k string) int64 {
 }
 ```
 
-**Ax (conventional)**
+**Ax (corpus / conventional)**
 
 ```ax
 fn get(m: Map[String, i64], k: String) -> i64 =
     match m.get(k) { Some(v) => v; None => 0; };
 ```
 
-**Ax-dense**
+**Ax**
 
 ```ax
 #get(m M[S, L], k S) L = m.get(k)?0;
@@ -274,7 +274,7 @@ fn get(m: Map[String, i64], k: String) -> i64 =
 
 Allocate a map, insert two keys, return their sum.
 
-| rust | c | go | ax | ax-dense |
+| rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
 | 112 | 156 | 56 | 126 | 75 |
 
@@ -318,7 +318,7 @@ func main() {
 }
 ```
 
-**Ax (conventional)**
+**Ax (corpus / conventional)**
 
 ```ax
 fn main() -> i64 !{alloc[a]} = {
@@ -331,7 +331,7 @@ fn main() -> i64 !{alloc[a]} = {
 };
 ```
 
-**Ax-dense**
+**Ax**
 
 ```ax
 #main() L !alloc[a] = { m M[S, L]:= %; m.insert("e", 2L); m.insert("o", 3L); e:= m.get("e")?0; o:= m.get("o")?0; e + o };
@@ -340,7 +340,7 @@ fn main() -> i64 !{alloc[a]} = {
 
 Parse an integer; on failure return a default.
 
-| rust | c | go | ax | ax-dense |
+| rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
 | 35 | 52 | 42 | 48 | 26 |
 
@@ -375,14 +375,14 @@ func parseOr(s string) int32 {
 }
 ```
 
-**Ax (conventional)**
+**Ax (corpus / conventional)**
 
 ```ax
 fn parse_or(s: String) -> i32 !{err[ParseError]} =
     match parse_i32(s) { Ok(v) => v; Err(_) => 0; };
 ```
 
-**Ax-dense**
+**Ax**
 
 ```ax
 #parse_or(s S) I !err[ParseError] = parse_i32(s)|0;
@@ -391,7 +391,7 @@ fn parse_or(s: String) -> i32 !{err[ParseError]} =
 
 Build `hello {name}` without a format macro.
 
-| rust | c | go | ax | ax-dense |
+| rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
 | 25 | 37 | 25 | 19 | 16 |
 
@@ -419,13 +419,13 @@ func greet(name string) string {
 }
 ```
 
-**Ax (conventional)**
+**Ax (corpus / conventional)**
 
 ```ax
 fn greet(name: String) -> String = f"hello {name}";
 ```
 
-**Ax-dense**
+**Ax**
 
 ```ax
 #greet(name S) S = f"hello {name}";

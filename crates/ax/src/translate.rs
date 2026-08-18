@@ -107,13 +107,12 @@ pub fn translate_rust(src: &str) -> TranslateReport {
         i += 1;
     }
 
-    // Reprint as the agent-canonical tree when the stripped source parses.
-    // The mechanical strip still produces the corpus dialect; the tree is
-    // what an agent should keep.
+    // Reprint as the language (short syntax) when the stripped source parses.
     let mut intern = crate::intern::Interner::new();
     if let Ok(file) = crate::parser::Parser::parse_file(&out, crate::span::FileId(0), &mut intern) {
-        notes.push("reprinted as tree surface".into());
-        out = crate::tree::format_file(&file, &intern);
+        notes.push("reprinted as Ax short syntax".into());
+        let conv = crate::fmt::format_file(&file, &intern);
+        out = crate::frontend::to_dense(&conv);
     }
 
     TranslateReport {

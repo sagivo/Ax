@@ -1402,8 +1402,8 @@ fn cmd_gbnf(args: &[String]) -> ExitCode {
         print!("{}", ax::gbnf::file_gbnf());
         ExitCode::SUCCESS
     } else {
-        // Default is the agent-canonical tree. The Rust-shaped GBNF remains
-        // at `--conventional` for the corpus dialect.
+        // Default GBNF is the prefix tree (constrained decoding). The
+        // Rust-shaped corpus grammar remains at `--conventional`.
         print!("{}", ax::tree::file_gbnf());
         ExitCode::SUCCESS
     }

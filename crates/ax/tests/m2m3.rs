@@ -247,6 +247,13 @@ fn conventional_still_compiles() {
 }
 
 #[test]
+fn default_session_compiles_short_syntax() {
+    let mut s = Session::new();
+    s.compile("t.ax", "#add(a I, b I) I = a + b\n")
+        .unwrap_or_else(|d| panic!("{d:?}"));
+}
+
+#[test]
 fn usecase_ax_snippets_compile() {
     for c in ax::usecases::cases() {
         let has_main = c.src.ax.contains("fn main(");

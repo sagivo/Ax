@@ -222,9 +222,9 @@ fn asc(x: &usz, y: &usz) -> Ordering = if x < y { Lt } else { if x > y { Gt } el
 #[test]
 fn card_snippets_are_descriptive_not_runnable_blocks() {
     let card = ax::driver::card_text();
-    assert!(card.contains("(fn "));
-    assert!(card.contains("(raise e)"));
-    assert!(card.contains("(attempt e)"));
+    assert!(card.contains("#add(") || card.contains("#fn") || card.contains("#name("));
+    assert!(card.contains("raise") && card.contains("catch"));
+    assert!(card.contains("short syntax"));
 }
 
 #[test]

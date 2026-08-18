@@ -651,6 +651,7 @@ impl<'a> Lowerer<'a> {
 
         let err = self.err_channel(&f.inferred, subst_map)?;
         fb.func.err = err.clone();
+        let same_len = same_len_pairs(&f.body, self.intern);
 
         let mut fl = FnLower {
             l: self,
@@ -666,6 +667,8 @@ impl<'a> Lowerer<'a> {
             loops: Vec::new(),
             recips: HashMap::new(),
             index_facts: Vec::new(),
+            same_len,
+            data_ptrs: HashMap::new(),
             test_fail: None,
         };
 
@@ -761,6 +764,8 @@ impl<'a> Lowerer<'a> {
             loops: Vec::new(),
             recips: HashMap::new(),
             index_facts: Vec::new(),
+            same_len: Vec::new(),
+            data_ptrs: HashMap::new(),
             test_fail: None,
         };
         // A test that raises without catching fails, exactly as in the oracle.
@@ -969,6 +974,13 @@ struct FnLower<'l, 'a> {
     /// length", collected at loop entry and used to drop provably-redundant
     /// bounds checks. See `bounded_by`.
     index_facts: Vec<(Symbol, Symbol)>,
+    /// Pairs of vecs that were filled by lockstep `push` in the same loop and
+    /// never reassigned, so they have equal length. `for i in range(0, a.len())`
+    /// then also bounds `b.at(i)` / `b.set(i, _)`.
+    same_len: Vec<(Symbol, Symbol)>,
+    /// Hoisted `vec.data` pointers for the current loop. Valid only when the
+    /// body cannot grow or reassign the vec, so the pointer cannot move.
+    data_ptrs: HashMap<Symbol, ValId>,
     /// In a `test`, where an uncaught raise goes: the block that reports the
     /// test as failed. The oracle treats an uncaught raise the same way, so the
     /// two agree on which tests pass.
@@ -1453,6 +1465,8 @@ impl<'l, 'a> FnLower<'l, 'a> {
             loops: Vec::new(),
             recips: HashMap::new(),
             index_facts: Vec::new(),
+            same_len: Vec::new(),
+            data_ptrs: HashMap::new(),
             test_fail: None,
         };
         for (p, pty) in params.iter().zip(&ptys) {
@@ -1764,6 +1778,18 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     }
                     if let Some(v) = self.try_recip_div(op, l, rhs) {
                         return Ok(LVal::scalar(v, l.ty));
+                    }
+                    // Unsigned `n % 2^k` is `n & (2^k - 1)`. clang does this;
+                    // we have to, because we emit a helper for `%` and clang
+                    // will not rewrite a runtime call.
+                    if op == BinOp::Rem && !l.ty.is_signed() {
+                        if let ExprKind::Lit(Lit::Int { value, .. }) = &rhs.kind {
+                            if *value > 0 && (*value as u64).is_power_of_two() {
+                                let mask = self.fb.const_int(*value - 1, l.ty);
+                                let v = self.fb.bin(BinKind::And, l.v, mask);
+                                return Ok(LVal::scalar(v, l.ty));
+                            }
+                        }
                     }
                     let kind = if op == BinOp::Div {
                         BinKind::DivTruncNZ
@@ -2734,6 +2760,54 @@ impl<'l, 'a> FnLower<'l, 'a> {
         Some((var.name, container))
     }
 
+    /// Load `xs.data` once before a loop that cannot grow or reassign `xs`.
+    fn hoist_data_ptrs(&mut self, body: &Expr) {
+        let mut names = Vec::new();
+        for (_, cont) in &self.index_facts {
+            names.push(*cont);
+            for (a, b) in &self.same_len {
+                if a == cont {
+                    names.push(*b);
+                }
+                if b == cont {
+                    names.push(*a);
+                }
+            }
+        }
+        names.sort_by_key(|s| s.0);
+        names.dedup();
+        for name in names {
+            if assigns_to(body, name) || grows_vec(body, name, self.l.intern) {
+                continue;
+            }
+            if self.data_ptrs.contains_key(&name) {
+                continue;
+            }
+            let Some(loc) = self.lookup(name) else {
+                continue;
+            };
+            let Some(agg) = loc.agg else {
+                continue;
+            };
+            let Some(data_i) = self.l.prog.agg(agg).field_index("data") else {
+                continue;
+            };
+            let dp = self.fb.field_ptr(agg, data_i, loc.addr);
+            let data = self.fb.load(IrTy::Ptr, dp);
+            self.data_ptrs.insert(name, data);
+        }
+    }
+
+    fn hoisted_data(&self, recv: &Expr) -> Option<ValId> {
+        let ExprKind::Path(p) = &recv.kind else {
+            return None;
+        };
+        if p.segs.len() != 1 {
+            return None;
+        }
+        self.data_ptrs.get(&p.segs[0].name).copied()
+    }
+
     /// Is `idx` an index this function already knows is within `recv`'s length?
     fn bounded_by(&self, recv: &Expr, idx: &Expr) -> bool {
         let (ExprKind::Path(rp), ExprKind::Path(ip)) = (&recv.kind, &idx.kind) else {
@@ -2742,9 +2816,16 @@ impl<'l, 'a> FnLower<'l, 'a> {
         if rp.segs.len() != 1 || ip.segs.len() != 1 {
             return false;
         }
-        self.index_facts
-            .iter()
-            .any(|(var, cont)| *var == ip.segs[0].name && *cont == rp.segs[0].name)
+        let var = ip.segs[0].name;
+        let rec = rp.segs[0].name;
+        self.index_facts.iter().any(|(v, c)| {
+            *v == var
+                && (*c == rec
+                    || self
+                        .same_len
+                        .iter()
+                        .any(|(a, b)| (*a == *c && *b == rec) || (*b == *c && *a == rec)))
+        })
     }
 
     fn for_expr_inner(
@@ -2764,6 +2845,8 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 _ => None,
             };
             let hoisted = self.hoist_recips(&[body], loop_var);
+            let saved_data = self.data_ptrs.clone();
+            self.hoist_data_ptrs(body);
             self.fb.set_term(Term::Jump(Edge {
                 to: head,
                 args: vec![],
@@ -2809,6 +2892,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 args: vec![],
             }));
             self.fb.switch_to(exit);
+            self.data_ptrs = saved_data;
             self.drop_recips(&hoisted);
             return Ok(LVal::scalar(self.fb.unit(), IrTy::Unit));
         }
@@ -3609,7 +3693,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 return self.lower_map_method(base, &name, args, e);
             }
         }
-        if !matches!(name.as_str(), "len" | "at" | "get" | "push" | "set" | "reserve") {
+        if !matches!(name.as_str(), "len" | "at" | "get" | "push" | "set" | "reserve" | "eq") {
             return Ok(None);
         }
         // Module-qualified calls (`fs.read`) also parse as field access.
@@ -3653,17 +3737,77 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 let v = self.fb.load(IrTy::U64, p);
                 Ok(Some(LVal::scalar(v, IrTy::U64)))
             }
+            "eq" => {
+                let other = self.expr(&args[0])?;
+                let oagg = other
+                    .agg
+                    .ok_or("native backend: `eq` needs a Vec or String argument")?;
+                let oa = self.l.prog.agg(oagg).clone();
+                let (Some(odata_i), Some(olen_i)) = (oa.field_index("data"), oa.field_index("len"))
+                else {
+                    return Err("native backend: `eq` argument has no data/len".into());
+                };
+                let lp = self.fb.field_ptr(agg, len_i, recv.v);
+                let len = self.fb.load(IrTy::U64, lp);
+                let olp = self.fb.field_ptr(oagg, olen_i, other.v);
+                let olen = self.fb.load(IrTy::U64, olp);
+                let same = self.fb.bin(BinKind::Eq, len, olen);
+                let (join, params) = self.fb.new_block_with(&[IrTy::Bool]);
+                let cmp_b = self.fb.new_block();
+                let no_b = self.fb.new_block();
+                self.fb.set_term(Term::Br {
+                    cond: same,
+                    then_e: Edge {
+                        to: cmp_b,
+                        args: vec![],
+                    },
+                    else_e: Edge {
+                        to: no_b,
+                        args: vec![],
+                    },
+                });
+                self.fb.switch_to(no_b);
+                let f = self.fb.const_bool(false);
+                self.fb.set_term(Term::Jump(Edge {
+                    to: join,
+                    args: vec![f],
+                }));
+                self.fb.switch_to(cmp_b);
+                let dp = self.fb.field_ptr(agg, data_i, recv.v);
+                let data = self.fb.load(IrTy::Ptr, dp);
+                let odp = self.fb.field_ptr(oagg, odata_i, other.v);
+                let odata = self.fb.load(IrTy::Ptr, odp);
+                let sz = self.fb.push(Op::SizeOf(elem_size), IrTy::U64);
+                let nbytes = self.fb.bin(BinKind::Mul, len, sz);
+                let eq = self.fb.push(
+                    Op::CallExt {
+                        name: "ax_rt_mem_eq".into(),
+                        args: vec![data, odata, nbytes],
+                        ret: IrTy::Bool,
+                        fallible: false,
+                    },
+                    IrTy::Bool,
+                );
+                self.fb.set_term(Term::Jump(Edge {
+                    to: join,
+                    args: vec![eq],
+                }));
+                self.fb.switch_to(join);
+                Ok(Some(LVal::scalar(params[0], IrTy::Bool)))
+            }
             "at" | "get" => {
                 let i = self.expr(&args[0])?;
                 let idx = self.coerce_int(i, IrTy::U64);
-                let lp = self.fb.field_ptr(agg, len_i, recv.v);
-                let len = self.fb.load(IrTy::U64, lp);
-                let in_bounds = self.fb.bin(BinKind::Lt, idx, len);
+                let proven = name == "at" && self.bounded_by(base, &args[0]);
                 if name == "at" {
                     // `at` is checked always (§3.3) — unless this function has
                     // already established that the index is in range, in which
-                    // case the check is dead code and the abort unreachable.
-                    if !self.bounded_by(base, &args[0]) {
+                    // case the compare is dead and emitting it blocks clang
+                    // from vectorising the walk.
+                    if !proven {
+                        let lp = self.fb.field_ptr(agg, len_i, recv.v);
+                        let len = self.fb.load(IrTy::U64, lp);
+                        let in_bounds = self.fb.bin(BinKind::Lt, idx, len);
                         let ok = self.fb.new_block();
                         let bad = self.fb.new_block();
                         self.fb.set_term(Term::Br {
@@ -3675,8 +3819,13 @@ impl<'l, 'a> FnLower<'l, 'a> {
                         self.fb.set_term(Term::Abort(AbortCode::IndexOutOfBounds));
                         self.fb.switch_to(ok);
                     }
-                    let dp = self.fb.field_ptr(agg, data_i, recv.v);
-                    let data = self.fb.load(IrTy::Ptr, dp);
+                    let data = match self.hoisted_data(base) {
+                        Some(p) => p,
+                        None => {
+                            let dp = self.fb.field_ptr(agg, data_i, recv.v);
+                            self.fb.load(IrTy::Ptr, dp)
+                        }
+                    };
                     let ep = self.fb.push(
                         Op::ElemPtr {
                             elem: elem_repr,
@@ -3699,6 +3848,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     }));
                 }
                 // `get` yields Option[T] instead of aborting.
+                let lp = self.fb.field_ptr(agg, len_i, recv.v);
+                let len = self.fb.load(IrTy::U64, lp);
+                let in_bounds = self.fb.bin(BinKind::Lt, idx, len);
                 let (_, opt_agg) = self.ir_of(e)?;
                 let opt = opt_agg.ok_or("native backend: `get` with no Option layout")?;
                 let slot = self.fb.alloc_slot(SlotKind::Agg(opt), "");
@@ -3832,21 +3984,28 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 let i = self.expr(&args[0])?;
                 let idx = self.coerce_int(i, IrTy::U64);
                 let val = self.expr(&args[1])?;
-                let lp = self.fb.field_ptr(agg, len_i, recv.v);
-                let len = self.fb.load(IrTy::U64, lp);
-                let in_bounds = self.fb.bin(BinKind::Lt, idx, len);
-                let ok = self.fb.new_block();
-                let bad = self.fb.new_block();
-                self.fb.set_term(Term::Br {
-                    cond: in_bounds,
-                    then_e: Edge { to: ok, args: vec![] },
-                    else_e: Edge { to: bad, args: vec![] },
-                });
-                self.fb.switch_to(bad);
-                self.fb.set_term(Term::Abort(AbortCode::IndexOutOfBounds));
-                self.fb.switch_to(ok);
-                let dp = self.fb.field_ptr(agg, data_i, recv.v);
-                let data = self.fb.load(IrTy::Ptr, dp);
+                if !self.bounded_by(base, &args[0]) {
+                    let lp = self.fb.field_ptr(agg, len_i, recv.v);
+                    let len = self.fb.load(IrTy::U64, lp);
+                    let in_bounds = self.fb.bin(BinKind::Lt, idx, len);
+                    let ok = self.fb.new_block();
+                    let bad = self.fb.new_block();
+                    self.fb.set_term(Term::Br {
+                        cond: in_bounds,
+                        then_e: Edge { to: ok, args: vec![] },
+                        else_e: Edge { to: bad, args: vec![] },
+                    });
+                    self.fb.switch_to(bad);
+                    self.fb.set_term(Term::Abort(AbortCode::IndexOutOfBounds));
+                    self.fb.switch_to(ok);
+                }
+                let data = match self.hoisted_data(base) {
+                    Some(p) => p,
+                    None => {
+                        let dp = self.fb.field_ptr(agg, data_i, recv.v);
+                        self.fb.load(IrTy::Ptr, dp)
+                    }
+                };
                 let ep = self.fb.push(
                     Op::ElemPtr {
                         elem: elem_repr,
@@ -5432,8 +5591,170 @@ fn collect_invariant_divisors(
     each_child(e, &mut |c| collect_invariant_divisors(c, nonzero, needs_guard, out));
 }
 
-/// Does `e` assign to the binding `name`? Used to check that a container cannot
-/// be swapped out from under a bounds-check elimination.
+/// Vecs filled by lockstep `push` in the same loop, never reassigned.
+/// Equal length afterwards, so an index bounded by one is bounded by the other.
+fn same_len_pairs(body: &Expr, intern: &Interner) -> Vec<(Symbol, Symbol)> {
+    let mut out = Vec::new();
+    walk_same_len(body, intern, &mut out);
+    out
+}
+
+fn walk_same_len(e: &Expr, intern: &Interner, out: &mut Vec<(Symbol, Symbol)>) {
+    match &e.kind {
+        ExprKind::For { body, .. } | ExprKind::While { body, .. } | ExprKind::Loop { body } => {
+            collect_lockstep_pushes(body, intern, out);
+            walk_same_len(body, intern, out);
+        }
+        ExprKind::Block { stmts, tail } => {
+            for s in stmts {
+                match &s.kind {
+                    StmtKind::Expr(x) => walk_same_len(x, intern, out),
+                    StmtKind::Let(l) => walk_same_len(&l.init, intern, out),
+                }
+            }
+            if let Some(t) = tail {
+                walk_same_len(t, intern, out);
+            }
+        }
+        ExprKind::If {
+            then_b, else_b, ..
+        } => {
+            walk_same_len(then_b, intern, out);
+            if let Some(el) = else_b {
+                walk_same_len(el, intern, out);
+            }
+        }
+        ExprKind::Region { body, .. } => walk_same_len(body, intern, out),
+        _ => {}
+    }
+}
+
+fn collect_lockstep_pushes(body: &Expr, intern: &Interner, out: &mut Vec<(Symbol, Symbol)>) {
+    let mut pushed = Vec::new();
+    gather_pushes(body, intern, &mut pushed);
+    if pushed.len() < 2 {
+        return;
+    }
+    for i in 0..pushed.len() {
+        for j in (i + 1)..pushed.len() {
+            let a = pushed[i];
+            let b = pushed[j];
+            if assigns_to(body, a) || assigns_to(body, b) {
+                continue;
+            }
+            out.push((a, b));
+        }
+    }
+}
+
+fn gather_pushes(e: &Expr, intern: &Interner, out: &mut Vec<Symbol>) {
+    match &e.kind {
+        ExprKind::Call { callee, .. } => {
+            if let Some(recv) = push_receiver(callee, intern) {
+                if !out.contains(&recv) {
+                    out.push(recv);
+                }
+            }
+        }
+        ExprKind::Block { stmts, tail } => {
+            for s in stmts {
+                match &s.kind {
+                    StmtKind::Expr(x) => gather_pushes(x, intern, out),
+                    StmtKind::Let(l) => gather_pushes(&l.init, intern, out),
+                }
+            }
+            if let Some(t) = tail {
+                gather_pushes(t, intern, out);
+            }
+        }
+        ExprKind::If {
+            then_b, else_b, ..
+        } => {
+            gather_pushes(then_b, intern, out);
+            if let Some(el) = else_b {
+                gather_pushes(el, intern, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn push_receiver(callee: &Expr, intern: &Interner) -> Option<Symbol> {
+    match &callee.kind {
+        ExprKind::Field { base, field } => {
+            if intern.get(field.name) == "push" {
+                if let ExprKind::Path(p) = &base.kind {
+                    if p.segs.len() == 1 {
+                        return Some(p.segs[0].name);
+                    }
+                }
+            }
+            None
+        }
+        ExprKind::Path(p) if p.segs.len() >= 2 => {
+            let last = p.segs.last()?;
+            if intern.get(last.name) != "push" {
+                return None;
+            }
+            (p.segs.len() == 2).then_some(p.segs[0].name)
+        }
+        _ => None,
+    }
+}
+
+/// Does `e` grow `name` via `push` or `reserve`? Those can move `data`.
+fn grows_vec(e: &Expr, name: Symbol, intern: &Interner) -> bool {
+    match &e.kind {
+        ExprKind::Call { callee, args } => {
+            if let Some(recv) = push_receiver(callee, intern) {
+                if recv == name {
+                    return true;
+                }
+            }
+            if let ExprKind::Field { base, field } = &callee.kind {
+                if intern.get(field.name) == "reserve" {
+                    if let ExprKind::Path(p) = &base.kind {
+                        if p.segs.len() == 1 && p.segs[0].name == name {
+                            return true;
+                        }
+                    }
+                }
+            }
+            if grows_vec(callee, name, intern) {
+                return true;
+            }
+            args.iter().any(|a| grows_vec(a, name, intern))
+        }
+        ExprKind::Block { stmts, tail } => {
+            stmts.iter().any(|s| match &s.kind {
+                StmtKind::Expr(x) => grows_vec(x, name, intern),
+                StmtKind::Let(l) => grows_vec(&l.init, name, intern),
+            }) || tail
+                .as_ref()
+                .is_some_and(|t| grows_vec(t, name, intern))
+        }
+        ExprKind::If {
+            then_b, else_b, ..
+        } => {
+            grows_vec(then_b, name, intern)
+                || else_b
+                    .as_ref()
+                    .is_some_and(|el| grows_vec(el, name, intern))
+        }
+        ExprKind::For { body, .. } | ExprKind::While { body, .. } | ExprKind::Loop { body } => {
+            grows_vec(body, name, intern)
+        }
+        ExprKind::Region { body, .. } => grows_vec(body, name, intern),
+        ExprKind::Binary { lhs, rhs, .. } => {
+            grows_vec(lhs, name, intern) || grows_vec(rhs, name, intern)
+        }
+        ExprKind::Unary { expr, .. } | ExprKind::Field { base: expr, .. } => {
+            grows_vec(expr, name, intern)
+        }
+        _ => false,
+    }
+}
+
 fn assigns_to(e: &Expr, name: Symbol) -> bool {
     let mut found = false;
     walk_assigns(e, name, &mut found);

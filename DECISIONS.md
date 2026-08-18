@@ -145,8 +145,9 @@ rate at all, without an entry here.
 ## R-14 — the language is a tree, not a Rust dialect (2026-08-18)
 
 The v0.3 surface rule ("look like Rust so models can write it") is
-reversed. The agent-canonical surface is a prefix tree (`S-tree`,
-`--surface tree`, auto-detected when a file opens with `(`). Reasons,
+reversed. A file that opens with `(` is the prefix tree (`S-tree`,
+`--surface tree`). The **default** language is the short syntax
+(R-16). Reasons for keeping the tree,
 from first principles, for a program that writes programs:
 
 - Infix is a silent-wrongness class (`a+b*c`). A prefix list cannot
@@ -172,9 +173,19 @@ dialect. It is not the identity of Ax.
 holes, the four-implementation oracle, and the protocol were never
 Rust. The tree is the surface those already deserved.
 
-New agent-facing examples live as trees in `examples/*.ax`. The card and
-`spec/v0.3.md` §1 / §3 describe the tree. The conventional grammar in
+New agent-facing examples may be trees (`examples/*.ax` that open with
+`(`) or short syntax. The card and `spec/v0.3.md` §1 / §3 describe the
+short syntax as the language. The conventional grammar in
 `spec/grammar.ebnf` remains the corpus grammar until the corpus moves.
+
+## R-16 — short syntax is the language (2026-08-18)
+
+The token-minimal pack (`#fn`, `:=`, `$if`, type glyphs) is no longer
+an opt-in dense mode. It is the default session surface and what
+`ax fmt` prints. Detection: `#name(`, `:=`, `$`, `@while`, `i~n`.
+A file that opens with `(` is still the tree. `fn` / `module` / `let`
+corpus files still parse as conventional so existing tests keep
+proving the IR. `--surface ax` is the name; `dense` remains an alias.
 
 ## R-15 — accept-and-elide is frozen (2026-08-18)
 

@@ -27,8 +27,9 @@ fn bench_tokens() -> Result<(), String> {
     println!("  token; two-char operators are one; a newline is one. Bytes are exact.\n");
 
     let mut md = String::from(
-        "# Token cost\n\nSame program in each language. `ax-terse` / `ax-dense` \
-         are derived mechanically from `ax` and verified to compile to the same answer.\n\n         | program | ax | terse | dense | rust | go | c | terse/ax | dense/ax | rust/ax |\n         |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n",
+        "# Token cost\n\nSame program in each language. `ax` is the language \
+         (short syntax). `ax-conv` is the corpus dialect. `ax-terse` is a \
+         mechanical strip of conventional.\n\n         | program | ax-conv | terse | ax | rust | go | c | terse/conv | ax/conv | rust/conv |\n         |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n",
     );
 
     let mut tot = [0usize; 6];
@@ -91,9 +92,9 @@ fn bench_tokens() -> Result<(), String> {
         let c = tokens::compare(
             name,
             &[
-                ("ax", &ax_src),
+                ("ax-conv", &ax_src),
                 ("ax-terse", &terse_src),
-                ("ax-dense", &dense_src),
+                ("ax", &dense_src),
                 ("rust", &(k.rs)(n)),
                 ("go", &(k.go)(n)),
                 ("c", &(k.c)(n)),
@@ -124,7 +125,7 @@ fn bench_tokens() -> Result<(), String> {
     }
 
     println!("totals across {} programs", compute_kernels().len());
-    let names = ["ax", "ax-terse", "ax-dense", "rust", "go", "c"];
+    let names = ["ax-conv", "ax-terse", "ax", "rust", "go", "c"];
     for (i, n) in names.iter().enumerate() {
         println!(
             "  {:<10} {:>5} tokens   {:.2}× ax",

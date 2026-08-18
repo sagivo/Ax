@@ -509,12 +509,12 @@ pub struct ContextPack {
 
 pub fn context_pack(intern: &Interner, checked: &CheckOutput, limit: usize) -> ContextPack {
     let cheatsheet = "\
-Ax is a prefix tree. No infix, no precedence, no Rust to forgive.
-- write `(+ a (* b c))`, never `a+b*c`
-- `(own T)` is affine (use exactly once)
-- `(untrusted T)` / `(secret T)` are lattice annotations
-- `(raise e)` `(catch e (arm p h))` `(attempt e)` — no unwinding
-- `(region r …)` is a bump arena
+Ax is the short syntax (`#fn`, `:=`, `$if`, type glyphs I/Z/B).
+- `#add(a I, b I) I = a + b` — a file that opens with `(` is the tree
+- `own T` is affine (use exactly once)
+- `Untrusted[T]` / `Secret[T]` are lattice annotations
+- `raise` / `catch` / `attempt` — no unwinding; `e|d` is Ok/Err
+- `region r { … }` is a bump arena
 - no lifetimes, no borrow checker, no macros
 ";
     let mut digests = Vec::new();
@@ -545,7 +545,7 @@ pub fn repair(name: &str, src: &str) -> crate::agent::FixReport {
     crate::agent::apply_safe_fixes(
         name,
         src,
-        crate::tree::detect_surface(src, crate::frontend::Surface::Tree),
+        crate::tree::detect_surface(src, crate::frontend::Surface::Dense),
     )
 }
 

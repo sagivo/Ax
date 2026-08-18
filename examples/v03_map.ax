@@ -1,9 +1,6 @@
-(module examples.v03_map
-  (export main)
-  (fn main () usz (! (alloc a))
-    (block
-      (let mut m (Map String i64) (map.new test.alloc))
-      (m.insert "a" 1i64)
-      (m.insert "b" 2i64)
-      (m.len)))
-)
+#main() Z !alloc[a] = {
+  m M[S, L]:= %;
+  m.insert("a", 1L);
+  m.insert("b", 2L);
+  m.len()
+};

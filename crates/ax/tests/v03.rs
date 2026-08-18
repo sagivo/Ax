@@ -176,7 +176,7 @@ fn context_pack_is_divergences() {
     let src = "module t;\nfn main() -> i32 = 1;\n";
     let (s, out) = compile(src);
     let p = ax::perf::context_pack(&s.intern, &out, 1000);
-    assert!(p.cheatsheet.contains("prefix tree"));
+    assert!(p.cheatsheet.contains("short syntax"));
     assert!(p.tokens > 0);
 }
 
