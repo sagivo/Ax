@@ -1,0 +1,14 @@
+//@ id:        T-SND-0001
+//@ requires:  R-5.2.3
+//@ origin:    authored — [R-5.2.3] premise 1: caller is suspended
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 3i32
+// Attack: a callee cannot observe a caller binding mutating during the
+// call, because the caller is suspended. The specific mechanism is that
+// there is no re-entrant dispatch that could drop the caller's binding:
+// trait objects are not in v1, so the call is a direct static call.
+module tests.soundness.read_caller_suspended;
+fn add(a: i32, b: i32) -> i32 = a + b;
+fn main() -> i32 = add(1, 2);

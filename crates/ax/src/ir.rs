@@ -399,6 +399,21 @@ pub enum Op {
     /// without a parser generated per type. Each backend emits its own offsets,
     /// so no layout knowledge crosses the boundary.
     TypeDescriptor(TypeId),
+    /// Unique-heap allocation: `malloc` with no RC word. Freed at last use.
+    UniqueAlloc {
+        size: ValId,
+        align: u32,
+    },
+    /// Free a unique-heap object. No result.
+    UniqueFree(ValId),
+    /// Residual RC: allocate with a leading refcount word. Returns payload ptr.
+    RcAlloc {
+        size: ValId,
+        align: u32,
+        atomic: bool,
+    },
+    RcRetain(ValId),
+    RcRelease(ValId),
 }
 
 #[derive(Clone, Debug)]
@@ -773,6 +788,18 @@ fn op_to_text(op: &Op, p: &Program) -> String {
             Repr::Scalar(t) => format!("size_of.{}", t.name()),
             Repr::Agg(a) => format!("size_of %{a}"),
         },
+        Op::UniqueAlloc { size, align } => format!("unique.alloc v{size}, align {align}"),
+        Op::UniqueFree(p) => format!("unique.free v{p}"),
+        Op::RcAlloc {
+            size,
+            align,
+            atomic,
+        } => format!(
+            "rc.alloc v{size}, align {align}{}",
+            if *atomic { ", atomic" } else { "" }
+        ),
+        Op::RcRetain(p) => format!("rc.retain v{p}"),
+        Op::RcRelease(p) => format!("rc.release v{p}"),
     }
 }
 

@@ -1,0 +1,10 @@
+//@ id:        T-DIA-0006
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0105
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0105
+module tests.diagnostics.unknown_variant;
+type C = | Red | Blue;
+fn main() -> i32 = match Red { Green => 1; _ => 0 };

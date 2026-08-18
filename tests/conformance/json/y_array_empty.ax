@@ -1,0 +1,10 @@
+//@ id:        T-JSN-0001
+//@ requires:  R-3.3.1
+//@ origin:    nst/JSONTestSuite y_array_empty ([T-4.4])
+//@ upstream:  unpinned-pending-acquisition
+//@ license:   MIT
+//@ port:      mechanical
+//@ expect:    compile
+// Accept/reject is table-driven in testharness::json_core_cases.
+module tests.conformance.json.y_array_empty;
+fn main() -> i32 = 0;

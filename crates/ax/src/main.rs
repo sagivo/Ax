@@ -48,6 +48,7 @@ fn main() -> ExitCode {
         "caps" => cmd_caps(&args),
         "translate" => cmd_translate(&args),
         "gbnf" => cmd_gbnf(&args),
+        "testharness" => cmd_testharness(&args),
         "daemon" => cmd_daemon(&args),
         "kill-criteria" => cmd_kill_criteria(&args),
         "pkg" => cmd_pkg(&args),
@@ -101,6 +102,7 @@ Usage:
   ax caps [--json] <file>
   ax translate <rust-file>
   ax gbnf [--check N]
+  ax testharness [filter]
   ax daemon
   ax kill-criteria
   ax pkg list | ax pkg write
@@ -1249,7 +1251,14 @@ fn cmd_translate(args: &[String]) -> ExitCode {
         }
     };
     let r = ax::translate::translate_rust(&src);
-    print!("{}", r.source);
+    // [T-11.4] translated corpora are unshippable without provenance.
+    let stamped = ax::translate::with_provenance(
+        &r.source,
+        path,
+        "MIT OR Apache-2.0",
+        "unpinned-local",
+    );
+    print!("{stamped}");
     for n in &r.notes {
         eprintln!("note: {n}");
     }
@@ -1260,6 +1269,35 @@ fn cmd_translate(args: &[String]) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
+    }
+}
+
+fn cmd_testharness(args: &[String]) -> ExitCode {
+    let filter = args.iter().find(|a| !a.starts_with('-')).cloned();
+    let root = ax::testharness::suite_dir();
+    let cases = match ax::testharness::discover(&root) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::from(2);
+        }
+    };
+    match ax::testharness::run_suite(&root, filter.as_deref()) {
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::from(2)
+        }
+        Ok(results) => {
+            print!("{}", ax::testharness::render_summary(&results, &cases));
+            if results
+                .iter()
+                .any(|r| matches!(r.outcome, ax::testharness::Outcome::Fail { .. }))
+            {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
     }
 }
 

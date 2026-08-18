@@ -1,0 +1,9 @@
+//@ id:        T-CAP-0003
+//@ requires:  R-7.6
+//@ origin:    authored — capability red team: widen always fails
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    compile
+module tests.capability.no_widen;
+fn main() -> i32 = 0;

@@ -1,0 +1,9 @@
+//@ id:        T-DIA-0003
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0102
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0102
+module tests.diagnostics.unknown_type;
+fn main() -> Nope = 0;

@@ -1,0 +1,10 @@
+//@ id:        T-DIA-0004
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0103
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0103
+module tests.diagnostics.arity;
+fn add(a: i32, b: i32) -> i32 = a + b;
+fn main() -> i32 = add(1);

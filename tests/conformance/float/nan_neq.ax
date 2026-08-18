@@ -1,0 +1,9 @@
+//@ id:        T-FLT-0001
+//@ requires:  R-3.3.1
+//@ origin:    IEEE-754 / TestFloat class ([T-4.1])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: false
+module tests.conformance.float.nan_neq;
+fn main() -> bool = { let n = 0.0 / 0.0; n == n };

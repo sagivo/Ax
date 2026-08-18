@@ -2555,7 +2555,7 @@ fn gate_kernels(full: bool) -> Vec<GateKernel> {
     let mat = if full { 256 } else { 80 };
     let btree = if full { 2_000_000 } else { 200_000 };
     let trees = if full { 16 } else { 12 };
-    let words = if full { 4_000_000 } else { 400_000 };
+    let words = if full { 2_000_000 } else { 80_000 };
     let json_n = if full { 4_000_000 } else { 400_000 };
     let regex_n = if full { 4_000_000 } else { 400_000 };
     let ray = if full { 200 } else { 80 };
@@ -3186,11 +3186,18 @@ fn ax_wordfreq(n: u64) -> String {
         r#"
 module bench.wordfreq;
 export {{ main }};
-fn main() -> i64 = {{
+fn main() -> i64 !{{alloc[a]}} = {{
     let n: usz = {n};
-    let mut acc: i64 = 0;
+    let mut xs: Vec[i64] = vec.new(test.alloc);
+    for i in range(0, 26) {{ xs.push(0); }};
     for i in range(0, n) {{
-        acc = acc + ((i % 26) as i64);
+        let k = i % 26;
+        let cur = xs.at(k);
+        xs.set(k, cur + 1);
+    }};
+    let mut acc: i64 = 0;
+    for i in range(0, 26) {{
+        acc = acc + xs.at(i) * ((i as i64) + 1);
     }};
     acc
 }};
@@ -3204,8 +3211,10 @@ fn c_wordfreq(n: u64) -> String {
 #include <stdio.h>
 #include <stdint.h>
 int main(void) {{
+    long long xs[26] = {{0}};
+    for (uint64_t i = 0; i < {n}ull; i++) xs[i % 26]++;
     long long acc = 0;
-    for (uint64_t i = 0; i < {n}ull; i++) acc += (long long)(i % 26);
+    for (int i = 0; i < 26; i++) acc += xs[i] * (i + 1);
     printf("%lld\n", acc);
     return 0;
 }}
@@ -3217,9 +3226,18 @@ fn rs_wordfreq(n: u64) -> String {
     format!(
         r#"
 fn main() {{
-    let mut acc: i64 = 0;
+    let mut xs = [0i64; 26];
     let mut i = 0u64;
-    while i < {n} {{ acc += (i % 26) as i64; i += 1; }}
+    while i < {n} {{
+        xs[(i % 26) as usize] += 1;
+        i += 1;
+    }}
+    let mut acc: i64 = 0;
+    let mut j = 0;
+    while j < 26 {{
+        acc += xs[j] * ((j as i64) + 1);
+        j += 1;
+    }}
     println!("{{acc}}");
 }}
 "#

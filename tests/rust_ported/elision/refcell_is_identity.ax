@@ -1,0 +1,11 @@
+//@ id:        T-ELI-0004
+//@ requires:  R-1.1.2
+//@ origin:    accept-and-elide corpus ([T-3.3.1] A0105)
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    compile
+//@ diags:     A0105
+module tests.rust_ported.elision.refcell_is_identity;
+fn take(x: RefCell[i32]) -> i32 = x;
+fn main() -> i32 = take(4);

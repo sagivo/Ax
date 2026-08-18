@@ -1,0 +1,9 @@
+//@ id:        T-FMT-0001
+//@ requires:  R-3.3.1
+//@ origin:    Rust core::fmt scenario ([T-4.6.1])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 3i32
+module tests.conformance.fmt.int_display;
+fn main() -> i32 = 1 + 2;

@@ -779,8 +779,31 @@ impl<'a> Checker<'a> {
             }
             TypeExprKind::Named { path, args } => {
                 let name = self.resolve_type_name(path);
-                if let Some(p) = Prim::from_str(self.intern.get(name)) {
+                let n = self.intern.get(name).to_string();
+                if let Some(p) = Prim::from_str(&n) {
                     return Type::Prim(p);
+                }
+                // Accept-and-elide: Box/Rc/Arc/RefCell are the inner value
+                // ([T-3.3.1] A0104 / A0105).
+                if matches!(n.as_str(), "Box" | "Rc" | "Arc") {
+                    self.diags.push(Diagnostic::warn(
+                        "A0104",
+                        path.span,
+                        format!("`{n}` is treated as the inner value; this is a documented divergence from Rust"),
+                    ));
+                    if let Some(inner) = args.first() {
+                        return self.lower_type(inner, env_region);
+                    }
+                }
+                if n == "RefCell" {
+                    self.diags.push(Diagnostic::warn(
+                        "A0105",
+                        path.span,
+                        "`RefCell` is identity; Ax has no interior mutability (documented divergence from Rust)",
+                    ));
+                    if let Some(inner) = args.first() {
+                        return self.lower_type(inner, env_region);
+                    }
                 }
                 // slice syntax via named `[T]` is represented as named slice
                 let lowered_args: Vec<Type> = args
@@ -1085,6 +1108,12 @@ impl<'a> Checker<'a> {
                 Type::unit()
             }
             ExprKind::Lambda { params, ret, body } => {
+                // Accept-and-elide: `move` on a closure is ignored ([T-3.3.1] A0107).
+                self.diags.push(Diagnostic::warn(
+                    "A0107",
+                    e.span,
+                    "`move` on a closure is ignored; Ax captures by value when needed (documented divergence from Rust)",
+                ));
                 env.push();
                 let mut pts = Vec::new();
                 for p in params {
@@ -1190,6 +1219,9 @@ impl<'a> Checker<'a> {
                         result = ht;
                         env.pop();
                     }
+                    // [T-1.2.4] / catalog E0204: a catch that drops a variant
+                    // is a static error, same exhaustiveness rule as match.
+                    self.check_catch_exhaustive(&et, arms, e.span, &env.def_id);
                     env.pop();
                     result
                 } else {
@@ -1718,6 +1750,18 @@ impl<'a> Checker<'a> {
     fn arg_compatible(&self, exp: &Type, got: &Type) -> bool {
         if types_eq(exp, got) {
             return true;
+        }
+        // Untrusted[T] flows through pure computation (spec §4.4). Sinks
+        // reject it separately (A5101).
+        if let Type::Untrusted(inner) = got {
+            if self.arg_compatible(exp, inner) {
+                return true;
+            }
+        }
+        if let Type::Untrusted(inner) = exp {
+            if self.arg_compatible(inner, got) {
+                return true;
+            }
         }
         // auto-ref: expected &T or &mut T, got T
         if let Type::Ref { inner, .. } = exp {
@@ -2254,6 +2298,13 @@ impl<'a> Checker<'a> {
             }
             UnOp::Ref | UnOp::RefMut => {
                 let t = self.check_expr(expr, None, env);
+                if op == UnOp::Ref {
+                    self.diags.push(Diagnostic::warn(
+                        "A0101",
+                        span,
+                        "`&` is elided; Ax treats references as hints (Rust would treat this as a borrow)",
+                    ));
+                }
                 if op == UnOp::RefMut {
                     if let ExprKind::Path(p) = &expr.kind {
                         if let Some(first) = p.segs.first() {
@@ -2460,6 +2511,52 @@ impl<'a> Checker<'a> {
     /// A missing case is otherwise a runtime abort, which for an agent means one
     /// more compile-run cycle to discover something the types already knew. Only
     /// variant scrutinees are checked: integers and strings have no finite case
+    fn check_catch_exhaustive(&mut self, err_ty: &Type, arms: &[Arm], span: Span, def_id: &str) {
+        // Same coverage walk as match, but the catalog code is E0204.
+        let bare = match err_ty {
+            Type::Ref { inner, .. }
+            | Type::Own(inner)
+            | Type::Untrusted(inner)
+            | Type::Secret(inner) => (**inner).clone(),
+            other => other.clone(),
+        };
+        let Type::Named { def, .. } = &bare else { return };
+        let Some(td) = self.type_defs.get(def).cloned() else {
+            return;
+        };
+        let TypeDefKind::Variants(cases) = &td.kind else {
+            return;
+        };
+        let mut covered: Vec<Symbol> = Vec::new();
+        for a in arms {
+            match &a.pat.kind {
+                PatKind::Wild => return,
+                PatKind::Bind(id) => {
+                    if self.variants.contains_key(&id.name) {
+                        covered.push(id.name);
+                    } else {
+                        return;
+                    }
+                }
+                PatKind::Variant { name, .. } => covered.push(name.name),
+                _ => return,
+            }
+        }
+        let missing: Vec<String> = cases
+            .iter()
+            .filter(|(n, _)| !covered.contains(n))
+            .map(|(n, _)| self.intern.get(*n).to_string())
+            .collect();
+        if !missing.is_empty() {
+            self.err(
+                "E0204",
+                span,
+                format!("catch not exhaustive: missing {}", missing.join(", ")),
+            );
+        }
+        let _ = def_id;
+    }
+
     /// list, so they still require a `_` arm to be total.
     fn check_exhaustive(&mut self, scrut: &Type, arms: &[Arm], span: Span, def_id: &str) {
         let bare = match scrut {

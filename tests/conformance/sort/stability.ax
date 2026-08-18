@@ -1,0 +1,19 @@
+//@ id:        T-SRT-0001
+//@ requires:  R-8.4
+//@ origin:    scenario from Rust library/alloc sort tests ([T-4.5.1])
+//@ upstream:  unpinned-pending-acquisition
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 3120i32
+module tests.conformance.sort.stability;
+type Item = { key: i32, tag: i32 };
+fn by_key(x: &Item, y: &Item) -> Ordering = i32.cmp(&x.key, &y.key);
+fn main() -> i32 !{alloc[a], diverge} = {
+    let mut xs: Vec[Item] = vec.new(test.alloc);
+    xs.push(Item { key: 1, tag: 3 });
+    xs.push(Item { key: 1, tag: 1 });
+    xs.push(Item { key: 1, tag: 2 });
+    xs.push(Item { key: 1, tag: 0 });
+    sort(&mut xs, by_key);
+    xs.at(0).tag * 1000 + xs.at(1).tag * 100 + xs.at(2).tag * 10 + xs.at(3).tag
+};

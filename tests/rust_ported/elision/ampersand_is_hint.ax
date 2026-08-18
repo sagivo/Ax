@@ -1,0 +1,14 @@
+//@ id:        T-ELI-0001
+//@ requires:  R-1.1.2
+//@ origin:    accept-and-elide corpus ([T-3.3.1] A0101)
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 7i32
+//@ diags:     A0101
+module tests.rust_ported.elision.ampersand_is_hint;
+fn main() -> i32 = {
+    let x: i32 = 7;
+    let r = &x;
+    x
+};

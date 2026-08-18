@@ -1,0 +1,9 @@
+//@ id:        T-SUB-0001
+//@ requires:  R-3.3.1
+//@ origin:    scenario from rust-lang/rust tests/ui (shadowing is shared)
+//@ upstream:  unpinned-pending-acquisition
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 2i32
+module tests.rust_ported.subset.shadowing;
+fn main() -> i32 = { let x: i32 = 1; let x: i32 = 2; x };

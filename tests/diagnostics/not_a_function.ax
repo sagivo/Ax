@@ -1,0 +1,9 @@
+//@ id:        T-DIA-0007
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0106
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0106
+module tests.diagnostics.not_a_function;
+fn main() -> i32 = { let x: i32 = 1; x(2) };

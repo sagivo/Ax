@@ -1,0 +1,11 @@
+//@ id:        T-SND-0005
+//@ requires:  R-5.2.3
+//@ origin:    authored — [R-5.2.3] premise 5: non-Escape is thread-invisible
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0600
+// Attack: send a Read value across a `par` boundary. `par` is rejected
+// until disjointness is proven — that is the specific mechanism.
+module tests.soundness.read_not_thread_visible;
+fn main() -> i32 = { par { let a = 1; }; 0 };

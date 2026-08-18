@@ -1,0 +1,9 @@
+//@ id:        T-DIV-0003
+//@ requires:  R-8.1.3
+//@ origin:    documented: par rejected until disjointness is proven
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0600
+module tests.rust_ported.divergence.par_rejected;
+fn main() -> i32 = { par { let a = 1; let b = 2; }; 3 };

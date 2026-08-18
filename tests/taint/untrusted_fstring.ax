@@ -1,0 +1,10 @@
+//@ id:        T-TNT-0002
+//@ requires:  R-5.2.4
+//@ origin:    authored — Untrusted cannot reach f-string ([T-5.3.1])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: A5101
+module tests.taint.untrusted_fstring;
+fn leak(u: Untrusted[i32]) -> String = f"untrusted {u}";
+fn main() -> i32 = 0;

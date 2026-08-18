@@ -132,6 +132,15 @@ impl CapBudget {
     }
 }
 
+/// A5002: a lockfile records the previously approved reachable set per
+/// dependency. A newly wider set requires re-approval.
+pub fn cap_widened(old: &[String], new: &[String]) -> Vec<String> {
+    new.iter()
+        .filter(|c| !old.iter().any(|o| o == *c))
+        .cloned()
+        .collect()
+}
+
 fn shortest_path(
     callees: &HashMap<String, Vec<String>>,
     start: &str,

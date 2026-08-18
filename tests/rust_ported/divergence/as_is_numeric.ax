@@ -1,0 +1,9 @@
+//@ id:        T-DIV-0002
+//@ requires:  R-8.1.3
+//@ origin:    card.md: `as` is the only numeric conversion (DECISIONS.md)
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0111
+module tests.rust_ported.divergence.as_is_numeric;
+fn main() -> i32 = true as i32;

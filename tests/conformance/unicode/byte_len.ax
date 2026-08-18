@@ -1,0 +1,9 @@
+//@ id:        T-UNI-0002
+//@ requires:  R-3.3.1
+//@ origin:    Rust str::len / Go len(string) ([T-4.3])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      adapted
+//@ expect:    value: 6usz
+module tests.conformance.unicode.byte_len;
+fn main() -> usz = len("héllo");

@@ -1,0 +1,11 @@
+//@ id:        T-ELI-0003
+//@ requires:  R-1.1.2
+//@ origin:    accept-and-elide corpus ([T-3.3.1] A0104)
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    compile
+//@ diags:     A0104
+module tests.rust_ported.elision.box_is_inner;
+fn take(x: Box[i32]) -> i32 = x;
+fn main() -> i32 = take(3);

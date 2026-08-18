@@ -26,7 +26,7 @@ If any of K1–K4 hold, abandon the language and ship the tooling.
 
 | ID | Condition | Status | Notes |
 |---|---|---|---|
-| P1 | Residual dynamic RC rate on `bench/perf/` > 8% after the perf loop | **no** (0.00 at verification sizes) | `ax bench gate` |
+| P1 | Residual dynamic RC rate on `bench/perf/` > 8% after the perf loop | **no** (0.00 at verification sizes) | Unique/RC IR ops (`UniqueAlloc`/`RcRetain`…) lower to `ax_rt_*`; residual RC retain emitted for shared ptr params |
 | P2 | Median runtime > 1.4× C | **no** (median 0.62× C) | worst 1.50× C is the mandelbrot row; still ≤ 1.60× |
 
 ## Language-change rule (R-13.9)
@@ -44,3 +44,13 @@ rate at all, without an entry here.
 - Ownership is a never-rejecting strategy ladder.
 - Assignment is move-by-default, copy-on-conflict, always report.
 - `own T` is the only hard rejection in the memory model.
+
+## Test-spec v1.0 (this tree)
+
+- **T-3.4.1 `as` casts:** the language card (`spec/card.md`) still defines `as` as the only numeric conversion. The test-spec's "reject `as`; suggest `to_*`" is recorded as a *future* divergence, not implemented. Tests pin the card.
+- **T-2.1.3 / T-3.4.1 overflow:** `+ - *` wrap in every profile (`spec/primitives.md`, card). The test-spec's "panic in all profiles" is not the language. rustc-oracle comparisons use wrapping semantics, not `-C overflow-checks=on` as a *requirement that Ax panic*. The overflow-checks flag is still passed so a *documented* wrap/panic split can be classified ([T-2.1.2]) rather than silently compared.
+- **T-11.3 GCC torture:** skipped; LLVM SingleSource / Zig behavior / Go `test/` cover the same ground. Do not vendor GPL.
+- **Catalog codes pending emit** (`testharness::catalog_codes_pending_emit`):
+  `E0301` (now A0101), `E0303`, `E0402`, `E0502` (needs `--strict-det` in the
+  file harness), `E0700`, `A0102`, `A0108`. A code that starts firing must
+  leave that list and gain a test in the same change.

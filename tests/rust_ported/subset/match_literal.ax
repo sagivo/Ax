@@ -1,0 +1,9 @@
+//@ id:        T-SUB-0002
+//@ requires:  R-3.3.1
+//@ origin:    scenario from rust-lang/rust tests/ui match
+//@ upstream:  unpinned-pending-acquisition
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 2i32
+module tests.rust_ported.subset.match_literal;
+fn main() -> i32 = match 1 { 0 => 0; 1 => 2; _ => 9 };

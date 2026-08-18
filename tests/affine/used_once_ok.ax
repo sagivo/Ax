@@ -1,0 +1,10 @@
+//@ id:        T-AFF-0005
+//@ requires:  R-3.3.1
+//@ origin:    authored — own used exactly once is accepted
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    compile
+module tests.affine.used_once_ok;
+fn take(p: own i32) -> i32 = p;
+fn main() -> i32 = 0;

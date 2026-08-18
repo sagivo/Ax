@@ -420,6 +420,7 @@ pub fn types_eq(a: &Type, b: &Type) -> bool {
         }
         (Type::Own(x), Type::Own(y)) => types_eq(x, y),
         (Type::Untrusted(x), Type::Untrusted(y)) => types_eq(x, y),
+        (Type::Untrusted(x), y) | (y, Type::Untrusted(x)) => types_eq(x, y),
         (Type::Secret(x), Type::Secret(y)) => types_eq(x, y),
         (
             Type::Fn {

@@ -1,0 +1,9 @@
+//@ id:        T-DIA-0010
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0500
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0500
+module tests.diagnostics.hole;
+fn main() -> i32 = ?;

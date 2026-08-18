@@ -1,0 +1,13 @@
+//@ id:        T-SND-0004
+//@ requires:  R-5.2.3
+//@ origin:    authored — [R-5.2.3] premise 4: unknown targets force Escape
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    compile
+// Attack: indirect call through a lambda. The analysis treats a returned
+// record as Escape → residual RC, never a dangling Read.
+module tests.soundness.read_escape_closure;
+type R = { x: i32 };
+fn wrap(v: R) -> R = v;
+fn main() -> i32 = wrap(R { x: 1 }).x;

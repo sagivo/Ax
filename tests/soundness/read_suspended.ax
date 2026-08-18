@@ -1,0 +1,5 @@
+//! expect: 3i32
+// §5.2.3 clause 1: the caller is suspended; a Read pointer is stable for the call.
+module sound.read_suspended;
+fn peek(x: i32) -> i32 = x;
+fn main() -> i32 = peek(3);

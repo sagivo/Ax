@@ -164,6 +164,40 @@ struct AxMap {
     uint64_t len;
 };
 
+void *ax_rt_unique_alloc(uint64_t size, uint32_t align) {
+    (void)align;
+    void *p = calloc(1, size ? (size_t)size : 1);
+    if (!p) ax_abort("out of memory");
+    return p;
+}
+
+void ax_rt_unique_free(void *p) {
+    free(p);
+}
+
+void *ax_rt_rc_alloc(uint64_t size, uint32_t align, int atomic) {
+    (void)align;
+    (void)atomic;
+    size_t n = sizeof(size_t) + (size ? (size_t)size : 1);
+    size_t *hdr = (size_t *)calloc(1, n);
+    if (!hdr) ax_abort("out of memory");
+    *hdr = 1;
+    return (void *)(hdr + 1);
+}
+
+void ax_rt_rc_retain(void *p) {
+    if (!p) return;
+    size_t *hdr = ((size_t *)p) - 1;
+    (*hdr)++;
+}
+
+void ax_rt_rc_release(void *p) {
+    if (!p) return;
+    size_t *hdr = ((size_t *)p) - 1;
+    if (*hdr == 0) ax_abort("double free");
+    if (--(*hdr) == 0) free(hdr);
+}
+
 void ax_rt_map_new(uint64_t _unused, AxMap **out) {
     (void)_unused;
     AxMap *m = (AxMap *)calloc(1, sizeof(AxMap));

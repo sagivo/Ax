@@ -686,6 +686,30 @@ impl<'a> Lowerer<'a> {
             // Only spill when the body actually needs an address for it.
             let needs = param_needs_slot(&f.body, *pname);
             fl.bind_param(*pname, v, ir, agg, &t, needs);
+            // Residual RC: a shared incoming heap value needs a retain so the
+            // caller's reference cannot die during the call (§5.2.3).
+            if ir == IrTy::Ptr {
+                let fname = fl.l.intern.get(f.sig.name);
+                if let Some(fo) = fl
+                    .l
+                    .co
+                    .ownership
+                    .functions
+                    .iter()
+                    .find(|x| x.function == fname)
+                {
+                    let pn = fl.l.intern.get(*pname);
+                    if let Some(vs) = fo.values.iter().find(|v| v.name == pn) {
+                        if matches!(
+                            vs.strategy,
+                            crate::ownership::Strategy::RcNonatomic
+                                | crate::ownership::Strategy::RcAtomic
+                        ) {
+                            fl.fb.push_void(Op::RcRetain(v));
+                        }
+                    }
+                }
+            }
         }
         if ret_agg.is_some() {
             let v = fl.fb.new_val(IrTy::Ptr);
@@ -3344,6 +3368,116 @@ impl<'l, 'a> FnLower<'l, 'a> {
     ///
     /// Element size comes from the layout, so one runtime routine serves every
     /// element type without boxing.
+    fn lower_map_method(
+        &mut self,
+        base: &Expr,
+        name: &str,
+        args: &[Expr],
+        e: &Expr,
+    ) -> Result<Option<LVal>, String> {
+        let recv = self.expr(base)?;
+        match name {
+            "len" => {
+                let v = self.fb.push(
+                    Op::CallExt {
+                        name: "ax_rt_map_len".into(),
+                        args: vec![recv.v],
+                        ret: IrTy::U64,
+                        fallible: false,
+                    },
+                    IrTy::U64,
+                );
+                Ok(Some(LVal::scalar(v, IrTy::U64)))
+            }
+            "insert" | "put" => {
+                let k = self.expr(&args[0])?;
+                let val = self.expr(&args[1])?;
+                self.fb.push_void(Op::CallExt {
+                    name: "ax_rt_map_insert".into(),
+                    args: vec![recv.v, k.v, val.v],
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(LVal::scalar(self.fb.unit(), IrTy::Unit)))
+            }
+            "get" => {
+                let k = self.expr(&args[0])?;
+                let tmp = self.fb.alloc_slot(SlotKind::Scalar(IrTy::I64), "mapget");
+                let found = self.fb.push(
+                    Op::CallExt {
+                        name: "ax_rt_map_get".into(),
+                        args: vec![recv.v, k.v, tmp],
+                        ret: IrTy::I32,
+                        fallible: false,
+                    },
+                    IrTy::I32,
+                );
+                let loaded = self.fb.load(IrTy::I64, tmp);
+                let (_, opt) = self.ir_of(e)?;
+                let opt = opt.ok_or("map.get: Option layout")?;
+                let slot = self.fb.alloc_slot(SlotKind::Agg(opt), "");
+                let some = self
+                    .l
+                    .prog
+                    .agg(opt)
+                    .case("Some")
+                    .cloned()
+                    .ok_or("Option Some")?;
+                let none = self
+                    .l
+                    .prog
+                    .agg(opt)
+                    .case("None")
+                    .cloned()
+                    .ok_or("Option None")?;
+                let join = self.fb.new_block();
+                let yes = self.fb.new_block();
+                let no = self.fb.new_block();
+                let zero = self.fb.const_int(0, IrTy::I32);
+                let pred = self.fb.bin(BinKind::Ne, found, zero);
+                self.fb.set_term(Term::Br {
+                    cond: pred,
+                    then_e: Edge { to: yes, args: vec![] },
+                    else_e: Edge { to: no, args: vec![] },
+                });
+                self.fb.switch_to(yes);
+                let tag = self.fb.const_int(some.tag as i128, IrTy::I32);
+                self.fb.store(IrTy::I32, slot, tag);
+                if let Some(fi) = some.fields.first() {
+                    self.store_field(slot, opt, *fi, LVal::scalar(loaded, IrTy::I64))?;
+                }
+                self.fb.set_term(Term::Jump(Edge { to: join, args: vec![] }));
+                self.fb.switch_to(no);
+                let tag = self.fb.const_int(none.tag as i128, IrTy::I32);
+                self.fb.store(IrTy::I32, slot, tag);
+                self.fb.set_term(Term::Jump(Edge { to: join, args: vec![] }));
+                self.fb.switch_to(join);
+                Ok(Some(LVal {
+                    v: slot,
+                    ty: IrTy::Ptr,
+                    agg: Some(opt),
+                }))
+            }
+            "contains" => {
+                let k = self.expr(&args[0])?;
+                let tmp = self.fb.alloc_slot(SlotKind::Scalar(IrTy::I64), "mapc");
+                let found = self.fb.push(
+                    Op::CallExt {
+                        name: "ax_rt_map_get".into(),
+                        args: vec![recv.v, k.v, tmp],
+                        ret: IrTy::I32,
+                        fallible: false,
+                    },
+                    IrTy::I32,
+                );
+                let zero = self.fb.const_int(0, IrTy::I32);
+                let pred = self.fb.bin(BinKind::Ne, found, zero);
+                Ok(Some(LVal::scalar(pred, IrTy::Bool)))
+            }
+            _ => Ok(None),
+        }
+    }
+
     fn try_method(
         &mut self,
         callee: &Expr,
@@ -3355,6 +3489,12 @@ impl<'l, 'a> FnLower<'l, 'a> {
             _ => return Ok(None),
         };
         let name = self.l.sym(field.name);
+        if matches!(name.as_str(), "len" | "get" | "insert" | "put" | "contains") {
+            let recv_ty = self.ty_of_node(base.id);
+            if type_is_map(&recv_ty, self.l.intern) {
+                return self.lower_map_method(base, &name, args, e);
+            }
+        }
         if !matches!(name.as_str(), "len" | "at" | "get" | "push" | "set") {
             return Ok(None);
         }
@@ -4936,6 +5076,23 @@ fn expr_kind_name(k: &ExprKind) -> &'static str {
         ExprKind::Region { .. } => "region",
         ExprKind::Par { .. } => "par",
         ExprKind::Assign { .. } => "assignment",
+    }
+}
+
+fn type_is_map(t: &Type, intern: &Interner) -> bool {
+    let bare = match t {
+        Type::Ref { inner, .. }
+        | Type::Own(inner)
+        | Type::Untrusted(inner)
+        | Type::Secret(inner) => inner.as_ref(),
+        other => other,
+    };
+    match bare {
+        Type::Named { def, .. } => {
+            let n = intern.get(*def);
+            n == "Map" || n == "SortedMap"
+        }
+        _ => false,
     }
 }
 

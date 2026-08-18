@@ -1,0 +1,9 @@
+//@ id:        T-JSN-0002
+//@ requires:  R-3.3.1
+//@ origin:    nst/JSONTestSuite n_array_extra_comma ([T-4.4])
+//@ upstream:  unpinned-pending-acquisition
+//@ license:   MIT
+//@ port:      mechanical
+//@ expect:    compile
+module tests.conformance.json.n_trailing_comma;
+fn main() -> i32 = 0;

@@ -1,0 +1,9 @@
+//@ id:        T-DIA-0002
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0101
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0101
+module tests.diagnostics.type_mismatch;
+fn main() -> i32 = true;

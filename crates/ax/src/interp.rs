@@ -2478,3 +2478,8 @@ impl<'a> JParser<'a> {
         s.parse().map_err(|_| ())
     }
 }
+
+/// Accept/reject for the JSONTestSuite-shaped runner ([T-4.4]).
+pub fn json_accepts(s: &str) -> bool {
+    parse_json(s.trim()).is_ok()
+}

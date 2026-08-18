@@ -1,0 +1,9 @@
+//@ id:        T-NUM-0002
+//@ requires:  R-3.3.1
+//@ origin:    Hacker's Delight / C UB; Ax wraps (card.md, DECISIONS.md)
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: -2147483648i32
+module tests.conformance.numeric.div_min_by_neg_one;
+fn main() -> i32 !{err[DivError]} = int.div_trunc(-2147483648i32, -1i32);

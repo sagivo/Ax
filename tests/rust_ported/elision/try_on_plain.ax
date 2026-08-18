@@ -1,0 +1,9 @@
+//@ id:        T-ELI-0005
+//@ requires:  R-1.1.2
+//@ origin:    accept-and-elide corpus ([T-3.3.1] A0109)
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    warn: A0109
+module tests.rust_ported.elision.try_on_plain;
+fn main() -> i32 = 3?;

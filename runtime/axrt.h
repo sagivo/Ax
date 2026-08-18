@@ -263,6 +263,14 @@ void ax_rt_vec_new(const AxAlloc *a, uint64_t elem_size, AxVec *out);
 /* Opaque hash map (string keys, i64 values) for v0.3 Map[K,V]. */
 typedef struct AxMap AxMap;
 void ax_rt_map_new(uint64_t _unused, AxMap **out);
+
+/* Ownership ladder (spec §5.2). Unique heap has no RC word. Residual RC
+   stores a size_t count immediately before the payload pointer. */
+void *ax_rt_unique_alloc(uint64_t size, uint32_t align);
+void ax_rt_unique_free(void *p);
+void *ax_rt_rc_alloc(uint64_t size, uint32_t align, int atomic);
+void ax_rt_rc_retain(void *p);
+void ax_rt_rc_release(void *p);
 void ax_rt_map_insert(AxMap *m, const char *key, int64_t val);
 int ax_rt_map_get(AxMap *m, const char *key, int64_t *out);
 uint64_t ax_rt_map_len(AxMap *m);

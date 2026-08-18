@@ -1,0 +1,15 @@
+//@ id:        T-INV-0002
+//@ requires:  R-1.2.2, R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/borrowck (E0502 mut + immut borrow)
+//@ upstream:  unpinned-pending-acquisition
+//@ license:   MIT OR Apache-2.0
+//@ port:      inverted-mechanical
+//@ expect:    value: 3i32
+//@ diags:     A0101
+module tests.rust_ported.inverted.mut_and_immut;
+fn main() -> i32 = {
+    let mut x: i32 = 3;
+    let r = &x;
+    let m = &mut x;
+    x
+};

@@ -1,0 +1,9 @@
+//@ id:        T-DIA-0001
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0100
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0100
+module tests.diagnostics.unknown_name;
+fn main() -> i32 = no_such_name;

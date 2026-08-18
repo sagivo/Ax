@@ -775,6 +775,42 @@ impl<'a, 'b> Trans<'a, 'b> {
                 let v = self.b.ins().iconst(clty::I64, size as i64);
                 self.set(d, v);
             }
+            Op::UniqueAlloc { size, align } => {
+                let d = i.results[0];
+                let argv = [self.get(*size), self.b.ins().iconst(clty::I32, *align as i64)];
+                let v = self
+                    .call_ext_raw("ax_rt_unique_alloc", &argv, Some(IrTy::Ptr))?
+                    .ok_or("unique_alloc returned nothing")?;
+                self.set(d, v);
+            }
+            Op::UniqueFree(p) => {
+                let argv = [self.get(*p)];
+                let _ = self.call_ext_raw("ax_rt_unique_free", &argv, None)?;
+            }
+            Op::RcAlloc {
+                size,
+                align,
+                atomic,
+            } => {
+                let d = i.results[0];
+                let argv = [
+                    self.get(*size),
+                    self.b.ins().iconst(clty::I32, *align as i64),
+                    self.b.ins().iconst(clty::I32, if *atomic { 1 } else { 0 }),
+                ];
+                let v = self
+                    .call_ext_raw("ax_rt_rc_alloc", &argv, Some(IrTy::Ptr))?
+                    .ok_or("rc_alloc returned nothing")?;
+                self.set(d, v);
+            }
+            Op::RcRetain(p) => {
+                let argv = [self.get(*p)];
+                let _ = self.call_ext_raw("ax_rt_rc_retain", &argv, None)?;
+            }
+            Op::RcRelease(p) => {
+                let argv = [self.get(*p)];
+                let _ = self.call_ext_raw("ax_rt_rc_release", &argv, None)?;
+            }
             Op::Call { f: callee, args } => {
                 let c = self.prog.func(*callee);
                 let cl = self.ids[*callee as usize];

@@ -1,0 +1,9 @@
+//@ id:        T-NUM-0003
+//@ requires:  R-3.3.1
+//@ origin:    spec/primitives.md — shift counts mask to width ([T-4.2.2])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 1i32
+module tests.conformance.numeric.shift_count_masked;
+fn main() -> i32 = 1 << 32;

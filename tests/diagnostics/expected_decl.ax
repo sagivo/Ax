@@ -1,0 +1,9 @@
+//@ id:        T-DIA-0012
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0002
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0002
+module tests.diagnostics.expected_decl;
+42;

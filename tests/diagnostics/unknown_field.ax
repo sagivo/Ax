@@ -1,0 +1,10 @@
+//@ id:        T-DIA-0005
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0104
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0104
+module tests.diagnostics.unknown_field;
+type R = { x: i32 };
+fn main() -> i32 = { let r = R { x: 1 }; r.nope };

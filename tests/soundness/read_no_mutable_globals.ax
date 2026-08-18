@@ -1,0 +1,12 @@
+//@ id:        T-SND-0002
+//@ requires:  R-5.2.3
+//@ origin:    authored — [R-5.2.3] premise 2: no mutable global state
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0002
+// Attack: reach a caller binding through module state. Ax has no
+// `static mut` (rejected at parse as an unexpected declaration).
+module tests.soundness.read_no_mutable_globals;
+static mut G: i32 = 0;
+fn main() -> i32 = G;

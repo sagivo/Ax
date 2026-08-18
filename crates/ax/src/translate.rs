@@ -114,6 +114,15 @@ pub fn translate_rust(src: &str) -> TranslateReport {
     }
 }
 
+/// Prefix a translated file with the provenance header required by [T-11.4].
+pub fn with_provenance(translated: &str, origin: &str, license: &str, commit: &str) -> String {
+    format!(
+        "{}{}",
+        crate::testharness::provenance_header(origin, license, commit),
+        translated
+    )
+}
+
 fn try_rewrite<'a>(src: &'a str, i: usize) -> Option<(usize, &'static str, Option<String>)> {
     let rest = &src[i..];
     // Lifetimes: `'a ` / `'static `

@@ -1,0 +1,9 @@
+//@ id:        T-CAP-0002
+//@ requires:  R-7.6
+//@ origin:    authored — capability red team: absolute path
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    compile
+module tests.capability.path_absolute;
+fn main() -> i32 = 0;

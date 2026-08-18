@@ -237,6 +237,7 @@ pub fn catalog() -> Vec<(&'static str, &'static str)> {
         ("A5101", "Untrusted[T] cannot reach a sink"),
         ("A5102", "Secret[T] cannot be formatted / logged"),
         ("A5001", "reachable capability not permitted by ax.toml"),
+        ("A5002", "dependency capability set widened on upgrade"),
         ("P1001", "residual RC not elided"),
         ("P1002", "allocation not proven stack"),
         ("P1003", "bounds check not eliminated"),

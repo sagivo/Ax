@@ -1,0 +1,9 @@
+//@ id:        T-DIV-0001
+//@ requires:  R-8.1.3
+//@ origin:    documented divergence ([T-3.4.1] A0106)
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    warn: A0106
+//@ message-contains: Rust
+unsafe fn main() -> i32 = 0;

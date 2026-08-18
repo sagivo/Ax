@@ -1,0 +1,10 @@
+//@ id:        T-OWN-0004
+//@ requires:  R-5.2.5
+//@ origin:    authored — exact allocation-count golden ([T-5.2.2])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 6i32
+module tests.ownership.no_alloc_chain;
+fn checksum_no_alloc(x: i32) -> i32 = x * 2;
+fn main() -> i32 = checksum_no_alloc(3);

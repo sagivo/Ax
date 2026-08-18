@@ -1,0 +1,10 @@
+//@ id:        T-AFF-0002
+//@ requires:  R-3.3.1
+//@ origin:    authored — own T never-used is A2021 ([T-5.4.1])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: A2021
+module tests.affine.never_used;
+fn take(p: own i32) -> i32 = 0;
+fn main() -> i32 = 0;

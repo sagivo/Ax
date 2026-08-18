@@ -766,7 +766,7 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
                 (alloc, alloc_type(b), false),
                 (path, fs_path_ty, false),
             ],
-            string_type(b),
+            Type::Untrusted(Box::new(string_type(b))),
             fs_eff,
         ),
     ));

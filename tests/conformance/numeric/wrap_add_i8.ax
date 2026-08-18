@@ -1,0 +1,9 @@
+//@ id:        T-NUM-0001
+//@ requires:  R-3.3.1
+//@ origin:    scenario from Go test/ + Rust wrapping_add ([T-4.2])
+//@ upstream:  unpinned-pending-acquisition
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: -128i8
+module tests.conformance.numeric.wrap_add_i8;
+fn main() -> i8 = 127i8 + 1i8;

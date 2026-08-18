@@ -1,0 +1,10 @@
+//@ id:        T-DIFF-0003
+//@ requires:  R-3.3.1
+//@ origin:    authored rustc-oracle companion
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      oracle
+//@ expect:    rustc-oracle
+module tests.differential.call;
+fn add(a: i32, b: i32) -> i32 = a + b;
+fn main() -> i32 = add(10, 32);

@@ -1,0 +1,13 @@
+//@ id:        T-OWN-0003
+//@ requires:  R-5.2.4, R-3.3.1
+//@ origin:    authored — alias set merge at a branch join
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 3i32
+module tests.ownership.branch_join_copy;
+fn main() -> i32 = {
+    let mut s: i32 = 0;
+    if 1 > 0 { s = s + 1; } else { s = s + 2; };
+    s + 2
+};

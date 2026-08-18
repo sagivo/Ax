@@ -1,0 +1,11 @@
+//@ id:        T-CAP-0001
+//@ requires:  R-7.6
+//@ origin:    authored — capability red team: `..` escape ([T-5.5.1])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    compile
+// The confine() helper rejects `..` that would leave the root. Exercised
+// by the cargo testharness, not by running this file as a program.
+module tests.capability.path_dotdot;
+fn main() -> i32 = 0;

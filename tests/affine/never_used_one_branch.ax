@@ -1,0 +1,10 @@
+//@ id:        T-AFF-0003
+//@ requires:  R-3.3.1
+//@ origin:    authored — unused own on one branch still A2021
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: A2021
+module tests.affine.never_used_one_branch;
+fn take(p: own i32, b: bool) -> i32 = if b { 1 } else { 2 };
+fn main() -> i32 = 0;

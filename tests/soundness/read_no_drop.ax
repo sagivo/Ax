@@ -1,0 +1,9 @@
+//! expect: 5i32
+// §5.2.3 clause 3: a Read parameter cannot be dropped by the callee.
+module sound.read_no_drop;
+fn twice(x: i32) -> i32 = x + x;
+fn main() -> i32 = {
+    let a: i32 = 5;
+    let b = twice(a);
+    a - b + b
+};

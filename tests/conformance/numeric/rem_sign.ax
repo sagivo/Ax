@@ -1,0 +1,9 @@
+//@ id:        T-NUM-0004
+//@ requires:  R-3.3.1
+//@ origin:    Rust num tests — rem sign follows dividend ([T-4.2.2])
+//@ upstream:  unpinned-pending-acquisition
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: -1i32
+module tests.conformance.numeric.rem_sign;
+fn main() -> i32 !{err[DivError]} = int.rem(-7i32, 3i32);

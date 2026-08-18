@@ -1,0 +1,13 @@
+//@ id:        T-SND-0003
+//@ requires:  R-5.2.3
+//@ origin:    authored — [R-5.2.3] premise 3: callee cannot drop a Read param
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 4i32
+// Attack: explicit drop / store of a Read parameter. A primitive Read
+// is a register copy; dropping the callee's binding cannot free the
+// caller's. Mechanism asserted: strategy stays Register.
+module tests.soundness.read_callee_cannot_drop;
+fn take(p: i32) -> i32 = p;
+fn main() -> i32 = take(4);

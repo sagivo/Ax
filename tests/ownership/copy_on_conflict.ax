@@ -1,0 +1,11 @@
+//@ id:        T-OWN-0001
+//@ requires:  R-3.3.1, R-1.3.1
+//@ origin:    authored — move/copy-on-conflict ([T-5.2.1])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    compile, run, perf-finding P1010
+module tests.ownership.copy_on_conflict;
+type R = { x: i32 };
+fn use2(v: R) -> i32 = v.x + v.x;
+fn main() -> i32 = use2(R { x: 3 });

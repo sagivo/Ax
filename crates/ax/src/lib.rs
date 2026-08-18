@@ -4,6 +4,7 @@
 //! structured diagnostics, holes, and the compiler protocol.
 
 pub mod agent;
+pub mod axmock;
 pub mod ast;
 pub mod backend_c;
 pub mod backend_clif;
@@ -36,6 +37,7 @@ pub mod parser;
 pub mod reach;
 pub mod translate;
 pub mod span;
+pub mod testharness;
 pub mod tokens;
 pub mod types;
 pub mod workspace;

@@ -1,0 +1,83 @@
+# Pinned upstream suites ([T-1.5.1], [T-11.1]).
+# Drift is reported, never auto-merged ([T-1.5.2]).
+# GPL must not be vendored ([T-11.3]).
+
+[suite.rust_ui]
+name = "rust-lang/rust tests/ui"
+url = "https://github.com/rust-lang/rust"
+commit = "unpinned-pending-acquisition"
+license = "MIT OR Apache-2.0"
+port = "inverted-mechanical"
+notes = "Acquire by error-code query over //~ ERROR. Do not port borrowck-positive, macros, async, unsafe."
+
+[suite.rust_library]
+name = "rust-lang/rust library/{core,alloc,std}/tests"
+url = "https://github.com/rust-lang/rust"
+commit = "unpinned-pending-acquisition"
+license = "MIT OR Apache-2.0"
+port = "mechanical"
+notes = "Via ax translate. Target ≥70% by M5 ([T-2.4.3])."
+
+[suite.go_test]
+name = "golang/go test/"
+url = "https://github.com/golang/go"
+commit = "unpinned-pending-acquisition"
+license = "BSD-3-Clause"
+port = "adapted"
+notes = "Scenario-ported into conformance/ and tests/conformance/."
+
+[suite.zig_behavior]
+name = "ziglang/zig test/behavior"
+url = "https://github.com/ziglang/zig"
+commit = "unpinned-pending-acquisition"
+license = "MIT"
+port = "adapted"
+notes = "Best structural model for Ax behavior tests ([T-4.7])."
+
+[suite.llvm_singlesource]
+name = "llvm/llvm-test-suite SingleSource"
+url = "https://github.com/llvm/llvm-test-suite"
+commit = "unpinned-pending-acquisition"
+license = "Apache-2.0 WITH LLVM-exception"
+port = "adapted"
+notes = "Preferred over GCC torture ([T-11.3] path a)."
+
+[suite.unicode]
+name = "Unicode UCD conformance"
+url = "https://www.unicode.org/Public/UCD/latest/ucd/"
+commit = "UCD-16.0.0-pending"
+license = "Unicode License"
+port = "mechanical"
+notes = "Machine-readable; table-driven runner. Retain the Unicode notice."
+
+[suite.jsontestsuite]
+name = "nst/JSONTestSuite"
+url = "https://github.com/nst/JSONTestSuite"
+commit = "unpinned-pending-acquisition"
+license = "MIT"
+port = "mechanical"
+notes = "y_/n_/i_ prefixes. i_ cases need a documented decision each ([T-4.4.1])."
+
+[suite.testfloat]
+name = "Berkeley TestFloat / SoftFloat"
+url = "http://www.jhauser.us/arithmetic/TestFloat.html"
+commit = "vector-extract-pending"
+license = "BSD-style (Hauser)"
+port = "adapted"
+notes = "Vector extraction, not vendored sources. Retain the Hauser notice."
+
+[suite.juliet]
+name = "NIST SARD Juliet"
+url = "https://samate.nist.gov/SARD"
+commit = "unpinned-pending-acquisition"
+license = "US Government work"
+port = "adapted"
+notes = "Verify current terms at acquisition ([T-5.3.3])."
+
+[suite.gcc_torture]
+name = "GCC gcc.c-torture"
+url = "https://gcc.gnu.org/git/"
+commit = "not-acquired"
+license = "GPL"
+port = "adapted"
+notes = "do-not-vendor"

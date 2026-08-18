@@ -1,0 +1,11 @@
+//@ id:        T-DIA-0009
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0200
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0200
+module tests.diagnostics.effect_row;
+type E = | Bad;
+fn f() -> i32 = raise Bad;
+fn main() -> i32 = 0;

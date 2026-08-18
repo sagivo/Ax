@@ -1,0 +1,10 @@
+//@ id:        T-DIA-0008
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0108 + autofix
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0108
+module tests.diagnostics.implicit_conv;
+fn take(x: i64) -> i64 = x;
+fn main() -> i64 = take(1i32);

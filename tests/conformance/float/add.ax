@@ -1,0 +1,9 @@
+//@ id:        T-FLT-0002
+//@ requires:  R-3.3.1
+//@ origin:    IEEE-754 add ([T-4.1])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 3f64
+module tests.conformance.float.add;
+fn main() -> f64 = 1.0 + 2.0;

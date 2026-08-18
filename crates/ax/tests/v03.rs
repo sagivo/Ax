@@ -339,3 +339,38 @@ fn gbnf_equivalence_1k() {
     let (a, b) = ax::gbnf::check_equivalence(1000);
     assert_eq!((a, b), (0, 0));
 }
+
+#[test]
+fn fs_read_returns_untrusted() {
+    let src = "module t;\nfn main() -> i32 = 0;\n";
+    let (s, out) = compile(src);
+    let fs = out
+        .callables
+        .iter()
+        .find(|c| c.name == "fs.read" || c.name.ends_with(".read"))
+        .expect("fs.read in prelude");
+    let d = fs.ret.display(&s.intern);
+    assert!(d.contains("Untrusted"), "fs.read should return Untrusted[…], got {d}");
+}
+
+#[test]
+fn unique_and_rc_ops_exist() {
+    let u = ax::ir::Op::UniqueAlloc { size: 0, align: 8 };
+    let r = ax::ir::Op::RcRetain(1);
+    assert!(format!("{u:?}").contains("UniqueAlloc"));
+    assert!(format!("{r:?}").contains("RcRetain"));
+}
+
+#[test]
+fn ax_mock_accepts_restricted_rust() {
+    assert!(ax::axmock::PROMPT.contains("no lifetimes"));
+    let src = "module t;\nfn main() -> i32 = 1 + 2;\n";
+    assert!(ax::axmock::validity(src));
+    assert!(ax::axmock::score_corpus(&[src]) > 0.9);
+}
+
+#[test]
+fn a5002_detects_widening() {
+    let extra = ax::reach::cap_widened(&["fs".into()], &["fs".into(), "net".into()]);
+    assert_eq!(extra, vec!["net".to_string()]);
+}

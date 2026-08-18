@@ -458,7 +458,8 @@ pub fn kill_criteria_report() -> String {
          K4 human review parity:       OPEN — needs a review panel\n\
          in-repo protocol: {rust_note}\n\
          interpretation: protocol evidence does not trigger K1 (tooling-was-everything).\n\
-         See DECISIONS.md.\n"
+         See DECISIONS.md.\n\
+         ax-mock prompt is in ax::axmock::PROMPT; validity via ax::axmock::validity.\n"
     )
 }
 

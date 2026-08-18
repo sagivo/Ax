@@ -547,6 +547,26 @@ impl<'a> Emit<'a> {
                 size,
                 align,
             } => set!(format!("ax_arena_alloc(&r{region}, v{size}, {align})")),
+            Op::UniqueAlloc { size, align } => {
+                set!(format!("ax_rt_unique_alloc(v{size}, {align})"))
+            }
+            Op::UniqueFree(p) => {
+                let _ = writeln!(self.out, "    ax_rt_unique_free(v{p});");
+            }
+            Op::RcAlloc {
+                size,
+                align,
+                atomic,
+            } => set!(format!(
+                "ax_rt_rc_alloc(v{size}, {align}, {})",
+                if *atomic { 1 } else { 0 }
+            )),
+            Op::RcRetain(p) => {
+                let _ = writeln!(self.out, "    ax_rt_rc_retain(v{p});");
+            }
+            Op::RcRelease(p) => {
+                let _ = writeln!(self.out, "    ax_rt_rc_release(v{p});");
+            }
             Op::Call { f: callee, args } => {
                 let c = self.p.func(*callee);
                 let argv: Vec<String> = args.iter().map(|a| format!("v{a}")).collect();

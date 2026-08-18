@@ -522,11 +522,13 @@ fn fmt_expr(o: &mut String, e: &Expr, intern: &Interner, indent: usize) {
             }
         }
         ExprKind::Raise(e) => {
-            o.push_str("raise ");
+            // Accept-and-elide: `raise e` is `Err(e)?` in the canonical subset.
+            o.push_str("Err(");
             fmt_expr(o, e, intern, indent);
+            o.push_str(")?");
         }
         ExprKind::Catch { expr, arms } => {
-            o.push_str("catch ");
+            o.push_str("match ");
             fmt_expr(o, expr, intern, indent);
             o.push_str(" {\n");
             for a in arms {
@@ -540,7 +542,6 @@ fn fmt_expr(o: &mut String, e: &Expr, intern: &Interner, indent: usize) {
             o.push('}');
         }
         ExprKind::Attempt(e) => {
-            o.push_str("attempt ");
             fmt_expr(o, e, intern, indent);
         }
         ExprKind::Try(e) => {
