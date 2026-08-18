@@ -1460,6 +1460,13 @@ impl<'a> Checker<'a> {
                         .iter()
                         .find(|(fnm, _)| *fnm == n.name)
                         .map(|(_, t)| t.clone())
+                        .or_else(|| {
+                            // `Some(v)` is parsed as field `_0`; accept that as
+                            // the first payload when the type names it `value`.
+                            let nm = self.intern.get(n.name);
+                            let idx = nm.strip_prefix('_')?.parse::<usize>().ok()?;
+                            field_tys.get(idx).map(|(_, t)| t.clone())
+                        })
                         .unwrap_or(Type::Error);
                     self.bind_pat(p, &ft, false, env);
                 }
@@ -2971,7 +2978,8 @@ impl<'a> Checker<'a> {
                 let some = self.intern.intern("Some");
                 if name == some {
                     let value = self.intern.intern("value");
-                    return vec![(value, args[0].clone())];
+                    let slot = self.intern.intern("_0");
+                    return vec![(value, args[0].clone()), (slot, args[0].clone())];
                 }
             }
         }

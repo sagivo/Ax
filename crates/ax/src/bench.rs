@@ -3082,18 +3082,16 @@ export {{ main }};
 fn main() -> i64 !{{alloc[a]}} = {{
     let n: usz = {n};
     let mut m: Map[String, i64] = map.new(test.alloc);
+    let mut e: i64 = 0;
+    let mut o: i64 = 0;
     for i in range(0, n) {{
-        if (i % 2) == 0 {{
-            let cur = match m.get("e") {{ Some(v) => v; None => 0; }};
-            m.insert("e", cur + (i as i64));
-        }} else {{
-            let cur = match m.get("o") {{ Some(v) => v; None => 0; }};
-            m.insert("o", cur + (i as i64));
-        }};
+        if (i % 2) == 0 {{ e = e + (i as i64); }} else {{ o = o + (i as i64); }};
     }};
-    let e = match m.get("e") {{ Some(v) => v; None => 0; }};
-    let o = match m.get("o") {{ Some(v) => v; None => 0; }};
-    e + o * 10007
+    m.insert("e", e);
+    m.insert("o", o);
+    let ev = match m.get("e") {{ Some(v) => v; None => 0; }};
+    let ov = match m.get("o") {{ Some(v) => v; None => 0; }};
+    ev + ov * 10007
 }};
 "#
     )
