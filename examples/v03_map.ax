@@ -1,9 +1,9 @@
-module examples.v03_map;
-export { main };
-
-fn main() -> usz !{alloc[a]} = {
-    let mut m: Map[String, i64] = map.new(test.alloc);
-    m.insert("a", 1i64);
-    m.insert("b", 2i64);
-    m.len()
-};
+(module examples.v03_map
+  (export main)
+  (fn main () usz (! (alloc a))
+    (block
+      (let mut m (Map String i64) (map.new test.alloc))
+      (m.insert "a" 1i64)
+      (m.insert "b" 2i64)
+      (m.len)))
+)

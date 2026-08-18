@@ -1,10 +1,7 @@
-module examples.v03_par;
-export { main };
-
-fn main() -> i32 = {
-    par {
-        let a = 1;
-        let b = 2;
-    };
-    3
-};
+(module examples.v03_par
+  (export main)
+  (fn main () i32
+    (block
+      (par (let a 1) (let b 2))
+      3))
+)

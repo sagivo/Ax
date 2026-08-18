@@ -92,8 +92,18 @@ pub fn apply_patch(
 
     // Rewrite the named function's body in the formatted source.
     let name = def_name(&tx.def_id);
-    let formatted = fmt::format_file(file, intern);
-    let Some(rewritten) = replace_fn_body(&formatted, &name, repl) else {
+    let tree = crate::tree::looks_like_tree(src);
+    let formatted = if tree {
+        crate::tree::format_file(file, intern)
+    } else {
+        fmt::format_file(file, intern)
+    };
+    let rewritten = if tree {
+        replace_fn_body_tree(&formatted, &name, repl)
+    } else {
+        replace_fn_body(&formatted, &name, repl)
+    };
+    let Some(rewritten) = rewritten else {
         return PatchResult {
             ok: false,
             applied: false,
@@ -104,7 +114,12 @@ pub fn apply_patch(
     };
 
     // Re-parse to confirm the result is still a program.
-    if Parser::parse_file(&rewritten, FileId(0), intern).is_err() {
+    let reparse_ok = if tree {
+        crate::tree::parse_file(&rewritten, FileId(0), intern, "m").is_ok()
+    } else {
+        Parser::parse_file(&rewritten, FileId(0), intern).is_ok()
+    };
+    if !reparse_ok {
         return PatchResult {
             ok: false,
             applied: false,
@@ -156,6 +171,69 @@ fn replace_fn_body(src: &str, name: &str, repl: &str) -> Option<String> {
     out.push_str(repl);
     out.push(';');
     out.push_str(&src[after_eq + end_rel..]);
+    Some(out)
+}
+
+/// Replace the last form of `(fn name … body)` with `repl`.
+fn replace_fn_body_tree(src: &str, name: &str, repl: &str) -> Option<String> {
+    let needle = format!("(fn {name}");
+    let start = src.find(&needle)?;
+    // Walk the fn list and record the last top-level form's span.
+    let bytes = src.as_bytes();
+    let mut i = start + 1; // skip the opening '(' of `(fn …)`
+    let mut depth = 1i32;
+    let mut form_start = None;
+    let mut last = None;
+    while i < bytes.len() && depth > 0 {
+        match bytes[i] {
+            b'(' => {
+                if depth == 1 {
+                    form_start = Some(i);
+                }
+                depth += 1;
+            }
+            b')' => {
+                depth -= 1;
+                if depth == 1 {
+                    if let Some(s) = form_start.take() {
+                        last = Some((s, i + 1));
+                    }
+                }
+                if depth == 0 {
+                    break;
+                }
+            }
+            b'"' => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            b if depth == 1 && !b.is_ascii_whitespace() => {
+                if form_start.is_none() {
+                    let s = i;
+                    while i + 1 < bytes.len()
+                        && !bytes[i + 1].is_ascii_whitespace()
+                        && bytes[i + 1] != b'('
+                        && bytes[i + 1] != b')'
+                    {
+                        i += 1;
+                    }
+                    last = Some((s, i + 1));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let (s, e) = last?;
+    let mut out = String::new();
+    out.push_str(&src[..s]);
+    out.push_str(repl.trim());
+    out.push_str(&src[e..]);
     Some(out)
 }
 

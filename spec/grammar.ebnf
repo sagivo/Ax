@@ -1,9 +1,12 @@
 (*
-  Ax language — normative grammar (v0.2 / research-v1).
-  This file is the single source of truth for surface syntax.
-  The reference card, syntax-highlighting definitions, and parser
-  are generated from / validated against it.
-  A grammar that disagrees with an example is a build failure.
+  Ax language — corpus dialect grammar (v0.2 / research-v1).
+
+  The agent-canonical surface is the prefix tree in spec/tree.md and
+  crates/ax/src/tree.rs. This file is the Rust-shaped dialect the
+  existing corpus still uses so the four backends keep proving the same
+  IR. It is not the language an agent writes. See DECISIONS.md R-14.
+
+  A grammar that disagrees with a corpus example is a build failure.
 *)
 
 file           ::= module_decl export_decl? use_decl* decl*

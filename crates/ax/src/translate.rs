@@ -107,6 +107,15 @@ pub fn translate_rust(src: &str) -> TranslateReport {
         i += 1;
     }
 
+    // Reprint as the agent-canonical tree when the stripped source parses.
+    // The mechanical strip still produces the corpus dialect; the tree is
+    // what an agent should keep.
+    let mut intern = crate::intern::Interner::new();
+    if let Ok(file) = crate::parser::Parser::parse_file(&out, crate::span::FileId(0), &mut intern) {
+        notes.push("reprinted as tree surface".into());
+        out = crate::tree::format_file(&file, &intern);
+    }
+
     TranslateReport {
         source: out,
         notes,

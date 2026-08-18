@@ -63,12 +63,38 @@ impl EffectAtom {
     }
 
     pub fn display(&self, intern: &Interner) -> String {
+        self.display_surface(intern, false)
+    }
+
+    pub fn display_tree(&self, intern: &Interner) -> String {
+        self.display_surface(intern, true)
+    }
+
+    pub fn display_surface(&self, intern: &Interner, tree: bool) -> String {
         match self {
             EffectAtom::Abort => "abort".into(),
-            EffectAtom::Alloc(s) => format!("alloc[{}]", intern.get(*s)),
+            EffectAtom::Alloc(s) => {
+                if tree {
+                    format!("(alloc {})", intern.get(*s))
+                } else {
+                    format!("alloc[{}]", intern.get(*s))
+                }
+            }
             EffectAtom::Diverge => "diverge".into(),
-            EffectAtom::Err(t) => format!("err[{}]", t.display(intern)),
-            EffectAtom::Io(s) => format!("io[{}]", intern.get(*s)),
+            EffectAtom::Err(t) => {
+                if tree {
+                    format!("(err {})", t.display_tree(intern))
+                } else {
+                    format!("err[{}]", t.display(intern))
+                }
+            }
+            EffectAtom::Io(s) => {
+                if tree {
+                    format!("(io {})", intern.get(*s))
+                } else {
+                    format!("io[{}]", intern.get(*s))
+                }
+            }
             EffectAtom::Nondet => "nondet".into(),
             EffectAtom::Race => "race".into(),
             EffectAtom::Susp => "susp".into(),
@@ -151,11 +177,24 @@ impl EffectSet {
     }
 
     pub fn display(&self, intern: &Interner) -> String {
+        self.display_surface(intern, false)
+    }
+
+    pub fn display_tree(&self, intern: &Interner) -> String {
+        self.display_surface(intern, true)
+    }
+
+    pub fn display_surface(&self, intern: &Interner, tree: bool) -> String {
         if self.atoms.is_empty() {
-            return String::new();
+            return if tree { "(!)".into() } else { String::new() };
         }
-        let inner: Vec<_> = self.atoms.iter().map(|a| a.display(intern)).collect();
-        format!("!{{{}}}", inner.join(", "))
+        if tree {
+            let inner: Vec<_> = self.atoms.iter().map(|a| a.display_tree(intern)).collect();
+            format!("(! {})", inner.join(" "))
+        } else {
+            let inner: Vec<_> = self.atoms.iter().map(|a| a.display(intern)).collect();
+            format!("!{{{}}}", inner.join(", "))
+        }
     }
 
     pub fn subset_of(&self, other: &EffectSet) -> bool {

@@ -1,11 +1,11 @@
-module examples.v03_btree_map;
-export { main };
-
-fn main() -> i64 !{alloc[a]} = {
-    let mut m: Map[String, i64] = map.new(test.alloc);
-    m.insert("e", 0i64);
-    m.insert("o", 1i64);
-    let e = match m.get("e") { Some(v) => v; None => 0; };
-    let o = match m.get("o") { Some(v) => v; None => 0; };
-    e + o
-};
+(module examples.v03_btree_map
+  (export main)
+  (fn main () i64 (! (alloc a))
+    (block
+      (let mut m (Map String i64) (map.new test.alloc))
+      (m.insert "e" 0i64)
+      (m.insert "o" 1i64)
+      (let e (match (m.get "e") (arm (Some v) v) (arm None 0)))
+      (let o (match (m.get "o") (arm (Some v) v) (arm None 0)))
+      (+ e o)))
+)

@@ -48,19 +48,24 @@ pub struct HoleFills {
 pub fn hole_fills(name: &str, src: &str, surface: Surface, limit: usize) -> Vec<HoleFills> {
     let mut s = Session::new();
     s.allow_holes = true;
-    s.surface = surface;
+    s.surface = if crate::tree::looks_like_tree(src) {
+        Surface::Tree
+    } else {
+        surface
+    };
     let Ok(out) = s.compile(name, src) else {
         return Vec::new();
     };
+    let tree = crate::tree::looks_like_tree(src);
     let mut result = Vec::new();
     for hole in &out.holes {
         let expected = hole.expected.clone();
-        let mut cands = generate(&expected, hole, &out, &s);
+        let mut cands = generate(&expected, hole, &out, &s, tree);
         // Verify in generated order, then re-rank so compiling fills come first.
         let mut verified = Vec::new();
         for (i, (expr, note)) in cands.drain(..).enumerate().take(limit) {
             let patched = replace_span(src, hole.span.start, hole.span.end, &expr);
-            let (compiles, codes) = check_clean(name, &patched, surface);
+            let (compiles, codes) = check_clean(name, &patched, s.surface);
             verified.push(Fill {
                 expr,
                 rank: i as u32,
@@ -75,7 +80,11 @@ pub fn hole_fills(name: &str, src: &str, surface: Surface, limit: usize) -> Vec<
         }
         result.push(HoleFills {
             def_id: hole.def_id.clone(),
-            expected: expected.display(&s.intern),
+            expected: if tree {
+                expected.display_tree(&s.intern)
+            } else {
+                expected.display(&s.intern)
+            },
             span: (hole.span.start, hole.span.end),
             fills: verified,
         });
@@ -127,6 +136,7 @@ fn generate(
     hole: &crate::check::HoleInfo,
     out: &CheckOutput,
     s: &Session,
+    tree: bool,
 ) -> Vec<(String, String)> {
     let intern = &s.intern;
     // The function whose body contains the hole, e.g. `...::fn:distance`.
@@ -144,7 +154,12 @@ fn generate(
     for (name, ty) in &hole.in_scope {
         scope_terms.push((name.clone(), ty.clone()));
         for (fname, fty) in record_fields(ty, out, intern) {
-            scope_terms.push((format!("{name}.{fname}"), fty));
+            let term = if tree {
+                format!("(field {name} {fname})")
+            } else {
+                format!("{name}.{fname}")
+            };
+            scope_terms.push((term, fty));
         }
     }
     for (term, ty) in &scope_terms {
@@ -173,8 +188,13 @@ fn generate(
                             }
                         }
                         if !args.iter().any(|a| a == "?") {
+                            let expr = if tree {
+                                format!("(var {vn} {})", args.join(" "))
+                            } else {
+                                format!("{vn}({})", args.join(", "))
+                            };
                             cands.push((
-                                format!("{vn}({})", args.join(", ")),
+                                expr,
                                 "variant constructor with in-scope payload".into(),
                             ));
                         }
@@ -200,7 +220,7 @@ fn generate(
         let mut args: Vec<String> = Vec::new();
         let mut ok = true;
         for p in &c.params {
-            match pick_arg(p, &scope_terms, &used) {
+            match pick_arg(p, &scope_terms, &used, tree) {
                 Some(a) => {
                     used.push(a.trim_start_matches("&mut ").trim_start_matches('&').to_string());
                     args.push(a);
@@ -226,7 +246,13 @@ fn generate(
         if bare == enclosing {
             continue;
         }
-        let expr = if args.is_empty() {
+        let expr = if tree {
+            if args.is_empty() {
+                format!("({})", c.name)
+            } else {
+                format!("({} {})", c.name, args.join(" "))
+            }
+        } else if args.is_empty() {
             format!("{}()", c.name)
         } else {
             format!("{}({})", c.name, args.join(", "))
@@ -271,7 +297,7 @@ fn generate(
 ///
 /// Terms already consumed by earlier arguments are considered only as a
 /// fallback, so a multi-argument call reaches for different values first.
-fn pick_arg(want: &Type, scope: &[(String, Type)], used: &[String]) -> Option<String> {
+fn pick_arg(want: &Type, scope: &[(String, Type)], used: &[String], tree: bool) -> Option<String> {
     let fresh = |t: &(String, Type)| !used.contains(&t.0);
     if let Some((term, _)) = scope.iter().find(|t| types_eq(&t.1, want) && fresh(t)) {
         return Some(term.clone());
@@ -279,11 +305,7 @@ fn pick_arg(want: &Type, scope: &[(String, Type)], used: &[String]) -> Option<St
     // `&T` accepts a `T` in scope by reference.
     if let Type::Ref { inner, mutable, .. } = want {
         if let Some((term, _)) = scope.iter().find(|t| types_eq(&t.1, inner) && fresh(t)) {
-            return Some(if *mutable {
-                format!("&mut {term}")
-            } else {
-                format!("&{term}")
-            });
+            return Some(ref_term(term, *mutable, tree));
         }
     }
     // Fall back to reuse rather than giving up on the call entirely.
@@ -292,14 +314,24 @@ fn pick_arg(want: &Type, scope: &[(String, Type)], used: &[String]) -> Option<St
     }
     if let Type::Ref { inner, mutable, .. } = want {
         if let Some((term, _)) = scope.iter().find(|(_, t)| types_eq(t, inner)) {
-            return Some(if *mutable {
-                format!("&mut {term}")
-            } else {
-                format!("&{term}")
-            });
+            return Some(ref_term(term, *mutable, tree));
         }
     }
     None
+}
+
+fn ref_term(term: &str, mutable: bool, tree: bool) -> String {
+    if tree {
+        if mutable {
+            format!("(refmut {term})")
+        } else {
+            format!("(ref {term})")
+        }
+    } else if mutable {
+        format!("&mut {term}")
+    } else {
+        format!("&{term}")
+    }
 }
 
 /// Fields of a record type, for projection candidates.

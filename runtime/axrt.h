@@ -272,6 +272,7 @@ void *ax_rt_rc_alloc(uint64_t size, uint32_t align, int atomic);
 void ax_rt_rc_retain(void *p);
 void ax_rt_rc_release(void *p);
 void ax_rt_map_insert(AxMap *m, const AxStr *key, int64_t val);
+void ax_rt_map_add(AxMap *m, const AxStr *key, int64_t delta);
 int ax_rt_map_get(AxMap *m, const AxStr *key, int64_t *out);
 uint64_t ax_rt_map_len(AxMap *m);
 /* Free entries only; the Map header is UniqueFree'd by lowering at last use. */
@@ -281,6 +282,8 @@ void ax_rt_vec_push(AxVec *v, const void *elem, uint64_t elem_size);
    test and a typed store — and calls this only when the buffer is full, so the
    common case is not a function call and not a `memcpy`. */
 void ax_rt_vec_grow(AxVec *v, uint64_t elem_size);
+/* Grow capacity to at least `n` elements without changing `len`. */
+void ax_rt_vec_reserve(AxVec *v, uint64_t elem_size, uint64_t n);
 /* Bounds-checked element address. Aborts out of range: `at` is checked always. */
 void *ax_rt_vec_at(const AxVec *v, uint64_t i, uint64_t elem_size);
 void *ax_rt_slice_at(const AxSlice *s, uint64_t i, uint64_t elem_size);
@@ -290,6 +293,9 @@ void *ax_rt_slice_at(const AxSlice *s, uint64_t i, uint64_t elem_size);
    native tiers agree element for element. */
 void ax_rt_sort(void *data, uint64_t len, uint64_t elem_size,
                 int (*cmp)(const void *, const void *));
+/* Same stable mergesort, i32 elements, `<=` compare. Used when the
+   comparator is `i32.cmp` so the trampoline is not in the way. */
+void ax_rt_sort_i32(int32_t *data, uint64_t len);
 
 /* The C callback signature has no room for an environment, so the Ax comparator
    travels through a thread-local slot that the generated trampoline reads.
@@ -354,6 +360,8 @@ void *ax_rt_read_cap_files(const AxStr *names, const AxStr *contents, uint64_t n
 void ax_rt_str_concat(const AxAlloc *a, const AxStr *x, const AxStr *y, AxStr *out);
 /* Byte at `i`, bounds-checked. */
 uint8_t ax_rt_str_byte(const AxStr *s, uint64_t i);
+/* One-byte string. Used by the self-hosted tree frontend. */
+void ax_rt_str_from_byte(const AxAlloc *a, uint8_t b, AxStr *out);
 
 /* ---- capabilities ------------------------------------------------------ */
 

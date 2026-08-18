@@ -77,7 +77,7 @@ fn print_help() {
 ax — systems language for AI agents
 
 Usage:
-  ax check [--json] [--allow-holes] [--strict-det] [--surface conventional|terse|verbose] <file>
+  ax check [--json] [--allow-holes] [--strict-det] [--surface ax|tree|conventional|terse|verbose] <file>
   ax hole [--fills] [--json] <file> [<def_id>]
   ax types <file> <def_id>
   ax effs <file> <def_id>
@@ -97,7 +97,7 @@ Usage:
   ax conform [filter]
   ax fix [--apply] [--json] <file>
   ax build [-o <bin>] [--tier dev|release|portable] <file>
-  ax bench io|http|metrics|tokens|gate|gate-check|all
+  ax bench io|http|metrics|tokens|usecases|software|gate|gate-check|all
   ax perf [--json] [--diff <baseline.json>] <file>
   ax complete --at <pos> [--json] <file>
   ax context [--limit=N] <file>
@@ -312,7 +312,7 @@ fn cmd_fix(args: &[String]) -> ExitCode {
         .surface
         .as_deref()
         .and_then(ax::frontend::Surface::from_str)
-        .unwrap_or(ax::frontend::Surface::Conventional);
+        .unwrap_or_else(|| ax::tree::detect_surface(&src, ax::frontend::Surface::Tree));
     let r = ax::agent::apply_safe_fixes(path.to_str().unwrap_or("input.ax"), &src, surface);
     let write = args.iter().any(|a| a == "--apply");
     if flags.json {
@@ -447,7 +447,7 @@ fn cmd_hole(args: &[String]) -> ExitCode {
             .surface
             .as_deref()
             .and_then(ax::frontend::Surface::from_str)
-            .unwrap_or(ax::frontend::Surface::Conventional);
+            .unwrap_or_else(|| ax::tree::detect_surface(&src, ax::frontend::Surface::Tree));
         let name = path.to_str().unwrap_or("input.ax");
         let holes = ax::agent::hole_fills(name, &src, surface, 64);
         if flags.json {
@@ -685,7 +685,7 @@ fn cmd_test(args: &[String]) -> ExitCode {
             .surface
             .as_deref()
             .and_then(ax::frontend::Surface::from_str)
-            .unwrap_or(ax::frontend::Surface::Conventional);
+            .unwrap_or_else(|| ax::tree::detect_surface(&src, ax::frontend::Surface::Tree));
         let r = ax::evalloop::attempts_to_green(
             path.to_str().unwrap_or("input.ax"),
             &src,
@@ -1398,8 +1398,13 @@ fn cmd_gbnf(args: &[String]) -> ExitCode {
         } else {
             ExitCode::from(1)
         }
-    } else {
+    } else if args.iter().any(|a| a == "--conventional") {
         print!("{}", ax::gbnf::file_gbnf());
+        ExitCode::SUCCESS
+    } else {
+        // Default is the agent-canonical tree. The Rust-shaped GBNF remains
+        // at `--conventional` for the corpus dialect.
+        print!("{}", ax::tree::file_gbnf());
         ExitCode::SUCCESS
     }
 }

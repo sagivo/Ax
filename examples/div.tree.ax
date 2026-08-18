@@ -1,4 +1,4 @@
-; Agent-canonical tree. Same program as the former conventional examples/div.ax.
+; Same program as examples/div.ax, written as the tree an agent should emit.
 (module examples.div
   (export div DivError)
   (type DivError (or Zero))

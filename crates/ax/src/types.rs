@@ -258,21 +258,40 @@ impl Type {
     }
 
     pub fn display(&self, intern: &crate::intern::Interner) -> String {
+        self.display_surface(intern, false)
+    }
+
+    /// Tree-surface spelling. Protocol replies use this so an agent that
+    /// writes trees also reads trees.
+    pub fn display_tree(&self, intern: &crate::intern::Interner) -> String {
+        self.display_surface(intern, true)
+    }
+
+    pub fn display_surface(&self, intern: &crate::intern::Interner, tree: bool) -> String {
         match self {
             Type::Prim(p) => p.as_str().to_string(),
             Type::Named { def, args } => {
-                let mut s = intern.get(*def).to_string();
-                if !args.is_empty() {
-                    s.push('[');
-                    for (i, a) in args.iter().enumerate() {
-                        if i > 0 {
-                            s.push_str(", ");
-                        }
-                        s.push_str(&a.display(intern));
+                if tree {
+                    if args.is_empty() {
+                        intern.get(*def).to_string()
+                    } else {
+                        let inner: Vec<_> = args.iter().map(|a| a.display_tree(intern)).collect();
+                        format!("({} {})", intern.get(*def), inner.join(" "))
                     }
-                    s.push(']');
+                } else {
+                    let mut s = intern.get(*def).to_string();
+                    if !args.is_empty() {
+                        s.push('[');
+                        for (i, a) in args.iter().enumerate() {
+                            if i > 0 {
+                                s.push_str(", ");
+                            }
+                            s.push_str(&a.display(intern));
+                        }
+                        s.push(']');
+                    }
+                    s
                 }
-                s
             }
             Type::Ref {
                 region,
@@ -280,38 +299,93 @@ impl Type {
                 inner,
             } => {
                 let r = intern.get(region.name);
-                if *mutable {
+                if tree {
+                    let mut o = String::from("(ref");
+                    if r != "_" && !r.is_empty() {
+                        o.push(' ');
+                        o.push_str(r);
+                    }
+                    if *mutable {
+                        o.push_str(" mut");
+                    }
+                    o.push(' ');
+                    o.push_str(&inner.display_tree(intern));
+                    o.push(')');
+                    o
+                } else if *mutable {
                     format!("&{r} mut {}", inner.display(intern))
                 } else {
                     format!("&{r} {}", inner.display(intern))
                 }
             }
-            Type::Own(t) => format!("own {}", t.display(intern)),
-            Type::Untrusted(t) => format!("Untrusted[{}]", t.display(intern)),
-            Type::Secret(t) => format!("Secret[{}]", t.display(intern)),
+            Type::Own(t) => {
+                if tree {
+                    format!("(own {})", t.display_tree(intern))
+                } else {
+                    format!("own {}", t.display(intern))
+                }
+            }
+            Type::Untrusted(t) => {
+                if tree {
+                    format!("(untrusted {})", t.display_tree(intern))
+                } else {
+                    format!("Untrusted[{}]", t.display(intern))
+                }
+            }
+            Type::Secret(t) => {
+                if tree {
+                    format!("(secret {})", t.display_tree(intern))
+                } else {
+                    format!("Secret[{}]", t.display(intern))
+                }
+            }
             Type::Fn {
                 params,
                 ret,
                 effects,
             } => {
-                let ps: Vec<_> = params.iter().map(|p| p.display(intern)).collect();
-                let mut s = format!("fn({}) -> {}", ps.join(", "), ret.display(intern));
-                if !effects.is_empty() {
-                    s.push(' ');
-                    s.push_str(&effects.display(intern));
+                if tree {
+                    let ps: Vec<_> = params.iter().map(|p| p.display_tree(intern)).collect();
+                    let mut s = format!("(fn ({}) {}", ps.join(" "), ret.display_tree(intern));
+                    if !effects.is_empty() {
+                        s.push(' ');
+                        s.push_str(&effects.display_tree(intern));
+                    }
+                    s.push(')');
+                    s
+                } else {
+                    let ps: Vec<_> = params.iter().map(|p| p.display(intern)).collect();
+                    let mut s = format!("fn({}) -> {}", ps.join(", "), ret.display(intern));
+                    if !effects.is_empty() {
+                        s.push(' ');
+                        s.push_str(&effects.display(intern));
+                    }
+                    s
                 }
-                s
             }
             Type::Tuple(ts) => {
-                let ps: Vec<_> = ts.iter().map(|t| t.display(intern)).collect();
-                format!("({})", ps.join(", "))
+                if tree {
+                    let ps: Vec<_> = ts.iter().map(|t| t.display_tree(intern)).collect();
+                    format!("(tuple {})", ps.join(" "))
+                } else {
+                    let ps: Vec<_> = ts.iter().map(|t| t.display(intern)).collect();
+                    format!("({})", ps.join(", "))
+                }
             }
             Type::Record(fs) => {
-                let ps: Vec<_> = fs
-                    .iter()
-                    .map(|(n, t)| format!("{}: {}", intern.get(*n), t.display(intern)))
-                    .collect();
-                format!("{{ {} }}", ps.join(", "))
+                if tree {
+                    let ps: Vec<_> = fs
+                        .iter()
+                        .map(|(n, t)| format!("({} {})", intern.get(*n), t.display_tree(intern)))
+                        .collect();
+                    format!("(rec {})", ps.join(" "))
+                } else {
+                    let ps: Vec<_> = fs
+                        .iter()
+                        .map(|(n, t)| format!("{}: {}", intern.get(*n), t.display(intern)))
+                        .collect();
+                    format!("{{ {} }}", ps.join(", "))
+                }
             }
             Type::Variant { def, .. } => intern.get(*def).to_string(),
             Type::Param(s) => intern.get(*s).to_string(),

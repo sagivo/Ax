@@ -883,6 +883,18 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
                 (y, string_type(b), false),
             ],
             string_type(b),
+            alloc_eff.clone(),
+        ),
+    ));
+    let bte = intern.intern("b");
+    out.push((
+        "str.from_byte".into(),
+        sig(
+            intern,
+            "core::fn:str.from_byte",
+            "from_byte",
+            vec![(alloc, alloc_type(b), false), (bte, Type::Prim(Prim::U8), false)],
+            string_type(b),
             alloc_eff,
         ),
     ));

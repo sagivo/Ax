@@ -1,50 +1,39 @@
-module app.loader;
-export { load, LoadError };
-use std.fs;
-use std.json;
-
-type Rec = { id: u64, name: String, score: f32 };
-
-type LoadError =
-    | LoadIo   { cause: fs.Error }
-    | LoadJson { cause: json.Error }
-    | NegativeScore { index: usz }
-with
-    from fs.Error   => LoadIo;
-    from json.Error => LoadJson;
-
-@intent "load records, reject negative scores, sort by score descending"
-@spec  REQ-118
-fn load(fs_cap: fs.ReadCap, a: Alloc, path: &str) -> Vec[Rec]
-    !{io[fs_cap], alloc[a], err[LoadError], diverge}
-    post all(ret, fn(r: Rec) => r.score >= 0.0)
-    post sorted_by(ret, fn(x: Rec, y: Rec) => x.score >= y.score)
-= {
-    let raw  = fs.read(fs_cap, a, path);
-    let mut recs = json.decode_recs(a, raw);
-
-    for i in range(0, recs.len()) {
-        if recs.at(i).score < 0.0 {
-            raise NegativeScore { index: i };
-        }
-    }
-
-    sort(&mut recs, score_desc);
-    recs
-};
-
-dict Ord[Rec] = { cmp: score_desc };
-fn score_desc(x: &Rec, y: &Rec) -> Ordering = f32.cmp(y.score, x.score);
-
-test "rejects negative, sorts descending" = {
-    let cap = test.read_cap({ "d.json":
-        `[{"id":1,"name":"a","score":2.0},{"id":2,"name":"b","score":9.5}]` });
-    let rs = load(cap, test.alloc, "d.json");
-    assert(rs.at(0).id == 2);
-
-    let bad = test.read_cap({ "b.json": `[{"id":3,"name":"c","score":-1.0}]` });
-    match attempt load(bad, test.alloc, "b.json") {
-        Err(NegativeScore { index }) => assert(index == 0);
-        _ => fail("expected NegativeScore");
-    };
-};
+(module app.loader
+  (export load LoadError)
+  (use std.fs)
+  (use std.json)
+  (type Rec (rec (id u64) (name String) (score f32)))
+  (type LoadError
+    (or
+      (LoadIo (cause fs.Error))
+      (LoadJson (cause json.Error))
+      (NegativeScore (index usz)))
+    (from fs.Error LoadIo)
+    (from json.Error LoadJson))
+  (@ intent "load records, reject negative scores, sort by score descending")
+  (@ spec REQ-118)
+  (fn load ((fs_cap fs.ReadCap) (a Alloc) (path (ref str))) (Vec Rec)
+    (! (io fs_cap) (alloc a) (err LoadError) diverge)
+    (post (all ret (fn ((r Rec)) (>= (field r score) 0.0))))
+    (post (sorted_by ret (fn ((x Rec) (y Rec)) (>= (field x score) (field y score)))))
+    (block
+      (let raw (fs.read fs_cap a path))
+      (let mut recs (json.decode_recs a raw))
+      (for i (range 0 (recs.len))
+        (if (< (field (recs.at i) score) 0.0)
+          (raise (var NegativeScore (index i)))))
+      (sort (refmut recs) score_desc)
+      recs))
+  (dict Ord Rec (cmp score_desc))
+  (fn score_desc ((x (ref Rec)) (y (ref Rec))) Ordering
+    (f32.cmp (field y score) (field x score)))
+  (test "rejects negative, sorts descending"
+    (block
+      (let cap (test.read_cap (rec (d.json "[{\"id\":1,\"name\":\"a\",\"score\":2.0},{\"id\":2,\"name\":\"b\",\"score\":9.5}]"))))
+      (let rs (load cap test.alloc "d.json"))
+      (assert (== (field (rs.at 0) id) 2))
+      (let bad (test.read_cap (rec (b.json "[{\"id\":3,\"name\":\"c\",\"score\":-1.0}]"))))
+      (match (attempt (load bad test.alloc "b.json"))
+        (arm (Err (var NegativeScore (index index))) (assert (== index 0)))
+        (arm _ (fail "expected NegativeScore")))))
+)

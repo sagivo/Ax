@@ -161,9 +161,19 @@ typedef struct AxMapEntry {
 } AxMapEntry;
 
 struct AxMap {
-    AxMapEntry *head;
+    AxMapEntry **buckets;
+    uint64_t nbuckets;
     uint64_t len;
 };
+
+static uint64_t ax_map_hash(const char *k, size_t n) {
+    uint64_t h = 14695981039346656037ull;
+    for (size_t i = 0; i < n; i++) {
+        h ^= (unsigned char)k[i];
+        h *= 1099511628211ull;
+    }
+    return h;
+}
 
 void *ax_rt_unique_alloc(uint64_t size, uint32_t align) {
     (void)align;
@@ -202,6 +212,9 @@ void ax_rt_rc_release(void *p) {
 AxMap *ax_rt_map_new(void) {
     AxMap *m = (AxMap *)calloc(1, sizeof(AxMap));
     if (!m) ax_abort("out of memory");
+    m->nbuckets = 8;
+    m->buckets = (AxMapEntry **)calloc(8, sizeof(AxMapEntry *));
+    if (!m->buckets) ax_abort("out of memory");
     return m;
 }
 
@@ -211,9 +224,32 @@ static int ax_str_eq(const char *k, size_t kn, const AxStr *s) {
     return kn == 0 || memcmp(k, s->ptr, kn) == 0;
 }
 
+static void ax_map_rehash(AxMap *m, uint64_t nb) {
+    AxMapEntry **next = (AxMapEntry **)calloc((size_t)nb, sizeof(AxMapEntry *));
+    if (!next) ax_abort("out of memory");
+    uint64_t mask = nb - 1;
+    for (uint64_t i = 0; i < m->nbuckets; i++) {
+        AxMapEntry *e = m->buckets[i];
+        while (e) {
+            AxMapEntry *n = e->next;
+            uint64_t b = ax_map_hash(e->key, e->klen) & mask;
+            e->next = next[b];
+            next[b] = e;
+            e = n;
+        }
+    }
+    free(m->buckets);
+    m->buckets = next;
+    m->nbuckets = nb;
+}
+
 void ax_rt_map_insert(AxMap *m, const AxStr *key, int64_t val) {
     if (!m || !key) return;
-    for (AxMapEntry *e = m->head; e; e = e->next) {
+    if (m->len * 4 >= m->nbuckets * 3) {
+        ax_map_rehash(m, m->nbuckets * 2);
+    }
+    uint64_t b = ax_map_hash(key->ptr ? key->ptr : "", key->len) & (m->nbuckets - 1);
+    for (AxMapEntry *e = m->buckets[b]; e; e = e->next) {
         if (ax_str_eq(e->key, e->klen, key)) { e->val = val; return; }
     }
     AxMapEntry *e = (AxMapEntry *)calloc(1, sizeof(AxMapEntry));
@@ -224,14 +260,37 @@ void ax_rt_map_insert(AxMap *m, const AxStr *key, int64_t val) {
     if (key->ptr && key->len) memcpy(e->key, key->ptr, key->len);
     e->key[key->len] = 0;
     e->val = val;
-    e->next = m->head;
-    m->head = e;
+    e->next = m->buckets[b];
+    m->buckets[b] = e;
+    m->len++;
+}
+
+void ax_rt_map_add(AxMap *m, const AxStr *key, int64_t delta) {
+    if (!m || !key) return;
+    if (m->len * 4 >= m->nbuckets * 3) {
+        ax_map_rehash(m, m->nbuckets * 2);
+    }
+    uint64_t b = ax_map_hash(key->ptr ? key->ptr : "", key->len) & (m->nbuckets - 1);
+    for (AxMapEntry *e = m->buckets[b]; e; e = e->next) {
+        if (ax_str_eq(e->key, e->klen, key)) { e->val += delta; return; }
+    }
+    AxMapEntry *e = (AxMapEntry *)calloc(1, sizeof(AxMapEntry));
+    if (!e) ax_abort("out of memory");
+    e->klen = key->len;
+    e->key = (char *)malloc(key->len + 1);
+    if (!e->key) ax_abort("out of memory");
+    if (key->ptr && key->len) memcpy(e->key, key->ptr, key->len);
+    e->key[key->len] = 0;
+    e->val = delta;
+    e->next = m->buckets[b];
+    m->buckets[b] = e;
     m->len++;
 }
 
 int ax_rt_map_get(AxMap *m, const AxStr *key, int64_t *out) {
-    if (!m || !key) return 0;
-    for (AxMapEntry *e = m->head; e; e = e->next) {
+    if (!m || !key || !m->buckets) return 0;
+    uint64_t b = ax_map_hash(key->ptr ? key->ptr : "", key->len) & (m->nbuckets - 1);
+    for (AxMapEntry *e = m->buckets[b]; e; e = e->next) {
         if (ax_str_eq(e->key, e->klen, key)) { if (out) *out = e->val; return 1; }
     }
     return 0;
@@ -240,15 +299,20 @@ int ax_rt_map_get(AxMap *m, const AxStr *key, int64_t *out) {
 uint64_t ax_rt_map_len(AxMap *m) { return m ? m->len : 0; }
 
 void ax_rt_map_free_entries(AxMap *m) {
-    if (!m) return;
-    AxMapEntry *e = m->head;
-    while (e) {
-        AxMapEntry *n = e->next;
-        free(e->key);
-        free(e);
-        e = n;
+    if (!m || !m->buckets) return;
+    for (uint64_t i = 0; i < m->nbuckets; i++) {
+        AxMapEntry *e = m->buckets[i];
+        while (e) {
+            AxMapEntry *n = e->next;
+            free(e->key);
+            free(e);
+            e = n;
+        }
+        m->buckets[i] = NULL;
     }
-    m->head = NULL;
+    free(m->buckets);
+    m->buckets = NULL;
+    m->nbuckets = 0;
     m->len = 0;
 }
 
@@ -262,6 +326,15 @@ void ax_rt_vec_new(const AxAlloc *a, uint64_t elem_size, AxVec *out) {
 
 void ax_rt_vec_grow(AxVec *v, uint64_t elem_size) {
     uint64_t cap = v->cap ? v->cap * 2 : 8;
+    v->data = ax_alloc_grow(&v->alloc, v->data, v->cap * elem_size,
+                            cap * elem_size, 16);
+    v->cap = cap;
+}
+
+void ax_rt_vec_reserve(AxVec *v, uint64_t elem_size, uint64_t n) {
+    if (!v || n <= v->cap) return;
+    uint64_t cap = v->cap ? v->cap : 8;
+    while (cap < n) cap *= 2;
     v->data = ax_alloc_grow(&v->alloc, v->data, v->cap * elem_size,
                             cap * elem_size, 16);
     v->cap = cap;
@@ -299,9 +372,11 @@ void *ax_rt_sort_get_cmp(void) {
 void ax_rt_sort(void *data, uint64_t len, uint64_t elem_size,
                 int (*cmp)(const void *, const void *)) {
     if (len < 2) return;
-    unsigned char *src = (unsigned char *)data;
-    unsigned char *tmp = (unsigned char *)malloc((size_t)(len * elem_size));
-    if (!tmp) ax_abort("out of memory");
+    unsigned char *a = (unsigned char *)data;
+    unsigned char *b = (unsigned char *)malloc((size_t)(len * elem_size));
+    if (!b) ax_abort("out of memory");
+    unsigned char *src = a;
+    unsigned char *dst = b;
     for (uint64_t width = 1; width < len; width *= 2) {
         for (uint64_t i = 0; i < len; i += 2 * width) {
             uint64_t mid = i + width < len ? i + width : len;
@@ -310,27 +385,54 @@ void ax_rt_sort(void *data, uint64_t len, uint64_t elem_size,
             while (l < mid && r < end) {
                 /* `<= 0` keeps equal elements in their original order. */
                 if (cmp(src + l * elem_size, src + r * elem_size) <= 0) {
-                    memcpy(tmp + o * elem_size, src + l * elem_size, (size_t)elem_size);
+                    memcpy(dst + o * elem_size, src + l * elem_size, (size_t)elem_size);
                     l++;
                 } else {
-                    memcpy(tmp + o * elem_size, src + r * elem_size, (size_t)elem_size);
+                    memcpy(dst + o * elem_size, src + r * elem_size, (size_t)elem_size);
                     r++;
                 }
                 o++;
             }
-            while (l < mid) {
-                memcpy(tmp + o * elem_size, src + l * elem_size, (size_t)elem_size);
-                l++;
-                o++;
+            if (l < mid) {
+                memcpy(dst + o * elem_size, src + l * elem_size,
+                       (size_t)((mid - l) * elem_size));
             }
-            while (r < end) {
-                memcpy(tmp + o * elem_size, src + r * elem_size, (size_t)elem_size);
-                r++;
-                o++;
+            if (r < end) {
+                memcpy(dst + o * elem_size, src + r * elem_size,
+                       (size_t)((end - r) * elem_size));
             }
         }
-        memcpy(src, tmp, (size_t)(len * elem_size));
+        unsigned char *t = src;
+        src = dst;
+        dst = t;
     }
+    if (src != a) memcpy(a, src, (size_t)(len * elem_size));
+    free(b);
+}
+
+void ax_rt_sort_i32(int32_t *data, uint64_t len) {
+    if (len < 2) return;
+    int32_t *tmp = (int32_t *)malloc((size_t)len * sizeof(int32_t));
+    if (!tmp) ax_abort("out of memory");
+    int32_t *src = data;
+    int32_t *dst = tmp;
+    for (uint64_t width = 1; width < len; width *= 2) {
+        for (uint64_t i = 0; i < len; i += 2 * width) {
+            uint64_t mid = i + width < len ? i + width : len;
+            uint64_t end = i + 2 * width < len ? i + 2 * width : len;
+            uint64_t l = i, r = mid, o = i;
+            while (l < mid && r < end) {
+                if (src[l] <= src[r]) dst[o++] = src[l++];
+                else dst[o++] = src[r++];
+            }
+            while (l < mid) dst[o++] = src[l++];
+            while (r < end) dst[o++] = src[r++];
+        }
+        int32_t *t = src;
+        src = dst;
+        dst = t;
+    }
+    if (src != data) memcpy(data, src, (size_t)len * sizeof(int32_t));
     free(tmp);
 }
 
@@ -475,9 +577,21 @@ bool ax_rt_mem_eq(const void *a, const void *b, uint64_t n) {
 
 void ax_rt_str_concat(const AxAlloc *a, const AxStr *x, const AxStr *y, AxStr *out) {
     uint64_t n = x->len + y->len;
+    /* Grow `x` in place when it is still the arena's newest allocation.
+       Repeated `s = concat(s, chunk)` then costs a bump, not a copy of `s`. */
+    if (a && a->kind == AX_ALLOC_ARENA && a->arena && x && x->ptr &&
+        (void *)x->ptr == a->arena->last_ptr &&
+        a->arena->last_size == x->len + 1) {
+        char *p = (char *)ax_alloc_grow(a, (void *)x->ptr, x->len + 1, n + 1, 1);
+        if (y && y->ptr && y->len) memcpy(p + x->len, y->ptr, (size_t)y->len);
+        p[n] = 0;
+        out->ptr = p;
+        out->len = (size_t)n;
+        return;
+    }
     char *p = (char *)ax_alloc_raw(a, n + 1, 1);
-    memcpy(p, x->ptr, (size_t)x->len);
-    memcpy(p + x->len, y->ptr, (size_t)y->len);
+    if (x && x->ptr && x->len) memcpy(p, x->ptr, (size_t)x->len);
+    if (y && y->ptr && y->len) memcpy(p + x->len, y->ptr, (size_t)y->len);
     p[n] = 0;
     out->ptr = p;
     out->len = (size_t)n;
@@ -486,6 +600,14 @@ void ax_rt_str_concat(const AxAlloc *a, const AxStr *x, const AxStr *y, AxStr *o
 uint8_t ax_rt_str_byte(const AxStr *s, uint64_t i) {
     if (i >= s->len) ax_abort("index out of bounds");
     return (uint8_t)s->ptr[i];
+}
+
+void ax_rt_str_from_byte(const AxAlloc *a, uint8_t b, AxStr *out) {
+    char *p = (char *)ax_alloc_raw(a, 2, 1);
+    p[0] = (char)b;
+    p[1] = 0;
+    out->ptr = p;
+    out->len = 1;
 }
 
 bool ax_rt_parse_i32(const AxStr *s, int32_t *out) {

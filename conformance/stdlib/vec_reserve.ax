@@ -1,0 +1,9 @@
+//! expect: 3usz
+module conf.stdlib.vec_reserve;
+fn main() -> usz !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.reserve(8usz);
+    xs.push(1usz);
+    xs.push(2usz);
+    xs.at(0) + xs.at(1)
+};

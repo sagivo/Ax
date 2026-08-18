@@ -38,11 +38,14 @@ pub mod packages;
 pub mod parser;
 pub mod reach;
 pub mod silent;
+pub mod software;
 pub mod translate;
 pub mod span;
 pub mod testharness;
 pub mod tokens;
+pub mod tree;
 pub mod types;
+pub mod usecases;
 pub mod workspace;
 
 pub use driver::{check_report, render_diags, Session};

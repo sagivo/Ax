@@ -27,11 +27,11 @@ fn bench_tokens() -> Result<(), String> {
     println!("  token; two-char operators are one; a newline is one. Bytes are exact.\n");
 
     let mut md = String::from(
-        "# Token cost\n\nSame program in each language. `ax-terse` is derived \
-         mechanically from `ax` and verified to compile to the same answer.\n\n         | program | ax tokens | ax-terse | rust | go | c | terse/ax | rust/ax | go/ax |\n         |---|---:|---:|---:|---:|---:|---:|---:|---:|\n",
+        "# Token cost\n\nSame program in each language. `ax-terse` / `ax-dense` \
+         are derived mechanically from `ax` and verified to compile to the same answer.\n\n         | program | ax | terse | dense | rust | go | c | terse/ax | dense/ax | rust/ax |\n         |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n",
     );
 
-    let mut tot = [0usize; 5];
+    let mut tot = [0usize; 6];
     for k in &compute_kernels() {
         let name = k.name.split_whitespace().next().unwrap_or("k");
         // Use the small problem size: equivalence is verified by *running* both
@@ -40,6 +40,7 @@ fn bench_tokens() -> Result<(), String> {
         let n = k.n_interp;
         let ax_src = (k.ax)(n);
         let terse_src = crate::frontend::to_terse(&ax_src);
+        let dense_src = crate::frontend::to_dense(&ax_src);
 
         // The terse form must be the same program: compile it through the terse
         // surface and check it produces the same value as the conventional one.
@@ -52,6 +53,11 @@ fn bench_tokens() -> Result<(), String> {
         let out2 = s2
             .compile(&format!("{name}.ax"), &terse_src)
             .map_err(|d| format!("{name}: terse form failed to compile: {d:?}"))?;
+        let mut s3 = Session::new();
+        s3.surface = crate::frontend::Surface::Dense;
+        let out3 = s3
+            .compile(&format!("{name}.ax"), &dense_src)
+            .map_err(|d| format!("{name}: dense form failed to compile: {d:?}"))?;
         // Same arguments for both, since a kernel may read `argv`.
         let argv: Vec<String> = if let Some(a) = k.cli_arg {
             vec!["bench".to_string(), a.to_string()]
@@ -66,10 +72,19 @@ fn bench_tokens() -> Result<(), String> {
                 Err(e) => format!("err {e}"),
             }
         };
-        let (o1, o2) = (outcome(&s1, &out1), outcome(&s2, &out2));
+        let (o1, o2, o3) = (
+            outcome(&s1, &out1),
+            outcome(&s2, &out2),
+            outcome(&s3, &out3),
+        );
         if o1 != o2 {
             return Err(format!(
                 "{name}: terse form is not the same program ({o1} vs {o2})"
+            ));
+        }
+        if o1 != o3 {
+            return Err(format!(
+                "{name}: dense form is not the same program ({o1} vs {o3})"
             ));
         }
 
@@ -78,6 +93,7 @@ fn bench_tokens() -> Result<(), String> {
             &[
                 ("ax", &ax_src),
                 ("ax-terse", &terse_src),
+                ("ax-dense", &dense_src),
                 ("rust", &(k.rs)(n)),
                 ("go", &(k.go)(n)),
                 ("c", &(k.c)(n)),
@@ -94,12 +110,13 @@ fn bench_tokens() -> Result<(), String> {
         println!();
         let g = |i: usize| c.entries[i].count.tokens;
         md.push_str(&format!(
-            "| {name} | {} | {} | {} | {} | {} | {:.2}× | {:.2}× | {:.2}× |\n",
+            "| {name} | {} | {} | {} | {} | {} | {} | {:.2}× | {:.2}× | {:.2}× |\n",
             g(0),
             g(1),
             g(2),
             g(3),
             g(4),
+            g(5),
             g(1) as f64 / g(0) as f64,
             g(2) as f64 / g(0) as f64,
             g(3) as f64 / g(0) as f64,
@@ -107,7 +124,7 @@ fn bench_tokens() -> Result<(), String> {
     }
 
     println!("totals across {} programs", compute_kernels().len());
-    let names = ["ax", "ax-terse", "rust", "go", "c"];
+    let names = ["ax", "ax-terse", "ax-dense", "rust", "go", "c"];
     for (i, n) in names.iter().enumerate() {
         println!(
             "  {:<10} {:>5} tokens   {:.2}× ax",
@@ -117,16 +134,78 @@ fn bench_tokens() -> Result<(), String> {
         );
     }
     md.push_str(&format!(
-        "| **total** | {} | {} | {} | {} | {} | {:.2}× | {:.2}× | {:.2}× |\n",
+        "| **total** | {} | {} | {} | {} | {} | {} | {:.2}× | {:.2}× | {:.2}× |\n",
         tot[0],
         tot[1],
         tot[2],
         tot[3],
         tot[4],
+        tot[5],
         tot[1] as f64 / tot[0].max(1) as f64,
         tot[2] as f64 / tot[0].max(1) as f64,
         tot[3] as f64 / tot[0].max(1) as f64,
     ));
+    md.push_str("\n## §5.6 gate kernels (Ax conventional vs dense)\n\n");
+    md.push_str("| program | ax | dense | dense/ax |\n|---|---:|---:|---:|\n");
+    println!("\n§5.6 gate kernels");
+    let mut gax = 0usize;
+    let mut gd = 0usize;
+    for k in &gate_kernels(false) {
+        let ax_src = (k.ax)(k.n);
+        let dense_src = crate::frontend::to_dense(&ax_src);
+        let mut s1 = Session::new();
+        let out1 = s1
+            .compile(&format!("g{}.ax", k.name), &ax_src)
+            .map_err(|d| format!("{}: conventional failed: {d:?}", k.name))?;
+        let mut s3 = Session::new();
+        s3.surface = crate::frontend::Surface::Dense;
+        let out3 = s3
+            .compile(&format!("g{}.ax", k.name), &dense_src)
+            .map_err(|d| format!("{}: dense failed: {d:?}\n{dense_src}", k.name))?;
+        let o1 = match crate::driver::run_main(&s1.intern, &out1, 0) {
+            Ok(v) => v.display(),
+            Err(e) => format!("err {e}"),
+        };
+        let o3 = match crate::driver::run_main(&s3.intern, &out3, 0) {
+            Ok(v) => v.display(),
+            Err(e) => format!("err {e}"),
+        };
+        if o1 != o3 {
+            return Err(format!("{}: dense ≠ conventional ({o1} vs {o3})", k.name));
+        }
+        let ta = tokens::count(&ax_src).tokens;
+        let td = tokens::count(&dense_src).tokens;
+        gax += ta;
+        gd += td;
+        println!(
+            "  {:<16} {:>5} → {:>5}   {:.2}×",
+            k.name,
+            ta,
+            td,
+            td as f64 / ta.max(1) as f64
+        );
+        md.push_str(&format!(
+            "| {} | {} | {} | {:.2}× |\n",
+            k.name,
+            ta,
+            td,
+            td as f64 / ta.max(1) as f64
+        ));
+    }
+    println!(
+        "  {:<16} {:>5} → {:>5}   {:.2}×",
+        "total",
+        gax,
+        gd,
+        gd as f64 / gax.max(1) as f64
+    );
+    md.push_str(&format!(
+        "| **total** | {} | {} | {:.2}× |\n",
+        gax,
+        gd,
+        gd as f64 / gax.max(1) as f64
+    ));
+
     let path = bench_dir()?.join("TOKENS.md");
     std::fs::write(&path, &md).map_err(|e| e.to_string())?;
     println!("\nwrote {}", path.display());
@@ -139,6 +218,8 @@ pub fn run(which: &str) -> Result<(), String> {
         "http" => bench_http(),
         "metrics" => bench_metrics(),
         "tokens" => bench_tokens(),
+        "usecases" => bench_usecases(),
+        "software" => crate::software::run(),
         "gate" => bench_gate(),
         "gate-check" => bench_gate_check(),
         "all" => {
@@ -149,25 +230,39 @@ pub fn run(which: &str) -> Result<(), String> {
             bench_io()?;
             bench_http()?;
             println!();
+            crate::software::run()?;
+            println!();
             bench_gate()
         }
         other => Err(format!(
-            "unknown bench `{other}` (io|http|metrics|tokens|gate|gate-check|all)"
+            "unknown bench `{other}` (io|http|metrics|tokens|usecases|software|gate|gate-check|all)"
         )),
     }
 }
 
-fn workspace() -> PathBuf {
+fn bench_usecases() -> Result<(), String> {
+    use crate::usecases;
+    let path = workspace().join("docs/usecases.md");
+    if let Some(p) = path.parent() {
+        std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
+    }
+    usecases::write_doc(&path)?;
+    println!("{}", usecases::render_doc());
+    println!("wrote {}", path.display());
+    Ok(())
+}
+
+pub(crate) fn workspace() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn bench_dir() -> Result<PathBuf, String> {
+pub(crate) fn bench_dir() -> Result<PathBuf, String> {
     let dir = workspace().join("target/bench");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
 
-fn compile_ax(src: &str, stem: &str) -> Result<PathBuf, String> {
+pub(crate) fn compile_ax(src: &str, stem: &str) -> Result<PathBuf, String> {
     let dir = bench_dir()?;
     let axp = dir.join(format!("{stem}.ax"));
     std::fs::write(&axp, src).map_err(|e| e.to_string())?;
@@ -183,7 +278,7 @@ fn compile_ax(src: &str, stem: &str) -> Result<PathBuf, String> {
     Ok(br.bin_path)
 }
 
-fn compile_c(src: &str, stem: &str) -> Result<PathBuf, String> {
+pub(crate) fn compile_c(src: &str, stem: &str) -> Result<PathBuf, String> {
     let dir = bench_dir()?;
     let cp = dir.join(format!("{stem}.c"));
     std::fs::write(&cp, src).map_err(|e| e.to_string())?;
@@ -210,7 +305,7 @@ fn compile_c(src: &str, stem: &str) -> Result<PathBuf, String> {
     Ok(bin)
 }
 
-fn compile_rust(src: &str, stem: &str) -> Result<PathBuf, String> {
+pub(crate) fn compile_rust(src: &str, stem: &str) -> Result<PathBuf, String> {
     let dir = bench_dir()?;
     let rsp = dir.join(format!("{stem}.rs"));
     std::fs::write(&rsp, src).map_err(|e| e.to_string())?;
@@ -250,7 +345,7 @@ fn median_ns(samples: &[u128]) -> u128 {
 
 /// Compile a Go program. `go build` needs a module directory, so each kernel gets
 /// its own subdirectory with a minimal `go.mod`.
-fn compile_go(src: &str, stem: &str) -> Result<PathBuf, String> {
+pub(crate) fn compile_go(src: &str, stem: &str) -> Result<PathBuf, String> {
     let dir = bench_dir()?.join(format!("go_{stem}"));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     std::fs::write(dir.join("main.go"), src).map_err(|e| e.to_string())?;
@@ -278,7 +373,7 @@ fn compile_go(src: &str, stem: &str) -> Result<PathBuf, String> {
 
 /// Is a Go toolchain available? Without one the Go column is omitted rather
 /// than guessed at.
-fn go_available() -> bool {
+pub(crate) fn go_available() -> bool {
     Command::new("go")
         .arg("version")
         .output()
@@ -289,7 +384,7 @@ fn go_available() -> bool {
 /// Wall time of `bin`, as (median, min). The minimum is the least
 /// noise-contaminated estimate of the actual work; the median is reported
 /// alongside it so a large gap between the two is visible rather than hidden.
-fn time_cmd_stats(
+pub(crate) fn time_cmd_stats(
     bin: &Path,
     args: &[&str],
     iters: u32,
@@ -355,7 +450,7 @@ fn time_fn(iters: u32, warmup: u32, mut f: impl FnMut() -> Result<String, String
     Ok((median_ns(&samples), last))
 }
 
-fn fmt_ms(ns: u128) -> String {
+pub(crate) fn fmt_ms(ns: u128) -> String {
     if ns >= 1_000_000_000 {
         format!("{:.3} s", ns as f64 / 1e9)
     } else if ns >= 1_000_000 {
@@ -367,23 +462,23 @@ fn fmt_ms(ns: u128) -> String {
     }
 }
 
-fn ratio(a: u128, b: u128) -> f64 {
+pub(crate) fn ratio(a: u128, b: u128) -> f64 {
     a as f64 / b.max(1) as f64
 }
 
-struct Row {
-    kind: String,
+pub(crate) struct Row {
+    pub kind: String,
     /// Median wall time.
-    ns: u128,
+    pub ns: u128,
     /// Fastest observed run: the estimate least polluted by scheduling noise.
-    min_ns: u128,
-    out: String,
+    pub min_ns: u128,
+    pub out: String,
 }
 
 /// Print a comparison group. Ratios use the fastest observed run of each
 /// program, which is the estimate least polluted by scheduler noise; the median
 /// is shown next to it so a wide spread is visible rather than averaged away.
-fn print_group(title: &str, rows: &[Row], baseline: Option<&str>) {
+pub(crate) fn print_group(title: &str, rows: &[Row], baseline: Option<&str>) {
     println!("{title}");
     let base = baseline
         .and_then(|name| rows.iter().find(|r| r.kind == name))
@@ -428,7 +523,7 @@ fn normalize_out(s: &str) -> String {
 }
 
 /// Every backend must produce the same value, or the timing is meaningless.
-fn expect_same(name: &str, rows: &[Row]) -> Result<(), String> {
+pub(crate) fn expect_same(name: &str, rows: &[Row]) -> Result<(), String> {
     let refs: Vec<_> = rows.iter().filter(|r| r.kind != "ax-interp").collect();
     if let Some(first) = refs.first() {
         let want = normalize_out(&first.out);
@@ -1955,7 +2050,7 @@ fn bench_compile(md: &mut String) -> Result<(), String> {
     Ok(())
 }
 
-fn ensure_payload() -> Result<PathBuf, String> {
+pub(crate) fn ensure_payload() -> Result<PathBuf, String> {
     let dir = bench_dir()?;
     let payload = dir.join("payload.bin");
     if !payload.exists() || payload.metadata().map(|m| m.len()).unwrap_or(0) < 32 * 1024 * 1024 {

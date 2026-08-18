@@ -1030,6 +1030,30 @@ impl<'a> Interpreter<'a> {
             if self.fns.contains_key(&q) || self.lookup_local_fn(&q).is_some() {
                 return self.call_named_at(&q, argv, Some(site));
             }
+            // Tree surface: `(xs.at i)` / `(recs.len)` is a dotted path
+            // call. If the first segment is a local, the last is a method.
+            if p.segs.len() >= 2 {
+                let first = self.intern.get(p.segs[0].name).to_string();
+                if self.lookup(&first).is_some() {
+                    let recv_path = Path {
+                        segs: p.segs[..p.segs.len() - 1].to_vec(),
+                        span: p.span,
+                    };
+                    let recv_expr = Expr {
+                        id: NodeId::NONE,
+                        kind: ExprKind::Path(recv_path),
+                        span: p.span,
+                    };
+                    let recv = self.eval(&recv_expr)?;
+                    let fname = self.intern.get(p.segs.last().unwrap().name);
+                    if fname == "clone" && args.is_empty() {
+                        return Ok(recv);
+                    }
+                    if let Some(v) = self.method(&recv, fname, &argv)? {
+                        return Ok(v);
+                    }
+                }
+            }
             if p.segs.len() == 1 {
                 let n = self.intern.get(p.segs[0].name).to_string();
                 if self.fns.contains_key(&n) {
@@ -1167,6 +1191,13 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Some(Value::Unit))
             }
+            ("reserve", Value::Vec(xs)) => {
+                let n = args.first().map(|v| v.as_i128()).unwrap_or(0);
+                if n > 0 {
+                    xs.borrow_mut().reserve(n as usize);
+                }
+                Ok(Some(Value::Unit))
+            }
             ("set", Value::Vec(xs)) => {
                 let i = idx();
                 let mut xs = xs.borrow_mut();
@@ -1189,6 +1220,22 @@ impl<'a> Interpreter<'a> {
             ("insert" | "put", Value::Map(m)) => {
                 if let (Some(k), Some(v)) = (args.first(), args.get(1)) {
                     m.borrow_mut().insert(k.display(), v.clone());
+                }
+                Ok(Some(Value::Unit))
+            }
+            ("add", Value::Map(m)) => {
+                if let (Some(k), Some(v)) = (args.first(), args.get(1)) {
+                    let key = k.display();
+                    let delta = v.as_i128();
+                    let mut map = m.borrow_mut();
+                    let cur = map.get(&key).map(|x| x.as_i128()).unwrap_or(0);
+                    map.insert(
+                        key,
+                        Value::Int {
+                            bits: cur.wrapping_add(delta),
+                            prim: Prim::I64,
+                        },
+                    );
                 }
                 Ok(Some(Value::Unit))
             }
@@ -1481,6 +1528,15 @@ impl<'a> Interpreter<'a> {
                 let y = args.get(2).map(|v| v.display()).unwrap_or_default();
                 let strip = |s: String| s.trim_matches('"').to_string();
                 Ok(Value::Str(format!("{}{}", strip(x), strip(y)).into()))
+            }
+            "str.from_byte" => {
+                let b = args.get(1).map(|v| v.as_i128() as u8).unwrap_or(0);
+                Ok(Value::Str(
+                    std::str::from_utf8(&[b])
+                        .unwrap_or("\u{FFFD}")
+                        .to_string()
+                        .into(),
+                ))
             }
             "range" => {
                 let start = args.first().map(|v| v.as_i128() as u64).unwrap_or(0);

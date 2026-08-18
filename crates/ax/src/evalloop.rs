@@ -137,7 +137,7 @@ fn pool(names: &[&str], nums: &[i64]) -> Vec<Candidate> {
     for nm in names {
         for n in nums {
             out.push(Candidate {
-                ax: format!("{nm} + {n}"),
+                ax: format!("(+ {nm} {n})"),
                 rust: format!("{nm} + {n}"),
             });
         }
@@ -149,7 +149,7 @@ fn task_add(id: &str, a: i64, b: i64) -> HiddenTask {
     HiddenTask {
         id: id.into(),
         spec: format!("return {a} plus {b} as i32"),
-        ax_starter: format!("module t;\nfn main() -> i32 = {a} + ?;\n"),
+        ax_starter: format!("(module t (fn main () i32 (+ {a} ?)))\n"),
         rust_template: "fn main() { println!(\"{}\", ".to_string()
             + &format!("{a} + ({{FILL}}) as i32); }}\n"),
         candidates: pool(&[], &[0, 1, b, a]),
@@ -161,7 +161,7 @@ fn task_ident(id: &str, a: i64) -> HiddenTask {
     HiddenTask {
         id: id.into(),
         spec: format!("return the in-scope binding whose value is {a}"),
-        ax_starter: format!("module t;\nfn main() -> i32 = {{ let x: i32 = {a}; ? }};\n"),
+        ax_starter: format!("(module t (fn main () i32 (block (let x i32 {a}) ?)))\n"),
         rust_template: format!(
             "fn main() {{ let x: i32 = {a}; println!(\"{{}}\", ({{FILL}}) as i32); }}\n"
         ),
@@ -175,7 +175,7 @@ fn task_sum_range(id: &str, n: u64) -> HiddenTask {
         id: id.into(),
         spec: format!("count the iterations of 0..{n}"),
         ax_starter: format!(
-            "module t;\nfn main() -> i32 = {{\n    let mut s: i32 = 0;\n    for i in range(0, {n}) {{\n        s = s + 1;\n    }};\n    ?\n}};\n"
+            "(module t (fn main () i32 (block (let mut s i32 0) (for i (range 0 {n}) (set s (+ s 1))) ?)))\n"
         ),
         rust_template: format!(
             "fn main() {{ let mut s: i32 = 0; for _i in 0..{n} {{ s += 1; }} println!(\"{{}}\", ({{FILL}}) as i32); }}\n"
@@ -191,7 +191,7 @@ fn task_clamp(id: &str, lo: i64, hi: i64, x: i64) -> HiddenTask {
         id: id.into(),
         spec: format!("clamp {x} into [{lo}, {hi}]"),
         ax_starter: format!(
-            "module t;\nfn main() -> i32 = if {x} < {lo} {{ {lo} }} else {{ if {x} > {hi} {{ {hi} }} else {{ ? }} }};\n"
+            "(module t (fn main () i32 (if (< {x} {lo}) {lo} (if (> {x} {hi}) {hi} ?))))\n"
         ),
         rust_template: format!(
             "fn main() {{ let v = if {x} < {lo} {{ {lo} }} else if {x} > {hi} {{ {hi} }} else {{ ({{FILL}}) as i64 }}; println!(\"{{}}\", v); }}\n"
@@ -220,7 +220,7 @@ pub fn run_ax_loop(task: &HiddenTask, max_attempts: u32) -> LoopResult {
     let mut last = None;
 
     // One protocol query: ranked fills, each already known to typecheck.
-    let holes = agent::hole_fills("task.ax", &task.ax_starter, Surface::Conventional, 64);
+    let holes = agent::hole_fills("task.ax", &task.ax_starter, Surface::Tree, 64);
     probes += 1;
     let mut ordered: Vec<String> = holes
         .first()

@@ -142,6 +142,62 @@ rate at all, without an entry here.
 - Assignment is move-by-default, copy-on-conflict, always report.
 - `own T` is the only hard rejection in the memory model.
 
+## R-14 — the language is a tree, not a Rust dialect (2026-08-18)
+
+The v0.3 surface rule ("look like Rust so models can write it") is
+reversed. The agent-canonical surface is a prefix tree (`S-tree`,
+`--surface tree`, auto-detected when a file opens with `(`). Reasons,
+from first principles, for a program that writes programs:
+
+- Infix is a silent-wrongness class (`a+b*c`). A prefix list cannot
+  encode the wrong grouping without writing it.
+- Humans need sugar because they read. An agent reads the protocol
+  (`ax types`, `ax hole`, `ax ir`) and writes once. Sugar is cost.
+- Multiple surfaces train format oscillation. One printer is the
+  inverse of one parser, so `fmt` is a bijection and patches are tree
+  edits.
+- Constrained decoding is a list grammar, not a reconstruction of Rust.
+- Accept-and-elide exists to forgive models that emit Rust. That is
+  training the language to be Rust. The tree has nothing to elide.
+
+**What stays Rust, and why.** The compiler is still a Rust program.
+The conventional / terse / verbose parsers stay so the four backends
+keep proving the same IR against the existing corpus, `ax k1`, and
+`ax silent-wrongness`. Those measurements are about *semantics*, not
+syntax, and rewriting 120 conformance files in the same change would
+confound them. Rust is the implementation language and the corpus
+dialect. It is not the identity of Ax.
+
+**What is not a coat.** Effects, regions, `own`, `Untrusted`/`Secret`,
+holes, the four-implementation oracle, and the protocol were never
+Rust. The tree is the surface those already deserved.
+
+New agent-facing examples live as trees in `examples/*.ax`. The card and
+`spec/v0.3.md` §1 / §3 describe the tree. The conventional grammar in
+`spec/grammar.ebnf` remains the corpus grammar until the corpus moves.
+
+## R-15 — accept-and-elide is frozen (2026-08-18)
+
+No agent-facing command emits the conventional dialect. `ax fmt`,
+`ax hole --fills`, `ax types`, `ax complete`, `ax translate`, and
+`ax patch` speak tree when the source is tree. Accept-and-elide
+(`pub`, `unsafe`, `.clone()`, Rust `struct`/`enum`/`impl`) stays in
+the corpus parser so `conformance/`, `ax k1`'s rust cell, and
+`ax silent-wrongness` keep measuring *semantics*. It is not extended.
+A new elision is a language change and needs an entry here.
+
+`std/core/lib.ax` and `ax-mock` remain conventional on purpose: they
+are compiler fixtures, not agent programs.
+
+## R-16 — measure the tree, not the coat (2026-08-18)
+
+`ax eval-loop` / `ax k1` hidden tasks now start as trees
+(`(+ a ?)`, `(block (let x i32 n) ?)`). Attempts-to-green on
+`examples/holes.ax` is a tree file. Silent-wrongness stays on the
+corpus dialect because E2 is a *semantic* comparison with Rust; a
+surface rewrite would confound it. Tree equivalence is pinned by
+`tree_and_conventional_same_answer` and the ported examples.
+
 ## Test-spec v1.0 (this tree)
 
 - **T-3.4.1 `as` casts:** the language card (`spec/card.md`) still defines `as` as the only numeric conversion. The test-spec's "reject `as`; suggest `to_*`" is recorded as a *future* divergence, not implemented. Tests pin the card.

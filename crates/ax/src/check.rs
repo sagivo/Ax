@@ -1605,6 +1605,28 @@ impl<'a> Checker<'a> {
             if let Some(sig) = self.lookup_fn(&q).cloned() {
                 return self.apply_sig(&sig, args, expected, env, span, callee);
             }
+            // Tree surface: `(xs.at i)` / `(m.insert k v)` is a dotted path
+            // call, not a field. If the first segment is a local, the rest is
+            // a method name. `int.div_trunc` is not a local, so it stays above.
+            if p.segs.len() >= 2 && env.lookup(p.segs[0].name).is_some() {
+                let fname = self.intern.get(p.segs.last().unwrap().name).to_string();
+                let recv_path = Path {
+                    segs: p.segs[..p.segs.len() - 1].to_vec(),
+                    span: p.span,
+                };
+                let recv_expr = Expr {
+                    id: NodeId::NONE,
+                    kind: ExprKind::Path(recv_path),
+                    span: p.span,
+                };
+                let recv = self.check_expr(&recv_expr, None, env);
+                let place_mut = self.is_mut_place(&recv_expr, env);
+                if let Some(ty) =
+                    self.check_method_at(&recv, &fname, args, env, span, place_mut)
+                {
+                    return ty;
+                }
+            }
             // first-seg local then field? already handled
             if p.segs.len() == 1 {
                 if let Some(sig) = self.fns_by_sym.get(&p.segs[0].name).cloned() {
@@ -2005,6 +2027,34 @@ impl<'a> Checker<'a> {
                 }
                 Some(builtins::option_type(&self.b, elem))
             }
+            "add" => {
+                arity(2, self);
+                if kind != SeqKind::Map {
+                    self.err(
+                        "E0108",
+                        span,
+                        format!("`add` needs a Map, got {}", recv.display(self.intern)),
+                    );
+                }
+                if !recv_mut {
+                    self.err("E0300", span, "`add` needs `&mut`");
+                }
+                if let Some(k) = args.first() {
+                    let t = self.check_expr(k, Some(&map_key), env);
+                    if !types_eq(&t, &map_key) {
+                        self.type_mismatch(k.span, &map_key, &t, &env.def_id);
+                    }
+                }
+                if let Some(v) = args.get(1) {
+                    let t = self.check_expr(v, Some(&elem), env);
+                    if !types_eq(&t, &elem) {
+                        self.type_mismatch(v.span, &elem, &t, &env.def_id);
+                    }
+                }
+                env.inferred
+                    .insert(EffectAtom::Alloc(self.intern.intern("a")));
+                Some(Type::unit())
+            }
             "insert" | "put" => {
                 arity(2, self);
                 if kind != SeqKind::Map {
@@ -2059,6 +2109,26 @@ impl<'a> Checker<'a> {
                     }
                 }
                 // Growth allocates through the Vec's own allocator handle.
+                env.inferred
+                    .insert(EffectAtom::Alloc(self.intern.intern("a")));
+                Some(Type::unit())
+            }
+            "reserve" => {
+                arity(1, self);
+                if kind != SeqKind::Vec {
+                    self.err(
+                        "E0108",
+                        span,
+                        format!("`reserve` needs a Vec, got {}", recv.display(self.intern)),
+                    );
+                }
+                if !recv_mut {
+                    self.err("E0300", span, "`reserve` needs `&mut`");
+                }
+                if let Some(a) = args.first() {
+                    let t = self.check_expr(a, Some(&Type::usz()), env);
+                    self.want_index(&t, a.span, env);
+                }
                 env.inferred
                     .insert(EffectAtom::Alloc(self.intern.intern("a")));
                 Some(Type::unit())

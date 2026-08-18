@@ -28,7 +28,7 @@ impl Session {
             sm: SourceMap::new(),
             allow_holes: false,
             strict_det: false,
-            surface: Surface::Conventional,
+            surface: Surface::Dense,
             indep_check: true,
         }
     }
@@ -42,7 +42,10 @@ impl Session {
             .and_then(|s| s.to_str())
             .unwrap_or("m")
             .replace(['-', '.'], "_");
-        frontend::parse_surface_named(src, id, &mut self.intern, self.surface, &stem)
+        // Tree if the file opens with `(`. Everything else is the short
+        // syntax (legacy conventional is rewritten, not a separate mode).
+        let surface = crate::tree::detect_surface(src, self.surface);
+        frontend::parse_surface_named(src, id, &mut self.intern, surface, &stem)
     }
 
     pub fn check(&mut self, file: &File) -> CheckOutput {
@@ -82,7 +85,13 @@ impl Session {
 
     pub fn format(&mut self, name: &str, src: &str) -> Result<String, Vec<Diagnostic>> {
         let file = self.parse(name, src)?;
-        Ok(fmt::format_file(&file, &self.intern))
+        match crate::tree::detect_surface(src, self.surface) {
+            Surface::Tree => Ok(crate::tree::format_file(&file, &self.intern)),
+            _ => {
+                let conv = fmt::format_file(&file, &self.intern);
+                Ok(crate::frontend::to_dense(&conv))
+            }
+        }
     }
 }
 
@@ -218,10 +227,10 @@ pub fn hole_report(intern: &Interner, out: &CheckOutput, filter: Option<&str>) -
             "hole {n}  def={}  path={}\n  expects: {}\n  in scope:\n",
             h.def_id,
             h.path,
-            h.expected.display(intern)
+            h.expected.display_tree(intern)
         ));
         for (name, ty) in &h.in_scope {
-            o.push_str(&format!("    {name}: {}\n", ty.display(intern)));
+            o.push_str(&format!("    {name}: {}\n", ty.display_tree(intern)));
         }
         o.push_str("  ranked candidates:\n");
         for c in &h.candidates {
@@ -242,10 +251,10 @@ pub fn search(intern: &Interner, out: &CheckOutput, query: &str) -> String {
     let mut o = String::new();
     for f in &out.fns {
         let sig = format!(
-            "fn {}(...) -> {} {}",
+            "(fn {} (…) {} {})",
             intern.get(f.sig.name),
-            f.sig.ret.display(intern),
-            f.sig.effects.display(intern)
+            f.sig.ret.display_tree(intern),
+            f.sig.effects.display_tree(intern)
         );
         if sig.contains(q) || intern.get(f.sig.name).contains(q) || q.is_empty() {
             o.push_str(&sig);
@@ -269,10 +278,10 @@ pub fn types_at(intern: &Interner, out: &CheckOutput, def_id: &str) -> String {
     for f in &out.fns {
         if f.sig.def_id.contains(def_id) || intern.get(f.sig.name) == def_id {
             return format!(
-                "{} : fn(...) -> {} {}\n",
+                "(fn {} (…) {} {})\n",
                 intern.get(f.sig.name),
-                f.sig.ret.display(intern),
-                f.sig.effects.display(intern)
+                f.sig.ret.display_tree(intern),
+                f.sig.effects.display_tree(intern)
             );
         }
     }
@@ -284,8 +293,8 @@ pub fn effs_at(intern: &Interner, out: &CheckOutput, def_id: &str) -> String {
         if f.sig.def_id.contains(def_id) || intern.get(f.sig.name) == def_id {
             return format!(
                 "declared {}\ninferred {}\n",
-                f.sig.effects.display(intern),
-                f.inferred.display(intern)
+                f.sig.effects.display_tree(intern),
+                f.inferred.display_tree(intern)
             );
         }
     }
@@ -302,7 +311,7 @@ pub fn errs_into(intern: &Interner, out: &CheckOutput, ty_name: &str) -> String 
             for inj in &t.injections {
                 o.push_str(&format!(
                     "from {} => {}\n",
-                    inj.from.display(intern),
+                    inj.from.display_tree(intern),
                     intern.get(inj.into_variant)
                 ));
             }

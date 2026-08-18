@@ -1,0 +1,193 @@
+; Self-hosted tree frontend (R-14). Lexer + printer in Ax, not Rust.
+; The Rust parser in crates/ax/src/tree.rs remains the production
+; implementation until this module covers the full AST. This file is
+; the language parsing itself: looks_like_tree, tokenize, reprint.
+(module std.tree
+  (export looks_like_tree tokenize reprint)
+
+  (type TokKind (or LParen RParen Atom String))
+  (type Tok (rec (kind TokKind) (text String)))
+  (type Pair (rec (text String) (pos usz)))
+
+  (fn is_ws ((b u8)) bool
+    (|| (|| (== b 32u8) (== b 9u8)) (|| (== b 10u8) (== b 13u8))))
+
+  (fn is_atom_end ((b u8)) bool
+    (|| (|| (is_ws b) (== b 40u8)) (|| (== b 41u8) (|| (== b 34u8) (== b 59u8)))))
+
+  (fn ch ((a Alloc) (b u8)) String (! (alloc a)) (str.from_byte a b))
+
+  (fn cat ((a Alloc) (x String) (y String)) String (! (alloc a)) (str.concat a x y))
+
+  (fn skip_line ((s String) (i usz)) usz
+    (block
+      (let mut p usz i)
+      (while (&& (< p (s.len)) (!= (s.at p) 10u8))
+        (set p (+ p 1)))
+      (if (< p (s.len)) (+ p 1) p)))
+
+  (fn skip_block ((s String) (i usz)) usz
+    (block
+      (let mut p usz (+ i 2))
+      (while (&& (< (+ p 1) (s.len))
+                 (not (&& (== (s.at p) 42u8) (== (s.at (+ p 1)) 47u8))))
+        (set p (+ p 1)))
+      (if (< (+ p 1) (s.len)) (+ p 2) (s.len))))
+
+  (fn skip_ws ((s String) (i usz)) usz
+    (block
+      (let mut p usz i)
+      (let mut again bool true)
+      (while again
+        (block
+          (set again false)
+          (while (&& (< p (s.len)) (is_ws (s.at p)))
+            (set p (+ p 1)))
+          (if (&& (< p (s.len)) (== (s.at p) 59u8))
+            (block (set p (skip_line s p)) (set again true) p))
+          (if (&& (< (+ p 1) (s.len))
+                  (&& (== (s.at p) 47u8) (== (s.at (+ p 1)) 47u8)))
+            (block (set p (skip_line s p)) (set again true) p))
+          (if (&& (< (+ p 1) (s.len))
+                  (&& (== (s.at p) 47u8) (== (s.at (+ p 1)) 42u8)))
+            (block (set p (skip_block s p)) (set again true) p))
+          p))
+      p))
+
+  (fn looks_like_tree ((s String)) bool
+    (block
+      (let p usz (skip_ws s 0))
+      (&& (< p (s.len)) (== (s.at p) 40u8))))
+
+  (fn read_string ((a Alloc) (s String) (i usz)) Pair (! (alloc a) diverge)
+    (block
+      (let mut p usz (+ i 1))
+      (let mut out String "")
+      (while (&& (< p (s.len)) (!= (s.at p) 34u8))
+        (block
+          (if (&& (== (s.at p) 92u8) (< (+ p 1) (s.len)))
+            (block
+              (let n u8 (s.at (+ p 1)))
+              (set out (cat a out (ch a (if (== n 110u8) 10u8
+                                          (if (== n 116u8) 9u8
+                                          (if (== n 114u8) 13u8 n))))))
+              (set p (+ p 2))
+              p)
+            (block
+              (set out (cat a out (ch a (s.at p))))
+              (set p (+ p 1))
+              p))
+          p))
+      (if (< p (s.len)) (set p (+ p 1)))
+      (rec (text out) (pos p))))
+
+  (fn read_atom ((a Alloc) (s String) (i usz)) Pair (! (alloc a) diverge)
+    (block
+      (let mut p usz i)
+      (let mut out String "")
+      (while (&& (< p (s.len)) (not (is_atom_end (s.at p))))
+        (block
+          (set out (cat a out (ch a (s.at p))))
+          (set p (+ p 1))
+          p))
+      (rec (text out) (pos p))))
+
+  (fn tokenize ((a Alloc) (s String)) (Vec Tok) (! (alloc a) diverge)
+    (block
+      (let mut p usz 0)
+      (let mut out (Vec Tok) (vec.new a))
+      (while (< p (s.len))
+        (block
+          (set p (skip_ws s p))
+          (if (>= p (s.len))
+            (block (set p (s.len)) p)
+            (block
+              (let b u8 (s.at p))
+              (if (== b 40u8)
+                (block
+                  (out.push (rec (kind LParen) (text "(")))
+                  (set p (+ p 1))
+                  p)
+                (if (== b 41u8)
+                  (block
+                    (out.push (rec (kind RParen) (text ")")))
+                    (set p (+ p 1))
+                    p)
+                  (if (== b 34u8)
+                    (block
+                      (let pair Pair (read_string a s p))
+                      (out.push (rec (kind String) (text (field pair text))))
+                      (set p (field pair pos))
+                      p)
+                    (block
+                      (let pair Pair (read_atom a s p))
+                      (out.push (rec (kind Atom) (text (field pair text))))
+                      (set p (field pair pos))
+                      p))))))))
+      out))
+
+  (fn escape ((a Alloc) (s String)) String (! (alloc a) diverge)
+    (block
+      (let mut i usz 0)
+      (let mut out String "")
+      (while (< i (s.len))
+        (block
+          (let b u8 (s.at i))
+          (if (== b 92u8) (set out (cat a out "\\\\"))
+            (if (== b 34u8) (set out (cat a out "\\\""))
+              (if (== b 10u8) (set out (cat a out "\\n"))
+                (if (== b 9u8) (set out (cat a out "\\t"))
+                  (set out (cat a out (ch a b)))))))
+          (set i (+ i 1))
+          i))
+      out))
+
+  (fn reprint ((a Alloc) (toks (Vec Tok))) String (! (alloc a) diverge)
+    (block
+      (let mut i usz 0)
+      (let mut out String "")
+      (let mut need_space bool false)
+      (while (< i (toks.len))
+        (block
+          (let t Tok (toks.at i))
+          (match (field t kind)
+            (arm LParen
+              (block
+                (if need_space (block (set out (cat a out " ")) out) out)
+                (set out (cat a out "("))
+                (set need_space false)
+                need_space))
+            (arm RParen
+              (block
+                (set out (cat a out ")"))
+                (set need_space true)
+                need_space))
+            (arm Atom
+              (block
+                (if need_space (block (set out (cat a out " ")) out) out)
+                (set out (cat a out (field t text)))
+                (set need_space true)
+                need_space))
+            (arm String
+              (block
+                (if need_space (block (set out (cat a out " ")) out) out)
+                (set out (cat a (cat a (cat a out "\"") (escape a (field t text))) "\""))
+                (set need_space true)
+                need_space)))
+          (set i (+ i 1))
+          i))
+      out))
+
+  (test "looks_like_tree"
+    (block
+      (assert (looks_like_tree "(module t)"))
+      (assert (looks_like_tree "; c\n(fn main () i32 1)"))
+      (assert (not (looks_like_tree "module t;")))
+      (assert (not (looks_like_tree "")))))
+
+  (test "tokenize reprint hello"
+    (block
+      (let src String "(module t (fn main () i32 (+ 1 2)))")
+      (let toks (Vec Tok) (tokenize test.alloc src))
+      (assert (== (reprint test.alloc toks) src))))
+)

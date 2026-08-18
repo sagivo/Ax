@@ -1,4 +1,4 @@
-module examples.io_sum;
-export { main };
-
-fn main() -> u64 !{io[fs], abort} = io.bytesum_file(argv(1));
+(module examples.io_sum
+  (export main)
+  (fn main () u64 (! (io fs) abort) (io.bytesum_file (argv 1)))
+)

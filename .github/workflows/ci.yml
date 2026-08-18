@@ -24,6 +24,14 @@ jobs:
       - name: the checker rejects what it says it rejects
         run: cargo run -p ax -- check examples/hello.ax
 
+      - name: tree surface is the language
+        run: |
+          cargo run -p ax -- check examples/hello.ax
+          cargo run -p ax -- run examples/hello.ax
+          cargo run -p ax -- test examples/div.ax
+          cargo run -p ax -- test examples/effects.ax
+          cargo run -p ax -- test std/tree/lib.ax
+
       - name: native build and run of the error example
         run: |
           cargo run -p ax -- build -o /tmp/div examples/div.ax

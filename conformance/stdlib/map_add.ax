@@ -1,0 +1,11 @@
+//! expect: 3i64
+module conf.stdlib.map_add;
+fn main() -> i64 !{alloc[a]} = {
+    let mut m: Map[String, i64] = map.new(test.alloc);
+    m.add("k", 1);
+    m.add("k", 2);
+    match m.get("k") {
+        Some(v) => v;
+        None => 0;
+    }
+};

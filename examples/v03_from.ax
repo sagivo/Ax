@@ -1,8 +1,4 @@
-module examples.v03_from;
-
-type LoadError = | Io | Malformed;
-impl From[ParseError] for LoadError {
-    fn from(e: ParseError) -> LoadError { Malformed }
-}
-
-fn main() -> i32 = 0;
+(module examples.v03_from
+  (type LoadError (or Io Malformed) (from ParseError Malformed))
+  (fn main () i32 0)
+)

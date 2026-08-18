@@ -38,7 +38,7 @@ fn hole_fill_uses_in_scope_binding() {
     // first compile-and-run cycle.
     let t = evalloop::generate_hidden(7, 16)
         .into_iter()
-        .find(|t| t.ax_starter.contains("let x: i32"))
+        .find(|t| t.ax_starter.contains("(let x i32"))
         .expect("ident task");
     let r = evalloop::run_ax_loop(&t, 12);
     assert!(r.green, "{:?}", r);

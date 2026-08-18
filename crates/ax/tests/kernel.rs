@@ -6,13 +6,11 @@ use ax::driver::{
     check_report, deps_affected, guarantee_labels, hole_report, run_main, run_tests, Session,
 };
 use ax::interp::{canon_f32, canon_f64, Value};
-use ax::parser::Parser;
-use ax::span::FileId;
 use ax::types::Prim;
 
 fn parse_ok(src: &str) {
-    let mut intern = ax::Interner::new();
-    Parser::parse_file(src, FileId(0), &mut intern).unwrap_or_else(|d| {
+    let mut s = Session::new();
+    s.parse("t.ax", src).unwrap_or_else(|d| {
         panic!("parse failed: {:?}", d);
     });
 }
@@ -58,6 +56,7 @@ fn sort[T](xs: &mut [T], order: Ord[T] = default) -> unit !{diverge} = ();
 fn parse_appendix_loader() {
     let src = include_str!("../../../examples/loader.ax");
     parse_ok(src);
+    assert!(ax::tree::looks_like_tree(src), "loader.ax must be the tree surface");
 }
 
 #[test]

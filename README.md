@@ -1,13 +1,14 @@
 # Ax
 
 A compiled systems language whose primary consumer is a program, not a person.
-The bet is not that the syntax is better; it is that a compiler which answers
-questions in microseconds, classifies its own fixes by safety, and ships a
-normative interpreter to check itself against is worth more to an agent than any
-surface-level cleverness.
+The surface is a prefix tree — no precedence, no infix, no Rust to forgive —
+because an agent samples tokens and a list cannot encode the wrong grouping
+without writing it. The bet under that is a compiler which answers questions
+in microseconds, classifies its own fixes by safety, and ships a normative
+interpreter to check itself against.
 
 ```
-.ax → lexer → parser (Rust subset + accept-and-elide; terse rewrite still works)
+.ax → tree parser (canonical)  |  Rust-shaped corpus dialect (legacy)
     → check (types, effects, regions, Untrusted/Secret/own)
     → ownership ladder + ax perf --json
     → typed SSA IR
@@ -39,27 +40,29 @@ optional (one benchmark column).
 ## Language
 
 ```ax
-module app;
-export { add };
-
-fn add(a: i32, b: i32) -> i32 = a + b;
-
-fn parse(s: &str) -> i32 !{err[ParseError]} = parse_i32(s);
-
-test "add" = assert(add(1, 2) == 3);
+(module app
+  (export add)
+  (fn add ((a i32) (b i32)) i32 (+ a b))
+  (fn parse ((s (ref str))) i32 (! (err ParseError)) (parse_i32 s))
+  (test "add" (assert (== (add 1 2) 3)))
+)
 ```
 
-- Rust/Go-shaped surface. Mandatory types on every top-level `fn`.
-- Effects in the signature: `err[E]`, `io[c]`, `alloc[a]`, `diverge`, `abort`.
+- Prefix tree. No infix, no precedence, no `;`, no `->`. Mandatory types on every top-level `fn`.
+- Effects in the signature: `(err E)`, `(io c)`, `(alloc a)`, `diverge`, `abort`.
 - Errors: `raise` / `catch` / `attempt` plus declared single-step `from`
   injections. No unwinding: a raise is a branch on a returned tag.
-- Regions: `region r { .. }` is a bump arena, and `r` is an allocator you can
-  hand to `vec.new(r)`. `store(&r T, l)` is legal iff `r` outlives `l`.
-- Dictionaries: `dict Ord[T] = { cmp: … }` with `= default` unique resolution,
+- Regions: `(region r …)` is a bump arena, and `r` is an allocator you can
+  hand to `(vec.new r)`. `store` of `(ref r T)` into `l` is legal iff `r` outlives `l`.
+- Dictionaries: `(dict Ord T (cmp fn))` with `default` unique resolution,
   resolved statically and called directly — no vtable.
-- `as` is the only numeric conversion; there are no implicit ones.
+- `(as e T)` is the only numeric conversion; there are no implicit ones.
+- The Rust-shaped dialect still parses so the corpus keeps proving the IR.
+  An agent does not write it. See `DECISIONS.md` R-14.
 
 Full card: `ax card` or `spec/card.md`. Normative grammar: `spec/grammar.ebnf`.
+Side-by-side Rust / C / Go / Ax syntax and token counts: `docs/usecases.md`
+(`ax bench usecases`).
 
 **v0.3 additions:** Rust-shaped `fn f() { … }` / `struct` / `enum` parse;
 postfix `?` is `Result` propagation; `f"…"` interpolates; `own T` is affine
@@ -71,7 +74,7 @@ capturing closures remain out of v1.
 ## Protocol
 
 ```
-ax check [--json] [--allow-holes] [--strict-det] [--surface conventional|terse|verbose]
+ax check [--json] [--allow-holes] [--strict-det] [--surface tree|conventional|terse|verbose]
 ax hole [--fills] [--json]      ranked fills, each verified by compiling it
 ax fix [--apply]                applies only semantics_preserving fixes
 ax test [--attempts-to-green]   the north-star metric
@@ -81,7 +84,7 @@ ax replay f source.ax           replays from the transcript, performing no IO
 ax ir | types | effs | search | errs --into | fmt | patch --tx | deps --affected
 ax conform [filter]             conformance suite, every tier
 ax build [-o bin] [--tier dev|release|portable]
-ax bench io|http|metrics|tokens|all  |  ax eval-loop [--seed N] [--n K]
+ax bench io|http|metrics|tokens|software|all  |  ax eval-loop [--seed N] [--n K]
 ax merge --semantic | label | card | pkg list | pkg write
 ax perf [--json] [--diff baseline.json] | complete | context | repair
 ax bench gate | gate-check
@@ -327,9 +330,12 @@ safe ambient-io(argv io.bytesum_file)
 ## Layout
 
 ```
-spec/grammar.ebnf     normative grammar
+spec/tree.md          agent-canonical prefix tree (the language)
+spec/grammar.ebnf     corpus dialect (Rust-shaped; not what agents write)
 spec/card.md          ≤ 3,000-token agent card
-spec/metrics.md       benchmark methodology and results
+std/tree/lib.ax       self-hosted tree lexer + printer
+spec/metrics.md       compute-kernel methodology and results
+docs/software_usecases.md  common software shapes vs C / Rust / Go
 crates/ax/            checker, typed IR, C backend, oracle, CLI
 runtime/axrt.c        IO / HTTP core (mmap, keep-alive pool)
 runtime/axlang.c      language ABI: aborts, arenas, exact semantics, stdlib
@@ -340,9 +346,12 @@ examples/             snippets CI compiles and runs
 
 ## Design stance
 
-Ax has zero training data, so recognisability plus a strong oracle beats
-compression. Novelty is spent on the compiler protocol, exact effect-aware
-interfaces, typed holes, and honest capability labels — not on syntax.
+Ax has zero training data. The old stance was "look like Rust so models can
+write it"; that made the language a coat. The tree spends novelty on a
+surface a program can sample without silent grouping errors. The protocol,
+exact effect-aware interfaces, typed holes, and honest capability labels
+are still the rest of the bet. The compiler is still a Rust program —
+that is an implementation choice, not a dialect.
 
 `net` / `tls` / `crypto` / `regex` / `time` are reserved versioned components
 (`ax pkg list`) and are **not** compiled into the toolchain.

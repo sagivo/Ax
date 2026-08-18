@@ -126,8 +126,9 @@ impl<'a> Parser<'a> {
         while self.at(TokenKind::Hash) {
             meta.push(self.parse_hash_attr()?);
         }
-        // Accept-and-elide: `pub`, `unsafe` are parsed and recorded as meta
-        // so the formatter can strip them (A0106 / visibility is file-based).
+        // Corpus dialect only (R-14 / R-15). Agent-facing Ax is the tree
+        // surface, which has no `pub`/`unsafe` to elide. These still parse
+        // here so the existing corpus and `ax-mock` keep running.
         while self.at(TokenKind::Ident) {
             let n = self.intern.get(self.cur().symbol);
             if n == "pub" || n == "unsafe" {

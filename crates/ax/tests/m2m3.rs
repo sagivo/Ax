@@ -2,7 +2,7 @@
 //! transactional patch, G2 replay.
 
 use ax::driver::Session;
-use ax::frontend::{rewrite_terse, Surface};
+use ax::frontend::{rewrite_dense_to_terse, rewrite_terse, to_dense, Surface};
 use ax::hash;
 use ax::indep::{self, store_legal, store_legal_v01_inverted};
 use ax::workspace::{self, PatchTx};
@@ -22,6 +22,97 @@ fn terse_rewrites_to_conventional() {
     s.surface = Surface::Terse;
     let out = s.compile("t.ax", terse).unwrap();
     assert_eq!(out.fns.len(), 1);
+}
+
+#[test]
+fn dense_rewrites_and_compiles() {
+    let dense = "#add(a I, b I) I = a + b\n";
+    let terse = rewrite_dense_to_terse(dense);
+    assert!(terse.contains("fn add"), "{terse}");
+    assert!(terse.contains("i32"), "{terse}");
+    let mut s = Session::new();
+    s.surface = Surface::Dense;
+    let out = s.compile("t.ax", dense).unwrap_or_else(|d| panic!("{d:?}"));
+    assert_eq!(out.fns.len(), 1);
+}
+
+#[test]
+fn dense_loop_and_bind_same_value() {
+    let conv = "module t;\nfn main() -> usz = { let mut s: usz = 1; for i in range(0, 4) { s = s + i; }; s };\n";
+    let dense = to_dense(conv);
+    assert!(dense.contains("#"), "{dense}");
+    assert!(dense.contains(":="), "{dense}");
+    assert!(dense.contains('~'), "{dense}");
+    let mut a = Session::new();
+    let mut b = Session::new();
+    b.surface = Surface::Dense;
+    let oa = a.compile("a.ax", conv).unwrap();
+    let ob = b.compile("b.ax", &dense).unwrap_or_else(|d| panic!("dense={dense}\n{d:?}"));
+    let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
+    let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
+    assert_eq!(va.display(), vb.display());
+    let ax_t = ax::tokens::count(conv).tokens;
+    let d_t = ax::tokens::count(&dense).tokens;
+    assert!(d_t < ax_t, "dense {d_t} should be < conventional {ax_t}\n{dense}");
+}
+
+#[test]
+fn dense_if_and_option_or() {
+    let conv = r#"
+module t;
+fn main() -> i64 !{alloc[a]} = {
+    let mut m: Map[String, i64] = map.new(test.alloc);
+    m.insert("k", 7i64);
+    if 1 < 2 { match m.get("k") { Some(v) => v; None => 0; } } else { 0 }
+};
+"#;
+    let dense = to_dense(conv);
+    assert!(dense.contains('$'), "{dense}");
+    assert!(dense.contains('?'), "{dense}");
+    let mut a = Session::new();
+    let mut b = Session::new();
+    b.surface = Surface::Dense;
+    let oa = a.compile("a.ax", conv).unwrap();
+    let ob = b
+        .compile("b.ax", &dense)
+        .unwrap_or_else(|d| panic!("dense={dense}\n{d:?}"));
+    let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
+    let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
+    assert_eq!(va.display(), vb.display());
+}
+
+#[test]
+fn dense_while_map_lit_result() {
+    let conv = r#"
+module t;
+fn main() -> i64 !{alloc[a], diverge} = {
+    let mut m: Map[String, i64] = map.new(test.alloc);
+    m.insert("k", 7i64);
+    let mut i: usz = 0;
+    while i < 1 { i = i + 1; };
+    match m.get("k") { Some(v) => v; None => 0; }
+};
+"#;
+    let dense = to_dense(conv);
+    assert!(dense.contains('%') || dense.contains("map.new"), "{dense}");
+    assert!(dense.contains('@') || dense.contains("while"), "{dense}");
+    assert!(dense.contains('L') || dense.contains("i64"), "{dense}");
+    let mut a = Session::new();
+    let mut b = Session::new();
+    b.surface = Surface::Dense;
+    let oa = a.compile("a.ax", conv).unwrap();
+    let ob = b
+        .compile("b.ax", &dense)
+        .unwrap_or_else(|d| panic!("dense={dense}\n{d:?}"));
+    let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
+    let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
+    assert_eq!(va.display(), vb.display());
+}
+
+#[test]
+fn looks_like_dense_detects_hash_fn() {
+    assert!(ax::frontend::looks_like_dense("#main() I = 1"));
+    assert!(!ax::frontend::looks_like_dense("fn main() -> i32 = 1"));
 }
 
 #[test]
@@ -153,4 +244,32 @@ fn replay_round_trip() {
 #[test]
 fn conventional_still_compiles() {
     compile_ok("module t;\nfn main() -> i32 = 1 + 2;\n");
+}
+
+#[test]
+fn usecase_ax_snippets_compile() {
+    for c in ax::usecases::cases() {
+        let has_main = c.src.ax.contains("fn main(");
+        let src = if has_main {
+            format!("module t;\nexport {{ main }};\n{}", c.src.ax)
+        } else {
+            format!(
+                "module t;\nexport {{ main }};\n{}\nfn main() -> i32 = 0;\n",
+                c.src.ax
+            )
+        };
+        let mut s = Session::new();
+        s.compile(&format!("{}.ax", c.id), &src)
+            .unwrap_or_else(|d| panic!("{}:\n{src}\n{d:?}", c.id));
+        let dense = ax::frontend::to_dense(c.src.ax);
+        let dsrc = if dense.contains("#main(") || dense.contains("fn main(") {
+            format!("module t;\nexport {{ main }};\n{dense}\n")
+        } else {
+            format!("module t;\nexport {{ main }};\n{dense}\nfn main() -> i32 = 0;\n")
+        };
+        let mut b = Session::new();
+        b.surface = Surface::Dense;
+        b.compile(&format!("{}d.ax", c.id), &dsrc)
+            .unwrap_or_else(|d| panic!("{} dense:\n{dsrc}\n{d:?}", c.id));
+    }
 }

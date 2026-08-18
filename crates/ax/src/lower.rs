@@ -3456,6 +3456,17 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 });
                 Ok(Some(LVal::scalar(self.fb.unit(), IrTy::Unit)))
             }
+            "add" => {
+                let k = self.expr(&args[0])?;
+                let delta = self.expr(&args[1])?;
+                self.fb.push_void(Op::CallExt {
+                    name: "ax_rt_map_add".into(),
+                    args: vec![recv.v, k.v, delta.v],
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(LVal::scalar(self.fb.unit(), IrTy::Unit)))
+            }
             "get" => {
                 let k = self.expr(&args[0])?;
                 let tmp = self.fb.alloc_slot(SlotKind::Scalar(IrTy::I64), "mapget");
@@ -3560,18 +3571,45 @@ impl<'l, 'a> FnLower<'l, 'a> {
         args: &[Expr],
         e: &Expr,
     ) -> Result<Option<LVal>, String> {
+        // Tree surface: `(xs.at i)` is a dotted Path, not a Field.
+        if let ExprKind::Path(p) = &callee.kind {
+            if p.segs.len() >= 2 && self.lookup(p.segs[0].name).is_some() {
+                let fname = self.l.sym(p.segs.last().unwrap().name);
+                let recv_path = Path {
+                    segs: p.segs[..p.segs.len() - 1].to_vec(),
+                    span: p.span,
+                };
+                let recv_expr = Expr {
+                    id: NodeId::NONE,
+                    kind: ExprKind::Path(recv_path),
+                    span: p.span,
+                };
+                return self.try_method_on(&recv_expr, &fname, args, e);
+            }
+        }
         let (base, field) = match &callee.kind {
             ExprKind::Field { base, field } => (base, field),
             _ => return Ok(None),
         };
         let name = self.l.sym(field.name);
-        if matches!(name.as_str(), "len" | "get" | "insert" | "put" | "contains") {
+        self.try_method_on(base, &name, args, e)
+    }
+
+    fn try_method_on(
+        &mut self,
+        base: &Expr,
+        name: &str,
+        args: &[Expr],
+        e: &Expr,
+    ) -> Result<Option<LVal>, String> {
+        let name = name.to_string();
+        if matches!(name.as_str(), "len" | "get" | "insert" | "put" | "contains" | "add") {
             let recv_ty = self.ty_of_node(base.id);
             if type_is_map(&recv_ty, self.l.intern) {
                 return self.lower_map_method(base, &name, args, e);
             }
         }
-        if !matches!(name.as_str(), "len" | "at" | "get" | "push" | "set") {
+        if !matches!(name.as_str(), "len" | "at" | "get" | "push" | "set" | "reserve") {
             return Ok(None);
         }
         // Module-qualified calls (`fs.read`) also parse as field access.
@@ -3716,6 +3754,18 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     ty: IrTy::Ptr,
                     agg: Some(opt),
                 }))
+            }
+            "reserve" => {
+                let n = self.expr(&args[0])?;
+                let want = self.coerce_int(n, IrTy::U64);
+                let sz = self.fb.push(Op::SizeOf(elem_size), IrTy::U64);
+                self.fb.push_void(Op::CallExt {
+                    name: "ax_rt_vec_reserve".into(),
+                    args: vec![recv.v, sz, want],
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(LVal::scalar(self.fb.unit(), IrTy::Unit)))
             }
             "push" => {
                 // Lowered inline: a capacity test, a typed store, and a length
@@ -4492,6 +4542,24 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     agg: Some(agg),
                 }))
             }
+            "str.from_byte" => {
+                let (_, agg) = self.ir_of(e)?;
+                let agg = agg.ok_or("native backend: `str.from_byte` with no str layout")?;
+                let alloc = self.expr(&args[0])?;
+                let b = self.expr(&args[1])?;
+                let slot = self.fb.alloc_slot(SlotKind::Agg(agg), "");
+                self.fb.push_void(Op::CallExt {
+                    name: "ax_rt_str_from_byte".into(),
+                    args: vec![alloc.v, b.v, slot],
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(LVal {
+                    v: slot,
+                    ty: IrTy::Ptr,
+                    agg: Some(agg),
+                }))
+            }
             "str.concat" => {
                 let (_, agg) = self.ir_of(e)?;
                 let agg = agg.ok_or("native backend: `str.concat` with no str layout")?;
@@ -4867,13 +4935,29 @@ impl<'l, 'a> FnLower<'l, 'a> {
             Some(x) => Repr::Agg(x),
             None => Repr::Scalar(elem_ir),
         };
-        let cmp = self.expr(&args[1])?;
-        let tramp = self.sort_trampoline(&elem_ty)?;
-        let tramp_addr = self.fb.push(Op::FuncAddr(tramp), IrTy::Ptr);
         let dp = self.fb.field_ptr(agg, data_i, seq.v);
         let data = self.fb.load(IrTy::Ptr, dp);
         let lp = self.fb.field_ptr(agg, len_i, seq.v);
         let len = self.fb.load(IrTy::U64, lp);
+        // `i32.cmp` is the default integer order: emit the specialised
+        // mergesort and skip the Ordering trampoline.
+        if matches!(elem_ir, IrTy::I32)
+            && callee_name(&args[1], self.l.intern)
+                .as_deref()
+                .is_some_and(|n| n == "i32.cmp" || n.ends_with(".i32.cmp"))
+        {
+            self.fb.push_void(Op::CallExt {
+                name: "ax_rt_sort_i32".into(),
+                args: vec![data, len],
+                ret: IrTy::Unit,
+                fallible: false,
+            });
+            let _ = e;
+            return Ok(LVal::scalar(self.fb.unit(), IrTy::Unit));
+        }
+        let cmp = self.expr(&args[1])?;
+        let tramp = self.sort_trampoline(&elem_ty)?;
+        let tramp_addr = self.fb.push(Op::FuncAddr(tramp), IrTy::Ptr);
         let sz = self.fb.push(Op::SizeOf(elem_repr), IrTy::U64);
         // The trampoline needs the comparator; it is passed through a
         // thread-local slot rather than a closure, because the C callback

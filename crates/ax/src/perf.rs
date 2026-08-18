@@ -460,9 +460,9 @@ pub fn complete_at(
         completions.push(Completion {
             name: name.clone(),
             signature: format!(
-                "fn {}(...) -> {}",
+                "(fn {} (…) {})",
                 name,
-                f.sig.ret.display(intern)
+                f.sig.ret.display_tree(intern)
             ),
             kind: "fn".into(),
         });
@@ -473,7 +473,7 @@ pub fn complete_at(
         }
         completions.push(Completion {
             name: c.name.clone(),
-            signature: format!("fn {} -> {}", c.name, c.ret.display(intern)),
+            signature: format!("(fn {} {})", c.name, c.ret.display_tree(intern)),
             kind: if c.from_prelude { "prelude" } else { "fn" }.into(),
         });
     }
@@ -509,21 +509,20 @@ pub struct ContextPack {
 
 pub fn context_pack(intern: &Interner, checked: &CheckOutput, limit: usize) -> ContextPack {
     let cheatsheet = "\
-Ax is a Rust subset. Divergences:
-- no lifetimes, no borrow checker; `&`/`&mut` are hints
-- `Result`/`?`/`From` as in Rust; `raise`/`catch`/`attempt` still parse
-- `own T` is affine (use exactly once)
-- `Untrusted[T]` / `Secret[T]` are lattice annotations
-- integer overflow panics unless proven impossible
-- `f\"…\"` interpolation; no macros
-- `region r { }` is a bump arena
+Ax is a prefix tree. No infix, no precedence, no Rust to forgive.
+- write `(+ a (* b c))`, never `a+b*c`
+- `(own T)` is affine (use exactly once)
+- `(untrusted T)` / `(secret T)` are lattice annotations
+- `(raise e)` `(catch e (arm p h))` `(attempt e)` — no unwinding
+- `(region r …)` is a bump arena
+- no lifetimes, no borrow checker, no macros
 ";
     let mut digests = Vec::new();
     for f in &checked.fns {
         digests.push(format!(
             "fn {} -> {}",
             intern.get(f.sig.name),
-            f.sig.ret.display(intern)
+            f.sig.ret.display_tree(intern)
         ));
     }
     let mut text = cheatsheet.to_string();
@@ -543,7 +542,11 @@ Ax is a Rust subset. Divergences:
 /// Repair to fixpoint: apply semantics_preserving fixes, re-check, roll back
 /// if the diagnostic count does not strictly decrease (spec §8.2).
 pub fn repair(name: &str, src: &str) -> crate::agent::FixReport {
-    crate::agent::apply_safe_fixes(name, src, crate::frontend::Surface::Conventional)
+    crate::agent::apply_safe_fixes(
+        name,
+        src,
+        crate::tree::detect_surface(src, crate::frontend::Surface::Tree),
+    )
 }
 
 #[allow(dead_code)]
