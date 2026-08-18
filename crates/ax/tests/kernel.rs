@@ -56,7 +56,10 @@ fn sort[T](xs: &mut [T], order: Ord[T] = default) -> unit !{diverge} = ();
 fn parse_appendix_loader() {
     let src = include_str!("../../../examples/loader.ax");
     parse_ok(src);
-    assert!(ax::tree::looks_like_tree(src), "loader.ax must be the tree surface");
+    assert!(
+        ax::tree::looks_like_tree(src),
+        "loader.ax must be the tree surface"
+    );
 }
 
 #[test]
@@ -494,7 +497,10 @@ fn canonical_nan() {
     // can be compared bit-for-bit.
     assert_eq!(canon_f32(f32::NAN).to_bits(), 0x7fc0_0000);
     assert_eq!(canon_f64(f64::NAN).to_bits(), 0x7ff8_0000_0000_0000);
-    assert_eq!(canon_f32(-f32::NAN).to_bits(), canon_f32(f32::NAN).to_bits());
+    assert_eq!(
+        canon_f32(-f32::NAN).to_bits(),
+        canon_f32(f32::NAN).to_bits()
+    );
     let src = wrap_fn("0.0 / 0.0", "f64", "");
     let (s, out) = compile(&src);
     let v = run_main(&s.intern, &out, 0).unwrap();
@@ -569,7 +575,11 @@ fn diagnostic_json_schema_versioned() {
     assert!(!diags.is_empty());
     for d in &diags {
         assert_eq!(d.schema, 1, "every diagnostic carries a schema version");
-        assert!(d.code.starts_with('E'), "code should be E-prefixed: {}", d.code);
+        assert!(
+            d.code.starts_with('E'),
+            "code should be E-prefixed: {}",
+            d.code
+        );
     }
     let report = check_report(&{
         let mut s = Session::new();
@@ -591,7 +601,11 @@ fn only_semantics_preserving_in_catalog_policy() {
     codes.sort_unstable();
     let before = codes.len();
     codes.dedup();
-    assert_eq!(before, codes.len(), "duplicate diagnostic codes in the catalog");
+    assert_eq!(
+        before,
+        codes.len(),
+        "duplicate diagnostic codes in the catalog"
+    );
     for (code, desc) in &cat {
         assert!(
             code.starts_with('E') || code.starts_with('A') || code.starts_with('P'),
@@ -691,7 +705,9 @@ fn strict_det_allows_diverge() {
     let src = "module t;\nfn spin() -> i32 !{diverge} = loop { 1 };\nfn main() -> i32 = 0;\n";
     let mut s = Session::new();
     s.strict_det = true;
-    let out = s.compile("t.ax", src).expect("strict-det must allow diverge");
+    let out = s
+        .compile("t.ax", src)
+        .expect("strict-det must allow diverge");
     assert!(!out.diags.iter().any(|d| d.is_error()));
 }
 

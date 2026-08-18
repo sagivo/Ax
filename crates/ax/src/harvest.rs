@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 /// Error codes the inverted bucket starts from ([T-3.2.1]).
 pub const INVERT_CODES: &[&str] = &[
-    "E0382", "E0499", "E0502", "E0505", "E0506", "E0507", "E0515", "E0597",
-    "E0716", "E0621", "E0623", "E0373", "E0521", "E0381", "E0596",
+    "E0382", "E0499", "E0502", "E0505", "E0506", "E0507", "E0515", "E0597", "E0716", "E0621",
+    "E0623", "E0373", "E0521", "E0381", "E0596",
 ];
 
 #[derive(Clone, Debug)]
@@ -79,7 +79,9 @@ pub fn extract_codes(src: &str) -> Vec<String> {
 }
 
 pub fn should_invert(codes: &[String]) -> bool {
-    codes.iter().any(|c| INVERT_CODES.contains(&c.as_str()) || c == "E0384" || c == "E0596")
+    codes
+        .iter()
+        .any(|c| INVERT_CODES.contains(&c.as_str()) || c == "E0384" || c == "E0596")
 }
 
 /// Walk `root` for `.rs` files (skips `.stderr`).
@@ -116,7 +118,12 @@ fn walk(dir: &Path, out: &mut Vec<HarvestHit>) -> std::io::Result<()> {
 
 /// Emit an inverted Ax file. `expect: compile` is the default: the original
 /// Rust test never ran, so a value is not known ([T-3.2.3]).
-pub fn emit_inverted(hit: &HarvestHit, dest_dir: &Path, id: &str, commit: &str) -> Result<PathBuf, String> {
+pub fn emit_inverted(
+    hit: &HarvestHit,
+    dest_dir: &Path,
+    id: &str,
+    commit: &str,
+) -> Result<PathBuf, String> {
     let stem = hit
         .path
         .file_stem()
@@ -142,7 +149,10 @@ pub fn emit_inverted(hit: &HarvestHit, dest_dir: &Path, id: &str, commit: &str) 
     );
     std::fs::create_dir_all(dest_dir).map_err(|e| e.to_string())?;
     let dest = dest_dir.join(format!("{stem}.ax"));
-    let body = format!("{header}module tests.rust_ported.inverted.{stem};\n{}", tr.source);
+    let body = format!(
+        "{header}module tests.rust_ported.inverted.{stem};\n{}",
+        tr.source
+    );
     std::fs::write(&dest, body).map_err(|e| e.to_string())?;
     Ok(dest)
 }

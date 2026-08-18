@@ -570,7 +570,9 @@ pub fn looks_like_dense(src: &str) -> bool {
     let t = src
         .lines()
         .map(str::trim_start)
-        .find(|l| !l.is_empty() && !l.starts_with("//") && !l.starts_with("#[") && !l.starts_with("/*"))
+        .find(|l| {
+            !l.is_empty() && !l.starts_with("//") && !l.starts_with("#[") && !l.starts_with("/*")
+        })
         .unwrap_or("");
     // `#name(` is a short-syntax fn. `#[attr]` is conventional meta.
     (t.starts_with('#') && t.len() > 1 && t.as_bytes()[1].is_ascii_alphabetic())
@@ -578,6 +580,8 @@ pub fn looks_like_dense(src: &str) -> bool {
         || contains_outside_comments(src, "$")
         || dense_at_sugar(src)
         || dense_range_sugar(src)
+        || dense_assign_sugar(src)
+        || dense_reduce_sugar(src)
         || has_hash_fn(src)
 }
 
@@ -700,6 +704,72 @@ fn dense_range_sugar(src: &str) -> bool {
     false
 }
 
+/// `s += e` (and `-=` `*=` `/=` `%=` `&=` `|=` `^=`) is compound assignment.
+fn dense_assign_sugar(src: &str) -> bool {
+    let b = src.as_bytes();
+    let mut i = 0;
+    while i + 1 < b.len() {
+        if b[i] == b'/' && b[i + 1] == b'/' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if b[i] == b'"' {
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                if b[i] == b'\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if matches!(b[i], b'+' | b'-' | b'*' | b'/' | b'%' | b'&' | b'|' | b'^') && b[i + 1] == b'='
+        {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// `+/n` / `*/n` is K-style reduce-over-range.
+fn dense_reduce_sugar(src: &str) -> bool {
+    let b = src.as_bytes();
+    let mut i = 0;
+    while i + 1 < b.len() {
+        if b[i] == b'/' && b[i + 1] == b'/' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if b[i] == b'"' {
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                if b[i] == b'\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if matches!(b[i], b'+' | b'*')
+            && b[i + 1] == b'/'
+            && i + 2 < b.len()
+            && (is_ident_char(b[i + 2]) || b[i + 2].is_ascii_digit())
+            && (i == 0 || !is_ident_char(b[i - 1]))
+        {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 /// Expand short syntax into S-terse. Same program; more tokens; one parser.
 ///
 ///   `#add(a I, b I) I = a + b`     → `fn add(a i32, b i32) i32 = a + b`
@@ -714,11 +784,16 @@ fn dense_range_sugar(src: &str) -> bool {
 ///   `@c{body}`                     → `while c { body }`
 ///   `%`                            → `map.new(test.alloc)`
 ///   `7L`                           → `7i64`
+///   `s += i`                       → `s = s + i`
+///   `+/n` / `+/a..b`               → sum of the range (K plus-over)
+///   `*/n` / `*/a..b`               → product of the range (K times-over)
 pub fn rewrite_dense_to_terse(src: &str) -> String {
     let mut s = expand_dense_mapnew(src);
     s = expand_dense_lits(&s);
+    s = expand_dense_reduce(&s);
     s = expand_dense_binds(&s);
     s = expand_dense_ranges(&s);
+    s = expand_dense_assign(&s);
     s = expand_dense_returns(&s);
     s = expand_dense_while(&s);
     s = expand_dense_if(&s);
@@ -811,7 +886,6 @@ fn ensure_decl_semicolons(src: &str) -> String {
         let body = t.trim_start();
         if (body.starts_with("fn ") || looks_like_bare_fn(body))
             && !t.ends_with(';')
-            && !t.ends_with('}')
             && !t.ends_with('{')
         {
             out.push_str(t);
@@ -1002,6 +1076,154 @@ fn expand_dense_ranges(src: &str) -> String {
             }
             out.push_str(name);
             continue;
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// `s += e` → `s = s + e` (same IR; the name is not re-evaluated).
+fn expand_dense_assign(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 16);
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' {
+            out.push('"');
+            i += 1;
+            while i < b.len() {
+                out.push(b[i] as char);
+                if b[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if i + 1 < b.len()
+            && matches!(b[i], b'+' | b'-' | b'*' | b'/' | b'%' | b'&' | b'|' | b'^')
+            && b[i + 1] == b'='
+        {
+            let op = b[i] as char;
+            // Walk back over the just-written lvalue atom (`name` or `name.field`).
+            let mut k = out.len();
+            while k > 0 && out.as_bytes()[k - 1].is_ascii_whitespace() {
+                k -= 1;
+            }
+            let end = k;
+            while k > 0 && (is_ident_char(out.as_bytes()[k - 1]) || out.as_bytes()[k - 1] == b'.') {
+                k -= 1;
+            }
+            if k < end {
+                let lhs = out[k..end].to_string();
+                out.truncate(k);
+                out.push_str(&lhs);
+                out.push_str(" = ");
+                out.push_str(&lhs);
+                out.push(' ');
+                out.push(op);
+                out.push(' ');
+                i += 2;
+                continue;
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// `+/n` → `{ let mut _r = 0; for _i in range(0, n) { _r = _r + _i; }; _r }`
+/// `+/a..b` same with `range(a, b)`. `*/` is the product (init 1, `*`).
+/// Hygienic temps: `_r` / `_i` cannot appear in a user program as a type glyph
+/// and are not reserved — they are ordinary idents the rest of the rewrite
+/// leaves alone. Nested `+/` is expanded left-to-right; the inner form is
+/// already gone before the outer body is parsed.
+fn expand_dense_reduce(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 64);
+    let mut i = 0;
+    let mut gen = 0u32;
+    while i < b.len() {
+        if b[i] == b'"' {
+            out.push('"');
+            i += 1;
+            while i < b.len() {
+                out.push(b[i] as char);
+                if b[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if i + 2 < b.len()
+            && matches!(b[i], b'+' | b'*')
+            && b[i + 1] == b'/'
+            && (is_ident_char(b[i + 2]) || b[i + 2].is_ascii_digit())
+            && (i == 0 || !is_ident_char(b[i - 1]))
+        {
+            let op = b[i] as char;
+            i += 2;
+            let lo_s = i;
+            while i < b.len() && (is_ident_char(b[i]) || b[i].is_ascii_digit()) {
+                i += 1;
+            }
+            if i > lo_s {
+                let first = &src[lo_s..i];
+                let mut lo = "0";
+                let mut hi = first;
+                let mut k = i;
+                while k < b.len() && b[k].is_ascii_whitespace() {
+                    k += 1;
+                }
+                if k + 1 < b.len() && &src[k..k + 2] == ".." {
+                    k += 2;
+                    while k < b.len() && b[k].is_ascii_whitespace() {
+                        k += 1;
+                    }
+                    let hi_s = k;
+                    while k < b.len() && (is_ident_char(b[k]) || b[k].is_ascii_digit()) {
+                        k += 1;
+                    }
+                    if k > hi_s {
+                        lo = first;
+                        hi = &src[hi_s..k];
+                        i = k;
+                    }
+                }
+                let acc = format!("_r{gen}");
+                let ix = format!("_i{gen}");
+                gen += 1;
+                // `range` is usz → usz, so the reduction is usz. A bare `0`
+                // would default to i32 and fail at `_r + _i`.
+                let init = if op == '*' { "1usz" } else { "0usz" };
+                out.push_str("{ let mut ");
+                out.push_str(&acc);
+                out.push_str(" = ");
+                out.push_str(init);
+                out.push_str("; for ");
+                out.push_str(&ix);
+                out.push_str(" in range(");
+                out.push_str(lo);
+                out.push_str(", ");
+                out.push_str(hi);
+                out.push_str(") { ");
+                out.push_str(&acc);
+                out.push_str(" = ");
+                out.push_str(&acc);
+                out.push(' ');
+                out.push(op);
+                out.push(' ');
+                out.push_str(&ix);
+                out.push_str("; }; ");
+                out.push_str(&acc);
+                out.push_str(" }");
+                continue;
+            }
         }
         out.push(b[i] as char);
         i += 1;
@@ -1375,6 +1597,8 @@ fn take_brace<'a>(b: &'a [u8], i: &mut usize) -> Option<&'a str> {
 pub fn to_dense(src: &str) -> String {
     let terse = to_terse(src);
     let mut s = pack_dense_fns(&terse);
+    // Reductions while `let mut` / `for i in range` are still visible.
+    s = pack_dense_reduce(&s);
     s = pack_dense_loops(&s);
     s = pack_dense_lets(&s);
     s = pack_dense_returns(&s);
@@ -1385,6 +1609,7 @@ pub fn to_dense(src: &str) -> String {
     s = pack_dense_mapnew(&s);
     s = pack_dense_types(&s);
     s = pack_dense_lits(&s);
+    s = pack_dense_assign(&s);
     s = pack_dense_semis(&s);
     minify_dense(&s)
 }
@@ -1581,9 +1806,7 @@ fn pack_dense_loops(src: &str) -> String {
                 let parts: Vec<&str> = args.split(',').map(str::trim).collect();
                 // Only pack atom bounds (`n`, `0`) — `xs.len()` stays as range().
                 let atom = |s: &str| {
-                    !s.is_empty()
-                        && s.chars()
-                            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
                 };
                 if parts.len() == 2 && atom(parts[0]) && atom(parts[1]) {
                     out.push_str(name);
@@ -1764,7 +1987,8 @@ fn expand_dense_option_or_real(src: &str) -> String {
                     j += 1;
                 }
             } else {
-                while j < b.len() && (is_ident_char(b[j]) || b[j].is_ascii_digit() || b[j] == b'"') {
+                while j < b.len() && (is_ident_char(b[j]) || b[j].is_ascii_digit() || b[j] == b'"')
+                {
                     if b[j] == b'"' {
                         j += 1;
                         while j < b.len() && b[j] != b'"' {
@@ -1795,12 +2019,14 @@ fn expand_dense_option_or_real(src: &str) -> String {
                     }
                 }
                 // include callee ident before `(`
-                while k > 0 && (is_ident_char(out.as_bytes()[k - 1]) || out.as_bytes()[k - 1] == b'.')
+                while k > 0
+                    && (is_ident_char(out.as_bytes()[k - 1]) || out.as_bytes()[k - 1] == b'.')
                 {
                     k -= 1;
                 }
             } else {
-                while k > 0 && (is_ident_char(out.as_bytes()[k - 1]) || out.as_bytes()[k - 1] == b'.')
+                while k > 0
+                    && (is_ident_char(out.as_bytes()[k - 1]) || out.as_bytes()[k - 1] == b'.')
                 {
                     k -= 1;
                 }
@@ -1990,4 +2216,180 @@ fn pack_dense_lits(src: &str) -> String {
         i += 1;
     }
     out
+}
+
+/// `name = name + e` → `name += e` when both sides are the same atom.
+fn pack_dense_assign(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' {
+            out.push('"');
+            i += 1;
+            while i < b.len() {
+                out.push(b[i] as char);
+                if b[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if is_ident_char(b[i]) && (i == 0 || !is_ident_char(b[i - 1])) {
+            let start = i;
+            while i < b.len() && (is_ident_char(b[i]) || b[i] == b'.') {
+                i += 1;
+            }
+            let lhs = &src[start..i];
+            let mut j = i;
+            while j < b.len() && b[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b'=' && (j + 1 == b.len() || b[j + 1] != b'=') {
+                j += 1;
+                while j < b.len() && b[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j + lhs.len() < b.len() && &src[j..j + lhs.len()] == lhs {
+                    let after = j + lhs.len();
+                    if after == b.len() || !is_ident_char(b[after]) {
+                        let mut k = after;
+                        while k < b.len() && b[k].is_ascii_whitespace() {
+                            k += 1;
+                        }
+                        if k < b.len()
+                            && matches!(b[k], b'+' | b'-' | b'*' | b'/' | b'%' | b'&' | b'|' | b'^')
+                        {
+                            let op = b[k] as char;
+                            let next = k + 1;
+                            if next == b.len() || b[next] != b'=' {
+                                out.push_str(lhs);
+                                out.push(' ');
+                                out.push(op);
+                                out.push('=');
+                                i = next;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            out.push_str(lhs);
+            continue;
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// `{ let mut s[: T] = 0; for i in range(lo, hi) { s = s + i; }; s }` → `+/hi` or `+/lo..hi`.
+/// Same with `*` / init `1` → `*/`. Anything else in the block is left as a loop.
+fn pack_dense_reduce(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let b = src.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if let Some((consumed, packed)) = try_pack_reduce_at(src, i) {
+            out.push_str(&packed);
+            i += consumed;
+            continue;
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+fn try_pack_reduce_at(src: &str, start: usize) -> Option<(usize, String)> {
+    let rest = &src[start..];
+    if !rest.starts_with('{') {
+        return None;
+    }
+    let inner = rest[1..].trim_start();
+    let after_let = inner.strip_prefix("let mut ")?;
+    let acc_end = after_let
+        .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .unwrap_or(after_let.len());
+    if acc_end == 0 {
+        return None;
+    }
+    let acc = &after_let[..acc_end];
+    let mut r = after_let[acc_end..].trim_start();
+    let mut acc_ty: Option<&str> = None;
+    if let Some(x) = r.strip_prefix(':') {
+        r = x.trim_start();
+        let ty_end = r.find('=').unwrap_or(r.len());
+        acc_ty = Some(r[..ty_end].trim());
+        r = r[ty_end..].trim_start();
+    }
+    r = r.strip_prefix('=')?.trim_start();
+    let init_end = r.find(|c: char| !c.is_ascii_digit()).unwrap_or(r.len());
+    if init_end == 0 {
+        return None;
+    }
+    let init = &r[..init_end];
+    r = r[init_end..].trim_start().strip_prefix(';')?.trim_start();
+    r = r.strip_prefix("for ")?;
+    let ix_end = r
+        .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .unwrap_or(r.len());
+    if ix_end == 0 {
+        return None;
+    }
+    let ix = &r[..ix_end];
+    r = r[ix_end..].trim_start().strip_prefix("in")?.trim_start();
+    r = r.strip_prefix("range(")?;
+    let close = r.find(')')?;
+    let args = &r[..close];
+    let parts: Vec<&str> = args.split(',').map(str::trim).collect();
+    let atom = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if parts.len() != 2 || !atom(parts[0]) || !atom(parts[1]) {
+        return None;
+    }
+    r = r[close + 1..].trim_start().strip_prefix('{')?.trim_start();
+    let want_add = format!("{acc} = {acc} + {ix}");
+    let want_mul = format!("{acc} = {acc} * {ix}");
+    let op = if r.starts_with(&want_add) && init == "0" {
+        '+'
+    } else if r.starts_with(&want_mul) && init == "1" {
+        '*'
+    } else {
+        return None;
+    };
+    r = r[if op == '+' {
+        want_add.len()
+    } else {
+        want_mul.len()
+    }..]
+        .trim_start();
+    r = r.strip_prefix(';')?.trim_start();
+    r = r.strip_prefix('}')?.trim_start();
+    r = r.strip_prefix(';')?.trim_start();
+    if !r.starts_with(acc) {
+        return None;
+    }
+    r = r[acc.len()..].trim_start();
+    r = r.strip_prefix('}')?;
+    let consumed = src.len() - start - r.len();
+    let mut packed = String::new();
+    packed.push(op);
+    packed.push('/');
+    if parts[0] == "0" {
+        packed.push_str(parts[1]);
+    } else {
+        packed.push_str(parts[0]);
+        packed.push_str("..");
+        packed.push_str(parts[1]);
+    }
+    // A literal bound is i32 by default; keep a non-i32 accumulator's type
+    // as a suffix (`+/10usz`) so expand types it the same way.
+    if let Some(ty) = acc_ty {
+        if ty != "i32" && parts[1].chars().all(|c| c.is_ascii_digit()) {
+            packed.push_str(ty);
+        }
+    }
+    Some((consumed, packed))
 }

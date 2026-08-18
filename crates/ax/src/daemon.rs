@@ -87,7 +87,9 @@ fn dispatch(req: Request) -> Response {
         | "digest" | "explain" => match compiled {
             Ok(out) => {
                 let result = match req.method.as_str() {
-                    "perf" => serde_json::to_value(perf::analyze_module(&s.intern, &out, name)).ok(),
+                    "perf" => {
+                        serde_json::to_value(perf::analyze_module(&s.intern, &out, name)).ok()
+                    }
                     "complete" => serde_json::to_value(perf::complete_at(
                         &s.intern,
                         &out,
@@ -95,14 +97,24 @@ fn dispatch(req: Request) -> Response {
                         req.params.get("at").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
                     ))
                     .ok(),
-                    "context" => serde_json::to_value(perf::context_pack(&s.intern, &out, 1000)).ok(),
+                    "context" => {
+                        serde_json::to_value(perf::context_pack(&s.intern, &out, 1000)).ok()
+                    }
                     "caps" => serde_json::to_value(reach::analyze(&s.intern, &out)).ok(),
                     "effs" => {
-                        let id = req.params.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
+                        let id = req
+                            .params
+                            .get("symbol")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
                         Some(json!({ "text": crate::driver::effs_at(&s.intern, &out, id) }))
                     }
                     "search" => {
-                        let q = req.params.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                        let q = req
+                            .params
+                            .get("query")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
                         Some(json!({ "text": crate::driver::search(&s.intern, &out, q) }))
                     }
                     "hole" => Some(json!({ "holes": out.holes.len() })),

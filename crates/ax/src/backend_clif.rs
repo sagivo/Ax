@@ -118,7 +118,11 @@ fn build_runtime_dylib() -> Result<PathBuf, String> {
     let header = rt.join("axrt.h");
     let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/axrt");
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
-    let ext = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+    let ext = if cfg!(target_os = "macos") {
+        "dylib"
+    } else {
+        "so"
+    };
     let lib = out_dir.join(format!("libaxrt.{ext}"));
 
     let newest_src = sources
@@ -260,7 +264,8 @@ impl Jit {
         // Entry shims. `main`'s value has to come back to Rust to be rendered,
         // and Cranelift's multi-value return is not a Rust ABI, so the shim
         // writes through pointers instead.
-        let (entry, test_entries) = build_entries(&prog, &mut module, &mut ctx, &mut fbctx, &ids, ptr_ty)?;
+        let (entry, test_entries) =
+            build_entries(&prog, &mut module, &mut ctx, &mut fbctx, &ids, ptr_ty)?;
 
         module
             .finalize_definitions()
@@ -292,8 +297,7 @@ impl Jit {
         let mut ptrs: Vec<*const std::ffi::c_char> = cargs.iter().map(|c| c.as_ptr()).collect();
         ptrs.push(std::ptr::null());
         unsafe {
-            let f: extern "C" fn(i32, *const *const std::ffi::c_char) =
-                std::mem::transmute(init);
+            let f: extern "C" fn(i32, *const *const std::ffi::c_char) = std::mem::transmute(init);
             f(cargs.len() as i32, ptrs.as_ptr());
         }
 
@@ -320,7 +324,11 @@ impl Jit {
         let code = self.module.get_finalized_function(self.entry);
         unsafe {
             let g: extern "C" fn(*mut u8, *mut u8, *mut i32) = std::mem::transmute(code);
-            g(slots.val.as_mut_ptr(), slots.err.as_mut_ptr(), &mut slots.tag);
+            g(
+                slots.val.as_mut_ptr(),
+                slots.err.as_mut_ptr(),
+                &mut slots.tag,
+            );
         }
         if f.is_fallible() && slots.tag != 0 {
             // Same text as the C tier and the oracle: an uncaught raise out of
@@ -396,7 +404,11 @@ fn build_descriptors(p: &Program, rt: &Runtime) -> Result<HashMap<TypeId, usize>
         unsafe { std::mem::transmute(field_fn) };
     for t in needed {
         let a = p.agg(t);
-        let described: Vec<&FieldDef> = a.fields.iter().filter(|f| field_kind(f).is_some()).collect();
+        let described: Vec<&FieldDef> = a
+            .fields
+            .iter()
+            .filter(|f| field_kind(f).is_some())
+            .collect();
         let name = CString::new(a.name.as_str()).map_err(|e| e.to_string())?;
         let d = new_fn(name.into_raw(), a.size, described.len() as u32);
         for f in described {
@@ -565,10 +577,7 @@ impl<'a, 'b> Trans<'a, 'b> {
 
     fn declare(&mut self, v: ValId) -> Variable {
         let ty = clif_ty(self.f.ty_of(v), self.ptr_ty);
-        *self
-            .vars
-            .entry(v)
-            .or_insert_with(|| self.b.declare_var(ty))
+        *self.vars.entry(v).or_insert_with(|| self.b.declare_var(ty))
     }
 
     fn get(&mut self, v: ValId) -> cranelift_codegen::ir::Value {
@@ -598,7 +607,11 @@ impl<'a, 'b> Trans<'a, 'b> {
                 let v = if x.is_nan() {
                     // Take the runtime's canonical NaN, so every tier agrees on
                     // the bit pattern a NaN literal has.
-                    let name = if t == IrTy::F32 { "ax_nan_f32" } else { "ax_nan_f64" };
+                    let name = if t == IrTy::F32 {
+                        "ax_nan_f32"
+                    } else {
+                        "ax_nan_f64"
+                    };
                     let r = self.call_ext_raw(name, &[], Some(t))?;
                     r.ok_or("ax_nan returned nothing")?
                 } else if t == IrTy::F32 {
@@ -643,7 +656,11 @@ impl<'a, 'b> Trans<'a, 'b> {
                     UnKind::Not => self.b.ins().icmp_imm_s(IntCC::Equal, x, 0),
                     UnKind::BitNot => self.b.ins().bnot(x),
                     UnKind::CanonNaN => {
-                        let name = if t == IrTy::F32 { "ax_canon_f32" } else { "ax_canon_f64" };
+                        let name = if t == IrTy::F32 {
+                            "ax_canon_f32"
+                        } else {
+                            "ax_canon_f64"
+                        };
                         self.call_ext_raw(name, &[x], Some(t))?
                             .ok_or("ax_canon returned nothing")?
                     }
@@ -777,7 +794,10 @@ impl<'a, 'b> Trans<'a, 'b> {
             }
             Op::UniqueAlloc { size, align } => {
                 let d = i.results[0];
-                let argv = [self.get(*size), self.b.ins().iconst(clty::I32, *align as i64)];
+                let argv = [
+                    self.get(*size),
+                    self.b.ins().iconst(clty::I32, *align as i64),
+                ];
                 let v = self
                     .call_ext_raw("ax_rt_unique_alloc", &argv, Some(IrTy::Ptr))?
                     .ok_or("unique_alloc returned nothing")?;
@@ -837,8 +857,7 @@ impl<'a, 'b> Trans<'a, 'b> {
                         .push(AbiParam::new(clif_ty(self.f.ty_of(*a), self.ptr_ty)));
                 }
                 if *ret != IrTy::Unit {
-                    sig.returns
-                        .push(AbiParam::new(clif_ty(*ret, self.ptr_ty)));
+                    sig.returns.push(AbiParam::new(clif_ty(*ret, self.ptr_ty)));
                 }
                 let sr = self.b.import_signature(sig);
                 let callee = self.get(*ptr);
@@ -1045,7 +1064,11 @@ impl<'a, 'b> Trans<'a, 'b> {
                 } else {
                     x
                 };
-                let stem = if matches!(kind, CastKind::FToS) { "ax_f2i" } else { "ax_f2u" };
+                let stem = if matches!(kind, CastKind::FToS) {
+                    "ax_f2i"
+                } else {
+                    "ax_f2u"
+                };
                 let name = format!("{stem}_{}", to.name());
                 self.call_ext_raw(&name, &[d], Some(to))?
                     .ok_or_else(|| format!("{name} returned nothing"))?
@@ -1091,7 +1114,11 @@ impl<'a, 'b> Trans<'a, 'b> {
             BinKind::FMul => self.b.ins().fmul(a, b),
             BinKind::FDiv => self.b.ins().fdiv(a, b),
             BinKind::FRem => {
-                let name = if t == IrTy::F32 { "ax_fmodf" } else { "ax_fmod" };
+                let name = if t == IrTy::F32 {
+                    "ax_fmodf"
+                } else {
+                    "ax_fmod"
+                };
                 self.call_ext_raw(name, &[a, b], Some(t))?
                     .ok_or("ax_fmod returned nothing")?
             }
@@ -1170,9 +1197,15 @@ impl<'a, 'b> Trans<'a, 'b> {
         // i8/i16 division is not uniformly available; widen, divide, narrow.
         let (wide, wt) = if ct.bits() < 32 {
             let w = if t.is_signed() {
-                (self.b.ins().sextend(clty::I32, a), self.b.ins().sextend(clty::I32, b))
+                (
+                    self.b.ins().sextend(clty::I32, a),
+                    self.b.ins().sextend(clty::I32, b),
+                )
             } else {
-                (self.b.ins().uextend(clty::I32, a), self.b.ins().uextend(clty::I32, b))
+                (
+                    self.b.ins().uextend(clty::I32, a),
+                    self.b.ins().uextend(clty::I32, b),
+                )
             };
             (w, clty::I32)
         } else {
@@ -1291,7 +1324,10 @@ impl<'a, 'b> Trans<'a, 'b> {
             }
             Term::RetErr(tag) => {
                 if !self.f.is_fallible() {
-                    return Err(format!("@{}: ret.err in an infallible function", self.f.name));
+                    return Err(format!(
+                        "@{}: ret.err in an infallible function",
+                        self.f.name
+                    ));
                 }
                 let mut out = Vec::new();
                 let has_payload = self.f.ret_agg.is_none() && self.f.ret != IrTy::Unit;
@@ -1379,8 +1415,7 @@ fn build_entries(
                 let results: Vec<_> = b.inst_results(call).to_vec();
                 let mut k = 0usize;
                 if f.ret_agg.is_none() && f.ret != IrTy::Unit {
-                    b.ins()
-                        .store(MemFlagsData::new(), results[k], out_val, 0);
+                    b.ins().store(MemFlagsData::new(), results[k], out_val, 0);
                     k += 1;
                 }
                 if f.is_fallible() {
@@ -1632,7 +1667,7 @@ fn render_agg(p: &Program, id: TypeId, base: *const u8) -> String {
         AggKind::Variant { cases } => {
             let tag = unsafe {
                 std::ptr::read_unaligned(
-                    base.add(def.field(VARIANT_TAG_FIELD).offset as usize) as *const i32,
+                    base.add(def.field(VARIANT_TAG_FIELD).offset as usize) as *const i32
                 )
             } as i64;
             let Some(c) = cases.iter().find(|c| c.tag == tag) else {

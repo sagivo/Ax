@@ -47,7 +47,15 @@ fn fmt_decl(o: &mut String, d: &Decl, intern: &Interner, indent: usize) {
         if key == "pub" || key == "unsafe" {
             continue;
         }
-        if key.starts_with("no_") || key == "pure" || key == "total" || key == "inline" || key == "in" || key == "derive" || key == "stack_only" || key == "max_alloc" {
+        if key.starts_with("no_")
+            || key == "pure"
+            || key == "total"
+            || key == "inline"
+            || key == "in"
+            || key == "derive"
+            || key == "stack_only"
+            || key == "max_alloc"
+        {
             o.push_str("#[");
             o.push_str(key);
             match &m.value {
@@ -371,10 +379,10 @@ fn fmt_expr(o: &mut String, e: &Expr, intern: &Interner, indent: usize) {
         ExprKind::Unary { op, expr } => {
             o.push_str(match op {
                 UnOp::Not => "!",
-            UnOp::BitNot => "~",
+                UnOp::BitNot => "~",
                 UnOp::Neg => "-",
-                UnOp::Ref => "",      // accept-and-elide: `&` is a no-op
-                UnOp::RefMut => "",   // `&mut` is a hint; formatter strips it
+                UnOp::Ref => "",    // accept-and-elide: `&` is a no-op
+                UnOp::RefMut => "", // `&mut` is a hint; formatter strips it
                 UnOp::Deref => "*",
             });
             fmt_expr(o, expr, intern, indent);
@@ -553,7 +561,12 @@ fn fmt_expr(o: &mut String, e: &Expr, intern: &Interner, indent: usize) {
             for p in parts {
                 match p {
                     InterpPart::Lit(s) => {
-                        o.push_str(&s.replace('\\', "\\\\").replace('"', "\\\"").replace('{', "{{").replace('}', "}}"));
+                        o.push_str(
+                            &s.replace('\\', "\\\\")
+                                .replace('"', "\\\"")
+                                .replace('{', "{{")
+                                .replace('}', "}}"),
+                        );
                     }
                     InterpPart::Expr(e) => {
                         o.push('{');

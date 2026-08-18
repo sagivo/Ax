@@ -15,7 +15,7 @@
 //!   `TypeName` → `Type`, `Name`), because subword vocabularies split there;
 //! - each punctuation character is one token, except that common two-character
 //!   operators (`->`, `==`, `!=`, `<=`, `>=`, `&&`, `||`, `::`, `<<`, `>>`,
-//!   `=>`) are one, since they appear in vocabularies as units;
+//!   `=>`, `:=`, `+=`, `+/`, `*/`, …) are one, since they appear in vocabularies as units;
 //! - whitespace is free except that a newline is one token, matching the usual
 //!   treatment of indentation-bearing source;
 //! - a character outside ASCII is one token, which is a floor;
@@ -74,7 +74,27 @@ pub fn count(src: &str) -> Count {
             let pair = &src[i..i + 2];
             if matches!(
                 pair,
-                "->" | "==" | "!=" | "<=" | ">=" | "&&" | "||" | "::" | "<<" | ">>" | "=>" | ":="
+                "->" | "=="
+                    | "!="
+                    | "<="
+                    | ">="
+                    | "&&"
+                    | "||"
+                    | "::"
+                    | "<<"
+                    | ">>"
+                    | "=>"
+                    | ":="
+                    | "+="
+                    | "-="
+                    | "*="
+                    | "/="
+                    | "%="
+                    | "&="
+                    | "|="
+                    | "^="
+                    | "+/"
+                    | "*/"
             ) {
                 tokens += 1;
                 i += 2;

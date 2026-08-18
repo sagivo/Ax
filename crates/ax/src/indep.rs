@@ -26,10 +26,7 @@ pub struct TypeFacts<'a> {
 }
 
 impl<'a> TypeFacts<'a> {
-    pub fn new(
-        node_types: &'a [Type],
-        nonzero_div: &'a std::collections::HashSet<NodeId>,
-    ) -> Self {
+    pub fn new(node_types: &'a [Type], nonzero_div: &'a std::collections::HashSet<NodeId>) -> Self {
         Self {
             node_types,
             nonzero_div,
@@ -151,7 +148,10 @@ pub fn infer_effects(
         r
     });
     known.insert("sort".into(), row_one(IndepEffect::Diverge));
-    known.insert("parse_i32".into(), row_one(IndepEffect::Err("ParseError".into())));
+    known.insert(
+        "parse_i32".into(),
+        row_one(IndepEffect::Err("ParseError".into())),
+    );
 
     // first pass: declared rows
     let mut decls: Vec<(&FnDecl, IndepRow)> = Vec::new();
@@ -249,12 +249,13 @@ fn infer_expr(
             r
         }
         ExprKind::Field { base, .. } => infer_expr(base, intern, known, facts),
-        ExprKind::Index { base, index } => infer_expr(base, intern, known, facts)
-            .union(&infer_expr(index, intern, known, facts)),
+        ExprKind::Index { base, index } => {
+            infer_expr(base, intern, known, facts).union(&infer_expr(index, intern, known, facts))
+        }
         ExprKind::Unary { expr, .. } => infer_expr(expr, intern, known, facts),
         ExprKind::Binary { op, lhs, rhs } => {
-            let mut r = infer_expr(lhs, intern, known, facts)
-                .union(&infer_expr(rhs, intern, known, facts));
+            let mut r =
+                infer_expr(lhs, intern, known, facts).union(&infer_expr(rhs, intern, known, facts));
             // Only integer `/` and `%` can raise: float division yields inf or
             // NaN per IEEE-754 and has no error effect.
             if matches!(op, BinOp::Div | BinOp::Rem)
@@ -283,7 +284,8 @@ fn infer_expr(
             then_b,
             else_b,
         } => {
-            let mut r = infer_expr(cond, intern, known, facts).union(&infer_expr(then_b, intern, known, facts));
+            let mut r = infer_expr(cond, intern, known, facts)
+                .union(&infer_expr(then_b, intern, known, facts));
             if let Some(el) = else_b {
                 r = r.union(&infer_expr(el, intern, known, facts));
             }
@@ -395,12 +397,7 @@ pub fn check_regions(file: &File, intern: &Interner) -> Vec<RegionJudgement> {
     let mut js = Vec::new();
     for d in &file.decls {
         if let DeclKind::Fn(f) | DeclKind::ContractFn(f) = &d.kind {
-            walk_region(
-                &f.body,
-                intern,
-                &mut vec![("static".into(), 0u32)],
-                &mut js,
-            );
+            walk_region(&f.body, intern, &mut vec![("static".into(), 0u32)], &mut js);
         }
     }
     js
@@ -420,8 +417,13 @@ fn walk_region(
             stack.pop();
         }
         ExprKind::Let(l) => {
-            if matches!(l.init.kind, ExprKind::Unary { op: UnOp::Ref | UnOp::RefMut, .. })
-            {
+            if matches!(
+                l.init.kind,
+                ExprKind::Unary {
+                    op: UnOp::Ref | UnOp::RefMut,
+                    ..
+                }
+            ) {
                 let loc_depth = stack.last().map(|(_, d)| *d).unwrap_or(0);
                 // ref is created in current region; storing into this let's location
                 // is legal because r == l (same depth).

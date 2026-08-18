@@ -346,9 +346,7 @@ impl<'a> Lexer<'a> {
             if let Some(c) = self.peek_at(1) {
                 if matches!(c, b'x' | b'X' | b'o' | b'O' | b'b' | b'B') {
                     self.pos += 2;
-                    let digits = |b: u8| {
-                        b.is_ascii_alphanumeric() || b == b'_'
-                    };
+                    let digits = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
                     while matches!(self.peek(), Some(b) if digits(b)) {
                         self.pos += 1;
                     }

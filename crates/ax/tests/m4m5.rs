@@ -40,10 +40,7 @@ fn four_way(src: &str, stem: &str) {
 
 #[test]
 fn diff_add() {
-    four_way(
-        "module t;\nfn main() -> i32 = 1 + 2;\n",
-        "d_add",
-    );
+    four_way("module t;\nfn main() -> i32 = 1 + 2;\n", "d_add");
 }
 
 #[test]
@@ -81,10 +78,7 @@ fn main() -> i32 = {
 
 #[test]
 fn diff_wrap() {
-    four_way(
-        "module t;\nfn main() -> i32 = 40 + 2;\n",
-        "d_wrap",
-    );
+    four_way("module t;\nfn main() -> i32 = 40 + 2;\n", "d_wrap");
 }
 
 #[test]
@@ -93,7 +87,16 @@ fn packs_builtin_set() {
         .into_iter()
         .map(|p| p.name)
         .collect();
-    for n in ["core", "alloc", "str", "fmt", "collections", "json", "fs", "test"] {
+    for n in [
+        "core",
+        "alloc",
+        "str",
+        "fmt",
+        "collections",
+        "json",
+        "fs",
+        "test",
+    ] {
         assert!(names.contains(&n.to_string()), "missing builtin {n}");
     }
 }

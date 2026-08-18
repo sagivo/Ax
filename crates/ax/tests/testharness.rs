@@ -28,9 +28,7 @@ fn headers_parse_and_require_an_r_id() {
             "{} missing requires:",
             c.header.id
         );
-        assert!(
-            testharness::PortKind::parse(c.header.port.as_str()).is_some()
-        );
+        assert!(testharness::PortKind::parse(c.header.port.as_str()).is_some());
     }
 }
 
@@ -213,7 +211,11 @@ fn fault_injection_all_variants_caught() {
         missed.is_empty(),
         "fault variants no test catches ([T-10.2.2]): {missed:?}"
     );
-    assert!(report.len() >= 29, "expected ~30 variants, got {}", report.len());
+    assert!(
+        report.len() >= 29,
+        "expected ~30 variants, got {}",
+        report.len()
+    );
 }
 
 #[test]
@@ -236,12 +238,8 @@ fn harvest_from_in_tree_fixture() {
     let fixtures = root().join("rust_ported/inverted/fixtures");
     let dest = testharness::temp_out().join("harvest-fixture");
     let _ = std::fs::remove_dir_all(&dest);
-    let r = ax::harvest::harvest_into(
-        &fixtures,
-        &dest,
-        "4d91de4e48198da2e33413efdcd9cd2cc0c46688",
-    )
-    .expect("harvest fixture");
+    let r = ax::harvest::harvest_into(&fixtures, &dest, "4d91de4e48198da2e33413efdcd9cd2cc0c46688")
+        .expect("harvest fixture");
     assert!(
         r.hits.len() >= 1,
         "fixture should yield at least one invert hit"
@@ -338,11 +336,7 @@ fn do_not_port_list_is_recorded() {
 
 #[test]
 fn harvest_writes_regression() {
-    let p = testharness::harvest_regression(
-        "module t;\nfn main() -> i32 = 0;\n",
-        "smoke",
-    )
-    .unwrap();
+    let p = testharness::harvest_regression("module t;\nfn main() -> i32 = 0;\n", "smoke").unwrap();
     assert!(p.exists());
     let src = std::fs::read_to_string(&p).unwrap();
     assert!(src.contains("//@ id:"));

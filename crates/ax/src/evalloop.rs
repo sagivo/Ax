@@ -836,9 +836,8 @@ pub fn run_2x2(seed: u64, n: usize, max_attempts: u32) -> FactorialReport {
             results.push(run_rust_tooled_loop(t, max_attempts));
         }
     }
-    let pick = |arm: &str| -> Vec<&LoopResult> {
-        results.iter().filter(|r| r.arm == arm).collect()
-    };
+    let pick =
+        |arm: &str| -> Vec<&LoopResult> { results.iter().filter(|r| r.arm == arm).collect() };
     let cells = vec![
         cell("ax+proto", "ax", true, &pick("ax")),
         cell("ax−proto", "ax", false, &pick("ax-noproto")),
@@ -879,11 +878,22 @@ pub fn render_2x2(r: &FactorialReport) -> String {
         }
         s.push_str(&format!(
             "{:<12} {:>3}/{:<2} {:>9.1} {:>8.1} {:>11.1} {:>9.0} {:>6}\n",
-            c.arm, c.pass, c.scored, c.median_attempts, c.median_probes, c.median_wall_ms,
-            c.median_tokens, c.excluded
+            c.arm,
+            c.pass,
+            c.scored,
+            c.median_attempts,
+            c.median_probes,
+            c.median_wall_ms,
+            c.median_tokens,
+            c.excluded
         ));
     }
-    let get = |arm: &str| r.cells.iter().find(|c| c.arm == arm).filter(|c| c.scored > 0);
+    let get = |arm: &str| {
+        r.cells
+            .iter()
+            .find(|c| c.arm == arm)
+            .filter(|c| c.scored > 0)
+    };
     s.push('\n');
     if let (Some(axp), Some(rp)) = (get("ax+proto"), get("rust+proto")) {
         s.push_str(&format!(

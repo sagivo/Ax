@@ -189,11 +189,7 @@ impl<'a> Emit<'a> {
 
     fn strings(&mut self) {
         for (i, s) in self.p.strings.iter().enumerate() {
-            let _ = writeln!(
-                self.out,
-                "static const char axs{i}[] = {};",
-                c_string(s)
-            );
+            let _ = writeln!(self.out, "static const char axs{i}[] = {};", c_string(s));
         }
         if !self.p.strings.is_empty() {
             self.out.push('\n');
@@ -293,9 +289,9 @@ impl<'a> Emit<'a> {
         // coefficients) hash both words; one-argument stays a single mix.
         let hash = match args.as_slice() {
             [(a, _)] => format!("(unsigned long)(v{a})"),
-            [(a, _), (b, _)] => format!(
-                "((unsigned long)(v{a}) * 0x9e3779b97f4a7c15ul ^ (unsigned long)(v{b}))"
-            ),
+            [(a, _), (b, _)] => {
+                format!("((unsigned long)(v{a}) * 0x9e3779b97f4a7c15ul ^ (unsigned long)(v{b}))")
+            }
             _ => "(unsigned long)0".into(),
         };
         let key_fields = args
@@ -404,10 +400,7 @@ impl<'a> Emit<'a> {
         // allocator handle that names it.
         for (i, r) in f.regions.iter().enumerate() {
             let _ = writeln!(self.out, "    AxArena r{i};  /* {} */", r.name);
-            let _ = writeln!(
-                self.out,
-                "    AxAlloc ra{i} = {{ AX_ALLOC_ARENA, &r{i} }};"
-            );
+            let _ = writeln!(self.out, "    AxAlloc ra{i} = {{ AX_ALLOC_ARENA, &r{i} }};");
         }
         // Every SSA value is a local; parameters already are.
         let params: std::collections::HashSet<ValId> = f.params.iter().copied().collect();
@@ -573,9 +566,10 @@ impl<'a> Emit<'a> {
                 let call = format!("{}({})", c.name, argv.join(", "));
                 if c.is_fallible() {
                     let payload = i.results.first().copied();
-                    let tag = i.results.get(1).copied().ok_or(
-                        "internal: call to a fallible function must define a tag value",
-                    )?;
+                    let tag =
+                        i.results.get(1).copied().ok_or(
+                            "internal: call to a fallible function must define a tag value",
+                        )?;
                     let tmp = format!("_r{tag}");
                     let _ = writeln!(self.out, "    {} {tmp} = {call};", res_name(c));
                     if let Some(pv) = payload {
@@ -670,11 +664,7 @@ impl<'a> Emit<'a> {
     fn edge(&mut self, f: &Func, e: &Edge, indent: &str) {
         let target = f.block(e.to);
         for (i, (p, a)) in target.params.iter().zip(&e.args).enumerate() {
-            let _ = writeln!(
-                self.out,
-                "{indent}{} _e{i} = v{a};",
-                cty(f.ty_of(*p))
-            );
+            let _ = writeln!(self.out, "{indent}{} _e{i} = v{a};", cty(f.ty_of(*p)));
         }
         for (i, p) in target.params.iter().enumerate() {
             let _ = writeln!(self.out, "{indent}v{p} = _e{i};");
@@ -722,7 +712,8 @@ impl<'a> Emit<'a> {
                             );
                         }
                         _ => {
-                            let _ = writeln!(self.out, "    return ({}){{ .tag = 0 }};", res_name(f));
+                            let _ =
+                                writeln!(self.out, "    return ({}){{ .tag = 0 }};", res_name(f));
                         }
                     }
                 } else if f.ret_agg.is_some() || f.ret == IrTy::Unit {
@@ -744,18 +735,10 @@ impl<'a> Emit<'a> {
                 if !f.is_fallible() {
                     return Err(format!("@{}: ret.err in an infallible function", f.name));
                 }
-                let _ = writeln!(
-                    self.out,
-                    "    return ({}){{ .tag = v{tag} }};",
-                    res_name(f)
-                );
+                let _ = writeln!(self.out, "    return ({}){{ .tag = v{tag} }};", res_name(f));
             }
             Term::Abort(code) => {
-                let _ = writeln!(
-                    self.out,
-                    "    ax_abort({});",
-                    c_string(code.message())
-                );
+                let _ = writeln!(self.out, "    ax_abort({});", c_string(code.message()));
             }
             Term::Unreachable => {
                 self.out.push_str("    ax_unreachable();\n");
@@ -817,11 +800,7 @@ impl<'a> Emit<'a> {
                     self.out.push_str("    switch (v->tag) {\n");
                     for c in cases {
                         let _ = writeln!(self.out, "    case {}:", c.tag);
-                        let _ = writeln!(
-                            self.out,
-                            "        fputs({}, stdout);",
-                            c_string(&c.name)
-                        );
+                        let _ = writeln!(self.out, "        fputs({}, stdout);", c_string(&c.name));
                         if !c.fields.is_empty() {
                             self.out.push_str("        fputs(\" { \", stdout);\n");
                             for (i, fi) in c.fields.iter().enumerate() {
@@ -845,7 +824,8 @@ impl<'a> Emit<'a> {
                         }
                         self.out.push_str("        break;\n");
                     }
-                    self.out.push_str("    default: fputs(\"<bad tag>\", stdout);\n    }\n");
+                    self.out
+                        .push_str("    default: fputs(\"<bad tag>\", stdout);\n    }\n");
                 }
             }
             self.out.push_str("}\n\n");
@@ -906,11 +886,7 @@ impl<'a> Emit<'a> {
                     self.out
                         .push_str("    if (_r.tag) { ax_abort(\"uncaught raise from main\"); }\n");
                     if f.ret_agg.is_some() {
-                        let _ = writeln!(
-                            self.out,
-                            "    ax_render_{}(&_ret);",
-                            f.ret_agg.unwrap()
-                        );
+                        let _ = writeln!(self.out, "    ax_render_{}(&_ret);", f.ret_agg.unwrap());
                         self.out.push_str("    fputc('\\n', stdout);\n");
                     } else if f.ret != IrTy::Unit {
                         let _ = writeln!(
@@ -928,11 +904,7 @@ impl<'a> Emit<'a> {
                     let _ = writeln!(self.out, "    {call};");
                 } else {
                     let _ = writeln!(self.out, "    {} _v = {call};", cty(f.ret));
-                    let _ = writeln!(
-                        self.out,
-                        "    {}",
-                        render_scalar("_v", f.ret, &f.ret_src)
-                    );
+                    let _ = writeln!(self.out, "    {}", render_scalar("_v", f.ret, &f.ret_src));
                     self.out.push_str("    fputc('\\n', stdout);\n");
                 }
                 self.out.push_str("    ax_rt_shutdown();\n    return 0;\n");
@@ -951,7 +923,8 @@ impl<'a> Emit<'a> {
                         c_string(name)
                     );
                 }
-                self.out.push_str("    ax_rt_shutdown();\n    return failed ? 1 : 0;\n");
+                self.out
+                    .push_str("    ax_rt_shutdown();\n    return failed ? 1 : 0;\n");
             }
         }
         self.out.push_str("}\n");

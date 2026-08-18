@@ -128,8 +128,7 @@ fn render_doc(rows: &[CaseResult]) -> String {
             r.go.map(fmt_ms).unwrap_or_else(|| "—".into()),
             ratio(r.ax, r.c),
             ratio(r.ax, r.rust),
-            r.go
-                .map(|g| format!("{:.2}×", ratio(r.ax, g)))
+            r.go.map(|g| format!("{:.2}×", ratio(r.ax, g)))
                 .unwrap_or_else(|| "—".into()),
             v,
         ));

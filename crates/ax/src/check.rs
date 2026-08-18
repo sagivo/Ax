@@ -537,7 +537,7 @@ impl<'a> Checker<'a> {
                     region_stack: vec![RegionId::static_region(self.intern.intern("static"))],
                     next_depth: 1,
                     in_contract: false,
-                loop_depth: 0,
+                    loop_depth: 0,
                     def_id: def_id.clone(),
                     mut_borrowed: Vec::new(),
                 };
@@ -569,8 +569,7 @@ impl<'a> Checker<'a> {
         }
         // Built before `checked_fns` is moved into the output.
         let callables: Vec<CallableInfo> = {
-            let local_ids: Vec<String> =
-                checked_fns.iter().map(|f| f.sig.def_id.clone()).collect();
+            let local_ids: Vec<String> = checked_fns.iter().map(|f| f.sig.def_id.clone()).collect();
             let mut out: Vec<CallableInfo> = Vec::new();
             for (name, sig) in &self.fns {
                 out.push(CallableInfo {
@@ -742,7 +741,9 @@ impl<'a> Checker<'a> {
             TypeExprKind::Untrusted(inner) => {
                 Type::Untrusted(Box::new(self.lower_type(inner, env_region)))
             }
-            TypeExprKind::Secret(inner) => Type::Secret(Box::new(self.lower_type(inner, env_region))),
+            TypeExprKind::Secret(inner) => {
+                Type::Secret(Box::new(self.lower_type(inner, env_region)))
+            }
             TypeExprKind::Ref {
                 region,
                 mutable,
@@ -999,7 +1000,10 @@ impl<'a> Checker<'a> {
                     self.type_mismatch(cond.span, &Type::bool(), &ct, &env.def_id);
                 }
                 // The same implication holds for the taken branch of an `if`.
-                let guarded = self.guard_nonzero(cond).map(|n| vec![n]).unwrap_or_default();
+                let guarded = self
+                    .guard_nonzero(cond)
+                    .map(|n| vec![n])
+                    .unwrap_or_default();
                 self.push_nonzero(guarded);
                 let th = self.check_expr(then_b, expected, env);
                 self.pop_nonzero();
@@ -1029,8 +1033,7 @@ impl<'a> Checker<'a> {
                 env.loop_depth += 1;
                 // A range starting at 1 or more never yields zero.
                 let mut guarded = Vec::new();
-                if let (PatKind::Bind(v), ExprKind::Call { callee, args }) =
-                    (&pat.kind, &iter.kind)
+                if let (PatKind::Bind(v), ExprKind::Call { callee, args }) = (&pat.kind, &iter.kind)
                 {
                     let is_range = matches!(&callee.kind, ExprKind::Path(p)
                         if p.segs.len() == 1 && self.intern.get(p.segs[0].name) == "range");
@@ -1072,7 +1075,10 @@ impl<'a> Checker<'a> {
                 env.loop_depth += 1;
                 // `while b != 0 { .. }` proves `b` non-zero for the body, which is
                 // exactly the shape Euclid's algorithm is written in.
-                let guarded = self.guard_nonzero(cond).map(|n| vec![n]).unwrap_or_default();
+                let guarded = self
+                    .guard_nonzero(cond)
+                    .map(|n| vec![n])
+                    .unwrap_or_default();
                 self.push_nonzero(guarded);
                 let _ = self.check_expr(body, None, env);
                 self.pop_nonzero();
@@ -1561,9 +1567,7 @@ impl<'a> Checker<'a> {
             let recv = self.check_expr(base, None, env);
             let fname = self.intern.get(field.name).to_string();
             let recv_place_mut = self.is_mut_place(base, env);
-            if let Some(ty) =
-                self.check_method_at(&recv, &fname, args, env, span, recv_place_mut)
-            {
+            if let Some(ty) = self.check_method_at(&recv, &fname, args, env, span, recv_place_mut) {
                 return ty;
             }
             // Not a method: it may be a field holding a function, which is how
@@ -1582,7 +1586,10 @@ impl<'a> Checker<'a> {
                     self.err(
                         "E0106",
                         span,
-                        format!("field `{fname}` is not callable: {}", other.display(self.intern)),
+                        format!(
+                            "field `{fname}` is not callable: {}",
+                            other.display(self.intern)
+                        ),
                     );
                     return Type::Error;
                 }
@@ -1621,9 +1628,7 @@ impl<'a> Checker<'a> {
                 };
                 let recv = self.check_expr(&recv_expr, None, env);
                 let place_mut = self.is_mut_place(&recv_expr, env);
-                if let Some(ty) =
-                    self.check_method_at(&recv, &fname, args, env, span, place_mut)
-                {
+                if let Some(ty) = self.check_method_at(&recv, &fname, args, env, span, place_mut) {
                     return ty;
                 }
             }
@@ -2139,7 +2144,10 @@ impl<'a> Checker<'a> {
                     self.err(
                         "E0108",
                         span,
-                        format!("`eq` needs a Vec or String, got {}", recv.display(self.intern)),
+                        format!(
+                            "`eq` needs a Vec or String, got {}",
+                            recv.display(self.intern)
+                        ),
                     );
                 }
                 if let Some(a) = args.first() {
@@ -2306,7 +2314,8 @@ impl<'a> Checker<'a> {
             } => {
                 let same = matches!(&lhs.kind, ExprKind::Path(p)
                     if p.segs.len() == 1 && p.segs[0].name == name);
-                let positive = matches!(&r.kind, ExprKind::Lit(Lit::Int { value, .. }) if *value > 0);
+                let positive =
+                    matches!(&r.kind, ExprKind::Lit(Lit::Int { value, .. }) if *value > 0);
                 same && positive
             }
             _ => false,
@@ -2552,9 +2561,7 @@ impl<'a> Checker<'a> {
                 // forces every caller through the fallible ABI and puts
                 // `err[DivError]` in every signature that touches `%`.
                 if let Some(p) = lt.as_prim() {
-                    if let (true, Some(unconditional)) =
-                        (p.is_int(), self.divisor_strength(rhs))
-                    {
+                    if let (true, Some(unconditional)) = (p.is_int(), self.divisor_strength(rhs)) {
                         self.nonzero_div.insert(rhs.id);
                         if !unconditional {
                             self.nonzero_div_needs_guard.insert(rhs.id);
@@ -2614,7 +2621,9 @@ impl<'a> Checker<'a> {
             | Type::Secret(inner) => (**inner).clone(),
             other => other.clone(),
         };
-        let Type::Named { def, .. } = &bare else { return };
+        let Type::Named { def, .. } = &bare else {
+            return;
+        };
         let Some(td) = self.type_defs.get(def).cloned() else {
             return;
         };
@@ -2660,7 +2669,9 @@ impl<'a> Checker<'a> {
             | Type::Secret(inner) => (**inner).clone(),
             other => other.clone(),
         };
-        let Type::Named { def, .. } = &bare else { return };
+        let Type::Named { def, .. } = &bare else {
+            return;
+        };
         let Some(td) = self.type_defs.get(def).cloned() else {
             return;
         };
@@ -2997,7 +3008,10 @@ impl<'a> Checker<'a> {
 
     fn map_key_type(&self, base: &Type) -> Type {
         match base {
-            Type::Named { args, .. } => args.first().cloned().unwrap_or(builtins::string_type(&self.b)),
+            Type::Named { args, .. } => args
+                .first()
+                .cloned()
+                .unwrap_or(builtins::string_type(&self.b)),
             Type::Ref { inner, .. } | Type::Own(inner) => self.map_key_type(inner),
             _ => builtins::string_type(&self.b),
         }
@@ -3589,7 +3603,6 @@ fn scrutinee_def(ty: &Type) -> Option<Symbol> {
     }
 }
 
-
 /// Apply `f` to each direct sub-expression of `e`.
 fn for_each_child(e: &Expr, f: &mut impl FnMut(&Expr)) {
     match &e.kind {
@@ -3678,7 +3691,10 @@ fn for_each_child(e: &Expr, f: &mut impl FnMut(&Expr)) {
             f(lhs);
             f(rhs);
         }
-        ExprKind::Lit(_) | ExprKind::Path(_) | ExprKind::Hole | ExprKind::Break
+        ExprKind::Lit(_)
+        | ExprKind::Path(_)
+        | ExprKind::Hole
+        | ExprKind::Break
         | ExprKind::Continue => {}
     }
 }

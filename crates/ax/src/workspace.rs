@@ -29,16 +29,9 @@ pub struct PatchResult {
     pub source: Option<String>,
 }
 
-pub fn apply_patch(
-    intern: &mut Interner,
-    src: &str,
-    file: &File,
-    tx: &PatchTx,
-) -> PatchResult {
+pub fn apply_patch(intern: &mut Interner, src: &str, file: &File, tx: &PatchTx) -> PatchResult {
     let base = hash::sha256_hex(src.as_bytes());
-    if !tx.base_module_hash.is_empty()
-        && tx.base_module_hash != "…"
-        && tx.base_module_hash != base
+    if !tx.base_module_hash.is_empty() && tx.base_module_hash != "…" && tx.base_module_hash != base
     {
         return PatchResult {
             ok: false,
@@ -156,7 +149,9 @@ fn def_name(def_id: &str) -> &str {
 fn replace_fn_body(src: &str, name: &str, repl: &str) -> Option<String> {
     let needle = format!("fn {name}");
     let start = src.find(&needle)?;
-    let eq = src[start..].find("\n=").or_else(|| src[start..].find('='))?;
+    let eq = src[start..]
+        .find("\n=")
+        .or_else(|| src[start..].find('='))?;
     let eq_abs = start + eq;
     let after_eq = src[eq_abs..].find('=')? + eq_abs + 1;
     // body runs to the matching top-level `;\n` after the `=`.

@@ -71,7 +71,10 @@ pub fn component_stubs() -> Vec<PackManifest> {
 
 fn builtin(name: &str, version: &str) -> PackManifest {
     let mut files = BTreeMap::new();
-    files.insert(format!("std/{name}/lib.ax"), hash::sha256_hex(name.as_bytes()));
+    files.insert(
+        format!("std/{name}/lib.ax"),
+        hash::sha256_hex(name.as_bytes()),
+    );
     let payload = files
         .iter()
         .map(|(p, h)| format!("{p}:{h}"))

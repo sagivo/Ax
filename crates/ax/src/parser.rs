@@ -150,7 +150,10 @@ impl<'a> Parser<'a> {
             self.bump();
             DeclKind::Fn(self.parse_fn_rest()?)
         } else if self.at(TokenKind::Ident)
-            && matches!(self.intern.get(self.cur().symbol), "struct" | "enum" | "impl" | "trait")
+            && matches!(
+                self.intern.get(self.cur().symbol),
+                "struct" | "enum" | "impl" | "trait"
+            )
         {
             // Rust-shaped type declarations. `struct`/`enum` become Type decls;
             // `impl`/`trait` are accepted and elided into a type alias so the
@@ -984,7 +987,10 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
         let named = TypeExpr {
-            kind: TypeExprKind::Named { path: path.clone(), args },
+            kind: TypeExprKind::Named {
+                path: path.clone(),
+                args,
+            },
             span: start.merge(self.prev_span()),
         };
         // Lattice constructors spelled as names: Untrusted[T] / Secret[T]
@@ -1031,7 +1037,8 @@ impl<'a> Parser<'a> {
             self.bump();
             let rhs = self.parse_expr()?;
             let span = lhs.span.merge(rhs.span);
-            return Ok(Expr { id: NodeId::NONE,
+            return Ok(Expr {
+                id: NodeId::NONE,
                 kind: ExprKind::Assign {
                     lhs: Box::new(lhs),
                     rhs: Box::new(rhs),
@@ -1048,7 +1055,8 @@ impl<'a> Parser<'a> {
             let op_span = self.bump().span;
             let rhs = self.parse_and()?;
             let span = e.span.merge(rhs.span);
-            e = Expr { id: NodeId::NONE,
+            e = Expr {
+                id: NodeId::NONE,
                 kind: ExprKind::Binary {
                     op: BinOp::Or,
                     lhs: Box::new(e),
@@ -1066,7 +1074,8 @@ impl<'a> Parser<'a> {
             self.bump();
             let rhs = self.parse_cmp()?;
             let span = e.span.merge(rhs.span);
-            e = Expr { id: NodeId::NONE,
+            e = Expr {
+                id: NodeId::NONE,
                 kind: ExprKind::Binary {
                     op: BinOp::And,
                     lhs: Box::new(e),
@@ -1093,7 +1102,8 @@ impl<'a> Parser<'a> {
             self.bump();
             let rhs = self.parse_bitor()?;
             let span = lhs.span.merge(rhs.span);
-            return Ok(Expr { id: NodeId::NONE,
+            return Ok(Expr {
+                id: NodeId::NONE,
                 kind: ExprKind::Binary {
                     op,
                     lhs: Box::new(lhs),
@@ -1202,7 +1212,8 @@ impl<'a> Parser<'a> {
             self.bump();
             let rhs = self.parse_mul()?;
             let span = e.span.merge(rhs.span);
-            e = Expr { id: NodeId::NONE,
+            e = Expr {
+                id: NodeId::NONE,
                 kind: ExprKind::Binary {
                     op,
                     lhs: Box::new(e),
@@ -1226,7 +1237,8 @@ impl<'a> Parser<'a> {
             self.bump();
             let rhs = self.parse_cast()?;
             let span = e.span.merge(rhs.span);
-            e = Expr { id: NodeId::NONE,
+            e = Expr {
+                id: NodeId::NONE,
                 kind: ExprKind::Binary {
                     op,
                     lhs: Box::new(e),
@@ -1263,7 +1275,8 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::Bang) {
             self.bump();
             let e = self.parse_unary()?;
-            return Ok(Expr { id: NodeId::NONE,
+            return Ok(Expr {
+                id: NodeId::NONE,
                 kind: ExprKind::Unary {
                     op: UnOp::Not,
                     expr: Box::new(e),
@@ -1286,7 +1299,8 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::Minus) {
             self.bump();
             let e = self.parse_unary()?;
-            return Ok(Expr { id: NodeId::NONE,
+            return Ok(Expr {
+                id: NodeId::NONE,
                 kind: ExprKind::Unary {
                     op: UnOp::Neg,
                     expr: Box::new(e),
@@ -1303,7 +1317,8 @@ impl<'a> Parser<'a> {
                 false
             };
             let e = self.parse_unary()?;
-            return Ok(Expr { id: NodeId::NONE,
+            return Ok(Expr {
+                id: NodeId::NONE,
                 kind: ExprKind::Unary {
                     op: if mut_ { UnOp::RefMut } else { UnOp::Ref },
                     expr: Box::new(e),
@@ -1314,7 +1329,8 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::Star) {
             self.bump();
             let e = self.parse_unary()?;
-            return Ok(Expr { id: NodeId::NONE,
+            return Ok(Expr {
+                id: NodeId::NONE,
                 kind: ExprKind::Unary {
                     op: UnOp::Deref,
                     expr: Box::new(e),
@@ -1346,7 +1362,8 @@ impl<'a> Parser<'a> {
                 }
                 self.expect(TokenKind::RParen)?;
                 let span = e.span.merge(self.prev_span());
-                e = Expr { id: NodeId::NONE,
+                e = Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Call {
                         callee: Box::new(e),
                         args,
@@ -1360,7 +1377,8 @@ impl<'a> Parser<'a> {
                 let index = self.parse_expr()?;
                 self.expect(TokenKind::RBracket)?;
                 let span = e.span.merge(self.prev_span());
-                e = Expr { id: NodeId::NONE,
+                e = Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Index {
                         base: Box::new(e),
                         index: Box::new(index),
@@ -1373,7 +1391,8 @@ impl<'a> Parser<'a> {
                 self.bump();
                 let field = self.parse_ident()?;
                 let span = e.span.merge(field.span);
-                e = Expr { id: NodeId::NONE,
+                e = Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Field {
                         base: Box::new(e),
                         field,
@@ -1406,7 +1425,8 @@ impl<'a> Parser<'a> {
                 let t = self.bump();
                 let text = self.intern.get(t.symbol).to_string();
                 let (value, suffix) = parse_int(&text);
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Lit(Lit::Int { value, suffix }),
                     span: t.span,
                 })
@@ -1415,14 +1435,16 @@ impl<'a> Parser<'a> {
                 let t = self.bump();
                 let text = self.intern.get(t.symbol).to_string();
                 let (value, suffix) = parse_float(&text);
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Lit(Lit::Float { value, suffix }),
                     span: t.span,
                 })
             }
             TokenKind::String => {
                 let t = self.bump();
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Lit(Lit::Str(self.intern.get(t.symbol).to_string())),
                     span: t.span,
                 })
@@ -1439,21 +1461,24 @@ impl<'a> Parser<'a> {
             }
             TokenKind::True => {
                 let t = self.bump();
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Lit(Lit::Bool(true)),
                     span: t.span,
                 })
             }
             TokenKind::False => {
                 let t = self.bump();
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Lit(Lit::Bool(false)),
                     span: t.span,
                 })
             }
             TokenKind::Question => {
                 let t = self.bump();
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Hole,
                     span: t.span,
                 })
@@ -1463,7 +1488,8 @@ impl<'a> Parser<'a> {
                 self.bump();
                 if self.at(TokenKind::RParen) {
                     let t = self.bump();
-                    return Ok(Expr { id: NodeId::NONE,
+                    return Ok(Expr {
+                        id: NodeId::NONE,
                         kind: ExprKind::Lit(Lit::Unit),
                         span: start.merge(t.span),
                     });
@@ -1478,7 +1504,8 @@ impl<'a> Parser<'a> {
             TokenKind::Loop => {
                 self.bump();
                 let body = self.parse_block_expr()?;
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Loop {
                         body: Box::new(body),
                     },
@@ -1516,7 +1543,8 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Let => {
                 let l = self.parse_let_stmt()?;
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Let(Box::new(l)),
                     span: start.merge(self.prev_span()),
                 })
@@ -1538,7 +1566,8 @@ impl<'a> Parser<'a> {
                 };
                 self.expect(TokenKind::FatArrow)?;
                 let body = self.parse_expr()?;
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Lambda {
                         params,
                         ret,
@@ -1554,7 +1583,8 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Return(e),
                     span: start.merge(self.prev_span()),
                 })
@@ -1562,7 +1592,8 @@ impl<'a> Parser<'a> {
             TokenKind::Raise => {
                 self.bump();
                 let e = self.parse_expr()?;
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Raise(Box::new(e)),
                     span: start.merge(self.prev_span()),
                 })
@@ -1571,7 +1602,8 @@ impl<'a> Parser<'a> {
             TokenKind::Attempt => {
                 self.bump();
                 let e = self.parse_expr()?;
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Attempt(Box::new(e)),
                     span: start.merge(self.prev_span()),
                 })
@@ -1580,7 +1612,8 @@ impl<'a> Parser<'a> {
                 self.bump();
                 let name = self.parse_ident()?;
                 let body = self.parse_block_expr()?;
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Region {
                         name,
                         body: Box::new(body),
@@ -1604,12 +1637,14 @@ impl<'a> Parser<'a> {
                 let name = self.parse_path_seg()?;
                 if self.at(TokenKind::LBrace) && self.looks_like_record_lit() {
                     let fields = self.parse_record_lit_fields()?;
-                    return Ok(Expr { id: NodeId::NONE,
+                    return Ok(Expr {
+                        id: NodeId::NONE,
                         kind: ExprKind::Variant { name, fields },
                         span: start.merge(self.prev_span()),
                     });
                 }
-                Ok(Expr { id: NodeId::NONE,
+                Ok(Expr {
+                    id: NodeId::NONE,
                     kind: ExprKind::Path(Path {
                         segs: vec![name],
                         span: start.merge(self.prev_span()),
@@ -1634,7 +1669,8 @@ impl<'a> Parser<'a> {
         if self.looks_like_record_lit() {
             let start = self.cur().span;
             let fields = self.parse_record_lit_fields()?;
-            return Ok(Expr { id: NodeId::NONE,
+            return Ok(Expr {
+                id: NodeId::NONE,
                 kind: ExprKind::Record(fields),
                 span: start.merge(self.prev_span()),
             });
@@ -1690,7 +1726,8 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokenKind::RBrace)?;
-        Ok(Expr { id: NodeId::NONE,
+        Ok(Expr {
+            id: NodeId::NONE,
             kind: ExprKind::Block { stmts, tail },
             span: start.merge(self.prev_span()),
         })
@@ -1738,7 +1775,8 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        Ok(Expr { id: NodeId::NONE,
+        Ok(Expr {
+            id: NodeId::NONE,
             kind: ExprKind::If {
                 cond: Box::new(cond),
                 then_b: Box::new(then_b),
@@ -1771,7 +1809,8 @@ impl<'a> Parser<'a> {
             });
         }
         self.expect(TokenKind::RBrace)?;
-        Ok(Expr { id: NodeId::NONE,
+        Ok(Expr {
+            id: NodeId::NONE,
             kind: ExprKind::Match {
                 scrut: Box::new(scrut),
                 arms,
@@ -1787,7 +1826,8 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::In)?;
         let iter = self.parse_expr()?;
         let body = self.parse_block_expr()?;
-        Ok(Expr { id: NodeId::NONE,
+        Ok(Expr {
+            id: NodeId::NONE,
             kind: ExprKind::For {
                 pat,
                 iter: Box::new(iter),
@@ -1820,7 +1860,8 @@ impl<'a> Parser<'a> {
             });
         }
         self.expect(TokenKind::RBrace)?;
-        Ok(Expr { id: NodeId::NONE,
+        Ok(Expr {
+            id: NodeId::NONE,
             kind: ExprKind::Catch {
                 expr: Box::new(expr),
                 arms,
@@ -1840,7 +1881,8 @@ impl<'a> Parser<'a> {
             bindings.push(l);
         }
         self.expect(TokenKind::RBrace)?;
-        Ok(Expr { id: NodeId::NONE,
+        Ok(Expr {
+            id: NodeId::NONE,
             kind: ExprKind::Par { bindings },
             span: start.merge(self.prev_span()),
         })
@@ -1883,7 +1925,8 @@ impl<'a> Parser<'a> {
         let start = self.cur().span;
         if self.at(TokenKind::Ident) && self.intern.get(self.cur().symbol) == "_" {
             let t = self.bump();
-            return Ok(Pattern { id: NodeId::NONE,
+            return Ok(Pattern {
+                id: NodeId::NONE,
                 kind: PatKind::Wild,
                 span: t.span,
             });
@@ -1893,28 +1936,32 @@ impl<'a> Parser<'a> {
                 let t = self.bump();
                 let text = self.intern.get(t.symbol).to_string();
                 let (value, suffix) = parse_int(&text);
-                Ok(Pattern { id: NodeId::NONE,
+                Ok(Pattern {
+                    id: NodeId::NONE,
                     kind: PatKind::Lit(Lit::Int { value, suffix }),
                     span: t.span,
                 })
             }
             TokenKind::True | TokenKind::False => {
                 let t = self.bump();
-                Ok(Pattern { id: NodeId::NONE,
+                Ok(Pattern {
+                    id: NodeId::NONE,
                     kind: PatKind::Lit(Lit::Bool(t.kind == TokenKind::True)),
                     span: t.span,
                 })
             }
             TokenKind::String => {
                 let t = self.bump();
-                Ok(Pattern { id: NodeId::NONE,
+                Ok(Pattern {
+                    id: NodeId::NONE,
                     kind: PatKind::Lit(Lit::Str(self.intern.get(t.symbol).to_string())),
                     span: t.span,
                 })
             }
             TokenKind::LBrace => {
                 let fields = self.parse_record_pat_fields()?;
-                Ok(Pattern { id: NodeId::NONE,
+                Ok(Pattern {
+                    id: NodeId::NONE,
                     kind: PatKind::Record(fields),
                     span: start.merge(self.prev_span()),
                 })
@@ -1934,7 +1981,8 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 self.expect(TokenKind::RParen)?;
-                Ok(Pattern { id: NodeId::NONE,
+                Ok(Pattern {
+                    id: NodeId::NONE,
                     kind: PatKind::Tuple(ps),
                     span: start.merge(self.prev_span()),
                 })
@@ -1943,7 +1991,8 @@ impl<'a> Parser<'a> {
                 let name = self.parse_ident()?;
                 if self.at(TokenKind::LBrace) {
                     let fields = self.parse_record_pat_fields()?;
-                    Ok(Pattern { id: NodeId::NONE,
+                    Ok(Pattern {
+                        id: NodeId::NONE,
                         kind: PatKind::Variant { name, fields },
                         span: start.merge(self.prev_span()),
                     })
@@ -1975,12 +2024,14 @@ impl<'a> Parser<'a> {
                         }
                     }
                     self.expect(TokenKind::RParen)?;
-                    Ok(Pattern { id: NodeId::NONE,
+                    Ok(Pattern {
+                        id: NodeId::NONE,
                         kind: PatKind::Variant { name, fields },
                         span: start.merge(self.prev_span()),
                     })
                 } else {
-                    Ok(Pattern { id: NodeId::NONE,
+                    Ok(Pattern {
+                        id: NodeId::NONE,
                         kind: PatKind::Bind(name),
                         span: start.merge(self.prev_span()),
                     })
@@ -2003,7 +2054,8 @@ impl<'a> Parser<'a> {
                     self.bump();
                     self.parse_pattern()?
                 } else {
-                    Pattern { id: NodeId::NONE,
+                    Pattern {
+                        id: NodeId::NONE,
                         kind: PatKind::Bind(name.clone()),
                         span: name.span,
                     }
@@ -2270,7 +2322,10 @@ fn parse_int_text(s: &str) -> Option<i128> {
     }
     // An unsuffixed literal that does not fit i128 is clamped rather than
     // silently wrapping; the checker reports the width mismatch.
-    clean.parse().ok().or_else(|| clean.parse::<u128>().ok().map(|v| v as i128))
+    clean
+        .parse()
+        .ok()
+        .or_else(|| clean.parse::<u128>().ok().map(|v| v as i128))
 }
 
 fn parse_float(text: &str) -> (f64, Option<Prim>) {

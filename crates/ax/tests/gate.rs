@@ -15,14 +15,22 @@ fn protocol_reduces_compile_and_run_cycles() {
     //
     // Fewer tasks than the CLI default: each rust attempt is a real rustc run.
     let r = evalloop::run_eval_loop(42, 6, 12);
-    assert_eq!(r.ax_pass, r.n, "ax must green every hidden task: {:?}", r.ax);
+    assert_eq!(
+        r.ax_pass, r.n,
+        "ax must green every hidden task: {:?}",
+        r.ax
+    );
     if r.rust_skipped {
         // No control available: assert what we can and say nothing about the
         // comparison rather than inventing a number.
         eprintln!("note: rustc not found, control arm skipped");
         return;
     }
-    assert_eq!(r.rust_pass, r.n, "the control must also green: {:?}", r.rust);
+    assert_eq!(
+        r.rust_pass, r.n,
+        "the control must also green: {:?}",
+        r.rust
+    );
     assert!(
         r.ax_median_attempts <= r.rust_median_attempts,
         "ax median attempts {} > rust median {}",
@@ -64,9 +72,12 @@ fn distance(v: Vec2) -> f32 = ?;
     for f in h.fills.iter().filter(|f| f.compiles) {
         let patched = src.replacen('?', &f.expr, 1);
         let mut s = Session::new();
-        let out = s
-            .compile("t.ax", &patched)
-            .unwrap_or_else(|d| panic!("fill {:?} was reported as compiling but did not: {d:?}", f.expr));
+        let out = s.compile("t.ax", &patched).unwrap_or_else(|d| {
+            panic!(
+                "fill {:?} was reported as compiling but did not: {d:?}",
+                f.expr
+            )
+        });
         assert!(
             !out.diags.iter().any(|d| d.is_error()),
             "fill {:?} produced errors",
@@ -90,8 +101,14 @@ fn cap_rejects_parent_escape() {
     std::fs::write(tmp.join("ok.txt"), "hi").unwrap();
     let cap = ReadCap::open_dir(&tmp).unwrap();
     assert!(cap.read("ok.txt").is_ok());
-    assert!(matches!(cap.read("../etc/passwd"), Err(caps::CapError::Escape)));
-    assert!(matches!(cap.read("/etc/passwd"), Err(caps::CapError::Absolute)));
+    assert!(matches!(
+        cap.read("../etc/passwd"),
+        Err(caps::CapError::Escape)
+    ));
+    assert!(matches!(
+        cap.read("/etc/passwd"),
+        Err(caps::CapError::Absolute)
+    ));
 }
 
 #[test]
@@ -136,10 +153,13 @@ fn interp_host_read_rejects_escape() {
     // directory — so it passed whether or not confinement worked at all.
     let outside = std::env::temp_dir().join("ax-escape-target.txt");
     std::fs::write(&outside, b"secret").unwrap();
-    assert!(outside.exists(), "the target must exist for this test to mean anything");
+    assert!(
+        outside.exists(),
+        "the target must exist for this test to mean anything"
+    );
 
     for path in [
-        outside.to_string_lossy().to_string(), // absolute
+        outside.to_string_lossy().to_string(),         // absolute
         "../".repeat(12) + &outside.to_string_lossy(), // via `..`
     ] {
         let src = format!(
@@ -160,7 +180,11 @@ fn native_eq_oracle(src: &str, stem: &str) {
     let mut s = Session::new();
     let file = s.parse(&format!("{stem}.ax"), src).unwrap();
     let checked = s.check(&file);
-    assert!(!checked.diags.iter().any(|d| d.is_error()), "{:?}", checked.diags);
+    assert!(
+        !checked.diags.iter().any(|d| d.is_error()),
+        "{:?}",
+        checked.diags
+    );
     let oracle = run_main(&s.intern, &checked, 0).unwrap();
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/diff");
     let br = codegen::build_tier(&s.intern, &checked, stem, &dir, Tier::Dev).unwrap();
@@ -219,8 +243,9 @@ fn main() -> u64 !{io[fs], abort} = io.bytesum_file("x.txt");
         "ambient io is not in the transcript, so it is not replayable: {labels:?}"
     );
     assert!(
-        labels.iter().any(|l| l.starts_with("ambient-io(")
-            && l.contains("io.bytesum_file")),
+        labels
+            .iter()
+            .any(|l| l.starts_with("ambient-io(") && l.contains("io.bytesum_file")),
         "the offending call must be named: {labels:?}"
     );
 }
@@ -253,7 +278,11 @@ fn only_value_preserving_fixes_are_auto_applied() {
     let widen = "module t;\nfn main() -> u64 = 3usz;\n";
     let r = ax::agent::apply_safe_fixes("t.ax", widen, Surface::Conventional);
     assert_eq!(r.applied.len(), 1, "widening should be applied: {r:?}");
-    assert!(r.clean, "the module should check after the fix: {:?}", r.remaining);
+    assert!(
+        r.clean,
+        "the module should check after the fix: {:?}",
+        r.remaining
+    );
     assert!(r.source.contains("as u64"), "{}", r.source);
 
     let narrow = "module t;\nfn main() -> u8 = 300usz;\n";
@@ -289,8 +318,7 @@ fn replay_is_hermetic_and_detects_divergence() {
             result: "1234".into(),
         },
     ];
-    let (v, _) =
-        ax::driver::run_traced(&s.intern, &out, 0, &[], Some(events.clone())).unwrap();
+    let (v, _) = ax::driver::run_traced(&s.intern, &out, 0, &[], Some(events.clone())).unwrap();
     assert_eq!(v.as_i128(), 1234, "replay must return the recorded result");
 
     // A transcript that disagrees with what the program does is an error, not a
@@ -538,7 +566,9 @@ fn main() -> usz !{diverge} = {
         !row.contains("DivError"),
         "the row should not claim an error that cannot be raised: {row}"
     );
-    let ir2 = ax::lower::lower_program(&s2.intern, &out2).unwrap().to_text();
+    let ir2 = ax::lower::lower_program(&s2.intern, &out2)
+        .unwrap()
+        .to_text();
     assert!(
         ir2.contains("abort div_exact"),
         "an incremented divisor keeps its guard:\n{ir2}"
@@ -591,7 +621,9 @@ fn main() -> usz = {
 "#;
     let mut s2 = Session::new();
     let out2 = s2.compile("t.ax", assigned).expect("compiles");
-    let ir2 = ax::lower::lower_program(&s2.intern, &out2).unwrap().to_text();
+    let ir2 = ax::lower::lower_program(&s2.intern, &out2)
+        .unwrap()
+        .to_text();
     assert!(
         !ir2.contains("ax_recip_m"),
         "an assigned divisor must not hoist:\n{ir2}"
@@ -613,7 +645,9 @@ fn main() -> usz = {
 "#;
     let mut s3 = Session::new();
     let out3 = s3.compile("t.ax", literal).expect("compiles");
-    let ir3 = ax::lower::lower_program(&s3.intern, &out3).unwrap().to_text();
+    let ir3 = ax::lower::lower_program(&s3.intern, &out3)
+        .unwrap()
+        .to_text();
     assert!(
         !ir3.contains("ax_recip_m"),
         "a constant divisor must be left to the C compiler:\n{ir3}"
@@ -632,10 +666,7 @@ fn main() -> i32 = comb(10, 4);
     let mut s = Session::new();
     let out = s.compile("t.ax", src).expect("compiles");
     let ir = ax::lower::lower_program(&s.intern, &out).unwrap().to_text();
-    let comb = ir
-        .split("fn @ax_comb")
-        .nth(1)
-        .expect("comb is in the IR");
+    let comb = ir.split("fn @ax_comb").nth(1).expect("comb is in the IR");
     assert!(
         comb.contains("memoize"),
         "expected comb to be marked memoize:\n{comb}"

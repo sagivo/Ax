@@ -412,7 +412,13 @@ impl<'a> Interpreter<'a> {
         }
         let mut known_fns: std::collections::HashSet<String> = fns.keys().cloned().collect();
         for n in [
-            "i32.cmp", "f32.cmp", "int.div", "int.rem", "int.div_trunc", "math.sqrt", "math.abs",
+            "i32.cmp",
+            "f32.cmp",
+            "int.div",
+            "int.rem",
+            "int.div_trunc",
+            "math.sqrt",
+            "math.abs",
         ] {
             known_fns.insert(n.to_string());
         }
@@ -477,7 +483,12 @@ impl<'a> Interpreter<'a> {
     }
 
     /// Record an effect, or return its recorded result when replaying.
-    fn effect(&mut self, op: &str, arg: &str, perform: impl FnOnce(&mut Self) -> Result<String, Flow>) -> Result<String, Flow> {
+    fn effect(
+        &mut self,
+        op: &str,
+        arg: &str,
+        perform: impl FnOnce(&mut Self) -> Result<String, Flow>,
+    ) -> Result<String, Flow> {
         if let Some(r) = self.replay_next(op, arg) {
             return r;
         }
@@ -570,7 +581,9 @@ impl<'a> Interpreter<'a> {
             let memo_key = self.memo.as_ref().map(|_| {
                 (
                     name.to_string(),
-                    args.iter().flat_map(|a| a.canonical_bytes()).collect::<Vec<u8>>(),
+                    args.iter()
+                        .flat_map(|a| a.canonical_bytes())
+                        .collect::<Vec<u8>>(),
                 )
             });
             if let (Some(k), Some(m)) = (&memo_key, &self.memo) {
@@ -600,8 +613,8 @@ impl<'a> Interpreter<'a> {
                 }
                 // Missing argument: a defaulted dictionary parameter.
                 if f.sig.params[i].2 {
-                    if let Some(d) = call_site
-                        .and_then(|c| self.dict_defaults.get(&(c, i as u32)).copied())
+                    if let Some(d) =
+                        call_site.and_then(|c| self.dict_defaults.get(&(c, i as u32)).copied())
                     {
                         let v = self.build_dict(d)?;
                         frame.insert(self.intern.get(*n).to_string(), v);
@@ -805,32 +818,27 @@ impl<'a> Interpreter<'a> {
                     Err(other) => return Err(other),
                 }
             },
-            ExprKind::While { cond, body } => {
-                loop {
-                    if !self.eval(cond)?.as_bool() {
-                        return Ok(Value::Unit);
-                    }
-                    match self.eval(body) {
-                        Err(Flow::Break) => return Ok(Value::Unit),
-                        Err(Flow::Continue) | Ok(_) => {}
-                        Err(other) => return Err(other),
-                    }
-                    if self.world.step > 10_000_000 {
-                        return Err(Flow::Abort("loop iteration limit".into()));
-                    }
-                    self.world.tick();
+            ExprKind::While { cond, body } => loop {
+                if !self.eval(cond)?.as_bool() {
+                    return Ok(Value::Unit);
                 }
-            }
+                match self.eval(body) {
+                    Err(Flow::Break) => return Ok(Value::Unit),
+                    Err(Flow::Continue) | Ok(_) => {}
+                    Err(other) => return Err(other),
+                }
+                if self.world.step > 10_000_000 {
+                    return Err(Flow::Abort("loop iteration limit".into()));
+                }
+                self.world.tick();
+            },
             ExprKind::Break => Err(Flow::Break),
             ExprKind::Continue => Err(Flow::Continue),
             ExprKind::Cast { expr, ty: _ } => {
                 let v = self.eval(expr)?;
                 // The target comes from the checker's table, so a cast whose
                 // result type was refined by context converts to that type.
-                let to = self
-                    .node_types
-                    .get(e.id.index())
-                    .and_then(|t| t.as_prim());
+                let to = self.node_types.get(e.id.index()).and_then(|t| t.as_prim());
                 Ok(cast_value(&v, to))
             }
             ExprKind::Let(l) => {
@@ -902,11 +910,7 @@ impl<'a> Interpreter<'a> {
                 // Result[T,E] as a variant: Err re-raises, Ok unwraps.
                 match &v {
                     Value::Variant { name, fields } if name == "Err" => {
-                        let err = fields
-                            .values()
-                            .next()
-                            .cloned()
-                            .unwrap_or(v.clone());
+                        let err = fields.values().next().cloned().unwrap_or(v.clone());
                         Err(Flow::Raise(err))
                     }
                     Value::Variant { name, fields } if name == "Ok" => {
@@ -1067,10 +1071,7 @@ impl<'a> Interpreter<'a> {
                 if let Some(fnames) = self.variant_fields.get(&n).cloned() {
                     let mut fields = IndexMap::new();
                     for (i, v) in argv.into_iter().enumerate() {
-                        let key = fnames
-                            .get(i)
-                            .cloned()
-                            .unwrap_or_else(|| format!("_{i}"));
+                        let key = fnames.get(i).cloned().unwrap_or_else(|| format!("_{i}"));
                         fields.insert(key, v);
                     }
                     return Ok(Value::Variant { name: n, fields });
@@ -1092,10 +1093,7 @@ impl<'a> Interpreter<'a> {
     /// A literal's value at its checked type. Falls back to the literal's own
     /// spelling when no type was recorded (a synthesised node).
     fn lit_value_at(&self, l: &Lit, id: NodeId) -> Value {
-        let prim = self
-            .node_types
-            .get(id.index())
-            .and_then(|t| t.as_prim());
+        let prim = self.node_types.get(id.index()).and_then(|t| t.as_prim());
         match (l, prim) {
             (Lit::Int { value, suffix }, p) => {
                 let prim = suffix.or(p).unwrap_or(Prim::I32);
@@ -1206,10 +1204,7 @@ impl<'a> Interpreter<'a> {
                         let b = ys.borrow();
                         a.len() == b.len()
                             && a.iter().zip(b.iter()).all(|(x, y)| match (x, y) {
-                                (
-                                    Value::Int { bits: p, .. },
-                                    Value::Int { bits: q, .. },
-                                ) => p == q,
+                                (Value::Int { bits: p, .. }, Value::Int { bits: q, .. }) => p == q,
                                 (Value::Bool(p), Value::Bool(q)) => p == q,
                                 (Value::Str(p), Value::Str(q)) => p == q,
                                 _ => false,
@@ -1551,7 +1546,10 @@ impl<'a> Interpreter<'a> {
             "try_to_u8" => {
                 let n = args.first().map(|v| v.as_i128()).unwrap_or(0);
                 if (0..=255).contains(&n) {
-                    Ok(ok_val(Value::Int { bits: n, prim: Prim::U8 }))
+                    Ok(ok_val(Value::Int {
+                        bits: n,
+                        prim: Prim::U8,
+                    }))
                 } else {
                     Ok(err_val(Value::Variant {
                         name: "Invalid".into(),
@@ -1617,18 +1615,19 @@ impl<'a> Interpreter<'a> {
                     Some(other) => other.display().trim_matches('"').to_string(),
                     None => String::new(),
                 };
-                let sum = self.effect("io.bytesum_file", &path, |_| {
-                    match crate::caps::confine(std::path::Path::new("."), &path) {
-                        Ok(p) => match std::fs::read(p) {
-                            Ok(bytes) => Ok(bytes
-                                .iter()
-                                .fold(0u64, |a, b| a.wrapping_add(*b as u64))
-                                .to_string()),
-                            Err(e) => Err(Flow::Abort(format!("io.bytesum_file {path}: {e}"))),
-                        },
-                        Err(e) => Err(Flow::Abort(format!("io.bytesum_file {path}: {e:?}"))),
-                    }
-                })?;
+                let sum =
+                    self.effect("io.bytesum_file", &path, |_| {
+                        match crate::caps::confine(std::path::Path::new("."), &path) {
+                            Ok(p) => match std::fs::read(p) {
+                                Ok(bytes) => Ok(bytes
+                                    .iter()
+                                    .fold(0u64, |a, b| a.wrapping_add(*b as u64))
+                                    .to_string()),
+                                Err(e) => Err(Flow::Abort(format!("io.bytesum_file {path}: {e}"))),
+                            },
+                            Err(e) => Err(Flow::Abort(format!("io.bytesum_file {path}: {e:?}"))),
+                        }
+                    })?;
                 Ok(Value::Int {
                     bits: sum.parse::<u64>().unwrap_or(0) as i128,
                     prim: Prim::U64,
@@ -1705,11 +1704,9 @@ impl<'a> Interpreter<'a> {
                 })?;
                 Ok(Value::usz(len.parse::<u64>().unwrap_or(0)))
             }
-            "http.get_bytesum" | "http_get_bytesum" => {
-                Err(Flow::Abort(
-                    "http.get_bytesum is native-only; use `ax build`".into(),
-                ))
-            }
+            "http.get_bytesum" | "http_get_bytesum" => Err(Flow::Abort(
+                "http.get_bytesum is native-only; use `ax build`".into(),
+            )),
             "vec.len" => {
                 if let Some(v) = args.first() {
                     if let Some(r) = self.method(v, "len", &[])? {
@@ -2143,7 +2140,6 @@ fn value_as_path(v: Option<&Value>) -> String {
     }
 }
 
-
 fn path_join(p: &Path, intern: &Interner) -> String {
     p.segs
         .iter()
@@ -2206,7 +2202,14 @@ fn cast_value(v: &Value, to: Option<Prim>) -> Value {
                     let (lo, hi) = if to.is_signed_int() {
                         (-(1i128 << (w - 1)), (1i128 << (w - 1)) - 1)
                     } else {
-                        (0, if w >= 128 { i128::MAX } else { (1i128 << w) - 1 })
+                        (
+                            0,
+                            if w >= 128 {
+                                i128::MAX
+                            } else {
+                                (1i128 << w) - 1
+                            },
+                        )
                     };
                     if f <= lo as f64 {
                         lo

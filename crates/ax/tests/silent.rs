@@ -46,7 +46,8 @@ fn corpus_contains_a_family_where_rust_is_better() {
         "the corpus must retain parity families so the summary is not all wins"
     );
     assert!(
-        c.iter().any(|h| matches!(h.expect, Expect::Value(_)) && h.family == "control"),
+        c.iter()
+            .any(|h| matches!(h.expect, Expect::Value(_)) && h.family == "control"),
         "the corpus must contain a correct control program"
     );
 }
@@ -88,11 +89,10 @@ fn ax_rejects_the_language_level_hazards() {
             .iter()
             .find(|h| h.id == id)
             .unwrap_or_else(|| panic!("{id} missing from corpus"));
-        let rejected = h
-            .ax
-            .tiers
-            .iter()
-            .all(|(_, v)| matches!(v, Verdict::Rejected { .. }));
+        let rejected =
+            h.ax.tiers
+                .iter()
+                .all(|(_, v)| matches!(v, Verdict::Rejected { .. }));
         assert!(rejected, "ax must reject {id}, got {:?}", h.ax.tiers);
     }
 }

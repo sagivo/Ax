@@ -141,12 +141,7 @@ fn generate(
     let intern = &s.intern;
     // The function whose body contains the hole, e.g. `...::fn:distance`.
     // A def_id looks like `module::fn:name`; take the text after the last colon.
-    let enclosing = hole
-        .def_id
-        .rsplit(':')
-        .next()
-        .unwrap_or("")
-        .to_string();
+    let enclosing = hole.def_id.rsplit(':').next().unwrap_or("").to_string();
     let mut cands: Vec<(String, String)> = Vec::new();
 
     // Values in scope, and their fields, that already have the expected type.
@@ -182,9 +177,7 @@ fn generate(
                         for (_, fty) in fields {
                             match scope_terms.iter().find(|(_, t)| types_eq(t, fty)) {
                                 Some((term, _)) => args.push(term.clone()),
-                                None => {
-                                    args.push(literal_for(fty).unwrap_or_else(|| "?".into()))
-                                }
+                                None => args.push(literal_for(fty).unwrap_or_else(|| "?".into())),
                             }
                         }
                         if !args.iter().any(|a| a == "?") {
@@ -193,10 +186,7 @@ fn generate(
                             } else {
                                 format!("{vn}({})", args.join(", "))
                             };
-                            cands.push((
-                                expr,
-                                "variant constructor with in-scope payload".into(),
-                            ));
+                            cands.push((expr, "variant constructor with in-scope payload".into()));
                         }
                     }
                 }
@@ -222,7 +212,11 @@ fn generate(
         for p in &c.params {
             match pick_arg(p, &scope_terms, &used, tree) {
                 Some(a) => {
-                    used.push(a.trim_start_matches("&mut ").trim_start_matches('&').to_string());
+                    used.push(
+                        a.trim_start_matches("&mut ")
+                            .trim_start_matches('&')
+                            .to_string(),
+                    );
                     args.push(a);
                 }
                 None => match literal_for(p) {
@@ -388,7 +382,6 @@ fn literal_for(ty: &Type) -> Option<String> {
 pub struct FillReport {
     pub holes: Vec<HoleFills>,
 }
-
 
 /// A fix that was, or could be, applied automatically.
 #[derive(Clone, Debug, Serialize)]

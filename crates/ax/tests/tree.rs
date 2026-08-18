@@ -26,9 +26,13 @@ fn compile_conv(src: &str) -> (Session, ax::check::CheckOutput) {
 
 #[test]
 fn looks_like_tree_detects_open_paren() {
-    assert!(ax::tree::looks_like_tree("(module t\n  (fn main () i32 1)\n)\n"));
+    assert!(ax::tree::looks_like_tree(
+        "(module t\n  (fn main () i32 1)\n)\n"
+    ));
     assert!(ax::tree::looks_like_tree("; comment\n(fn main () i32 1)\n"));
-    assert!(!ax::tree::looks_like_tree("module t;\nfn main() -> i32 = 1;\n"));
+    assert!(!ax::tree::looks_like_tree(
+        "module t;\nfn main() -> i32 = 1;\n"
+    ));
     assert!(!ax::tree::looks_like_tree(""));
 }
 
@@ -64,7 +68,8 @@ fn tree_and_conventional_same_answer() {
   (fn main () i32 (add 20 22))
 )
 "#;
-    let conv = "module t;\nfn add(a: i32, b: i32) -> i32 = a + b;\nfn main() -> i32 = add(20, 22);\n";
+    let conv =
+        "module t;\nfn add(a: i32, b: i32) -> i32 = a + b;\nfn main() -> i32 = add(20, 22);\n";
     let (st, ot) = compile_tree(tree);
     let (sc, oc) = compile_conv(conv);
     let vt = run_main(&st.intern, &ot, 0).unwrap();
@@ -137,9 +142,14 @@ fn tree_fmt_roundtrip() {
     let mut intern2 = ax::Interner::new();
     let file2 = ax::tree::parse_file(&once, FileId(0), &mut intern2, "t").unwrap();
     let twice = ax::tree::format_file(&file2, &intern2);
-    assert_eq!(once, twice, "tree printer is not idempotent:\n{once}\n---\n{twice}");
+    assert_eq!(
+        once, twice,
+        "tree printer is not idempotent:\n{once}\n---\n{twice}"
+    );
     let mut s = Session::new();
-    let out = s.compile("t.ax", &once).unwrap_or_else(|d| panic!("{d:#?}"));
+    let out = s
+        .compile("t.ax", &once)
+        .unwrap_or_else(|d| panic!("{d:#?}"));
     let v = run_main(&s.intern, &out, 0).unwrap();
     assert_eq!(v.display(), "3i32");
 }
@@ -169,9 +179,7 @@ fn tree_hole_is_a_hole() {
 "#;
     let mut s = Session::new();
     s.allow_holes = true;
-    let out = s
-        .compile("t.ax", src)
-        .unwrap_or_else(|d| panic!("{d:#?}"));
+    let out = s.compile("t.ax", src).unwrap_or_else(|d| panic!("{d:#?}"));
     assert!(!out.holes.is_empty(), "expected a typed hole");
 }
 
@@ -194,7 +202,9 @@ fn tree_hole_fills_are_tree_forms() {
         "tree fills must propose a prefix call, got {exprs:?}"
     );
     assert!(
-        !exprs.iter().any(|e| e.contains(".x") || e.contains(".y") && !e.starts_with("(field ")),
+        !exprs
+            .iter()
+            .any(|e| e.contains(".x") || e.contains(".y") && !e.starts_with("(field ")),
         "tree fills must not emit infix field access: {exprs:?}"
     );
 }

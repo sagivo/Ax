@@ -153,7 +153,10 @@ impl AggDef {
     }
 
     pub fn field_index(&self, name: &str) -> Option<u32> {
-        self.fields.iter().position(|f| f.name == name).map(|i| i as u32)
+        self.fields
+            .iter()
+            .position(|f| f.name == name)
+            .map(|i| i as u32)
     }
 
     pub fn case(&self, name: &str) -> Option<&VariantCase> {
@@ -997,7 +1000,10 @@ pub fn verify(p: &Program) -> Result<(), String> {
                     }
                 }
                 match &i.op {
-                    Op::Store { .. } | Op::CopyAgg { .. } | Op::RegionEnter(_) | Op::RegionExit(_) => {
+                    Op::Store { .. }
+                    | Op::CopyAgg { .. }
+                    | Op::RegionEnter(_)
+                    | Op::RegionExit(_) => {
                         if !i.results.is_empty() {
                             return Err(format!(
                                 "@{}: bb{}: void op defines a value",
@@ -1042,9 +1048,7 @@ pub fn verify(p: &Program) -> Result<(), String> {
             };
             match &b.term {
                 Term::Jump(e) => check_edge(e)?,
-                Term::Br {
-                    then_e, else_e, ..
-                } => {
+                Term::Br { then_e, else_e, .. } => {
                     check_edge(then_e)?;
                     check_edge(else_e)?;
                 }
@@ -1063,7 +1067,11 @@ pub fn verify(p: &Program) -> Result<(), String> {
                 // returned expression. Caught cheaply now; otherwise it shows up
                 // as a silently wrong value after C's implicit conversions.
                 Term::Ret(v) => {
-                    let want = if f.ret_agg.is_some() { IrTy::Unit } else { f.ret };
+                    let want = if f.ret_agg.is_some() {
+                        IrTy::Unit
+                    } else {
+                        f.ret
+                    };
                     match v {
                         Some(x) => {
                             let got = f.ty_of(*x);

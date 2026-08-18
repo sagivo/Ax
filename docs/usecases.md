@@ -10,13 +10,13 @@ Same task in Rust, C, Go, and Ax. Token counts use the **in-repo proxy** (`ax::t
 |---|---:|---:|---:|---:|---:|---:|
 | Add two integers | 24 | 19 | 22 | 22 | 15 | 0.62× |
 | If / else | 24 | 22 | 24 | 22 | 17 | 0.71× |
-| Sum a range | 59 | 53 | 43 | 45 | 28 | 0.47× |
+| Sum a range | 58 | 52 | 42 | 45 | 11 | 0.19× |
 | Recursion | 34 | 31 | 34 | 32 | 26 | 0.76× |
 | Option unwrap-or | 52 | 57 | 41 | 44 | 25 | 0.48× |
 | Map insert + get | 112 | 156 | 56 | 126 | 75 | 0.67× |
 | Fallible parse | 35 | 52 | 42 | 48 | 26 | 0.74× |
 | String interpolation | 25 | 37 | 25 | 19 | 16 | 0.64× |
-| **total** | 365 | 427 | 287 | 358 | 228 | 0.62× |
+| **total** | 364 | 426 | 286 | 358 | 211 | 0.58× |
 
 Read the totals as *how much text an agent pays to write the same idea*. **Ax** is the short syntax (the language). Conventional is the corpus dialect, kept so the same idea can be compared with Rust / C / Go.
 
@@ -116,7 +116,7 @@ Accumulate `0 + 1 + … + (n-1)`.
 
 | rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
-| 59 | 53 | 43 | 45 | 28 |
+| 58 | 52 | 42 | 45 | 11 |
 
 **Rust**
 
@@ -169,7 +169,7 @@ fn sum(n: usz) -> usz = {
 **Ax**
 
 ```ax
-#sum(n Z) Z = { s Z:= 0; i~n { s = s + i }; s };
+#sum(n Z) Z = +/n;
 ```
 ## Recursion
 

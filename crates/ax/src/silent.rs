@@ -370,7 +370,9 @@ fn run_rust(h: &Hazard, out_dir: &Path, rustc: bool) -> ArmResult {
                 Verdict::Rejected { code }
             }
             Ok(_) => match Command::new(&bin).args(h.argv).output() {
-                Err(e) => Verdict::Crashed { note: e.to_string() },
+                Err(e) => Verdict::Crashed {
+                    note: e.to_string(),
+                },
                 Ok(r) if !r.status.success() => Verdict::Crashed {
                     note: String::from_utf8_lossy(&r.stderr)
                         .lines()

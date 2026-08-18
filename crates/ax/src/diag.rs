@@ -228,7 +228,10 @@ pub fn catalog() -> Vec<(&'static str, &'static str)> {
         ("A0103", "`.clone()` elided"),
         ("A0104", "`Box`/`Rc`/`Arc` treated as the inner value"),
         ("A0105", "`RefCell` is identity"),
-        ("A0106", "`unsafe` is meaningless; documented Rust divergence"),
+        (
+            "A0106",
+            "`unsafe` is meaningless; documented Rust divergence",
+        ),
         ("A0107", "`move` closure capture is ignored"),
         ("A0108", "macro form rewritten or rejected"),
         ("A0109", "`?` on a non-Result is ignored"),

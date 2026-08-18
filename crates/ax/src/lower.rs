@@ -126,7 +126,9 @@ impl<'a> Lowerer<'a> {
         let mut test_fns = Vec::new();
         for (ti, _t) in self.co.tests.iter().enumerate() {
             let id = self.prog.funcs.len() as FuncId;
-            self.prog.funcs.push(placeholder(id, format!("ax_test_{ti}")));
+            self.prog
+                .funcs
+                .push(placeholder(id, format!("ax_test_{ti}")));
             test_fns.push((ti, id));
         }
 
@@ -507,7 +509,11 @@ impl<'a> Lowerer<'a> {
         let mut fields = Vec::with_capacity(fs.len());
         for (n, ft) in fs {
             let ty = self.ir_ty(ft)?;
-            let agg = if ty == IrTy::Ptr { self.agg_of(ft)? } else { None };
+            let agg = if ty == IrTy::Ptr {
+                self.agg_of(ft)?
+            } else {
+                None
+            };
             fields.push(FieldDef {
                 name: self.sym(*n),
                 ty,
@@ -527,7 +533,11 @@ impl<'a> Lowerer<'a> {
         let mut fields = Vec::with_capacity(ts.len());
         for (n, ft) in names.iter().zip(ts) {
             let ty = self.ir_ty(ft)?;
-            let agg = if ty == IrTy::Ptr { self.agg_of(ft)? } else { None };
+            let agg = if ty == IrTy::Ptr {
+                self.agg_of(ft)?
+            } else {
+                None
+            };
             fields.push(FieldDef {
                 name: n.clone(),
                 ty,
@@ -564,7 +574,11 @@ impl<'a> Lowerer<'a> {
             let mut row = Vec::new();
             for (n, ft) in fs {
                 let ty = self.ir_ty(ft)?;
-                let agg = if ty == IrTy::Ptr { self.agg_of(ft)? } else { None };
+                let agg = if ty == IrTy::Ptr {
+                    self.agg_of(ft)?
+                } else {
+                    None
+                };
                 let inline = if matches!(ft, Type::Ref { .. } | Type::Own(_)) {
                     None
                 } else {
@@ -574,7 +588,14 @@ impl<'a> Lowerer<'a> {
                     Some(a) => (self.prog.agg(a).size, self.prog.agg(a).align),
                     None => (ty.size(), ty.align()),
                 };
-                row.push((self.sym(*n), ty, inline, size, align, ft.display(self.intern)));
+                row.push((
+                    self.sym(*n),
+                    ty,
+                    inline,
+                    size,
+                    align,
+                    ft.display(self.intern),
+                ));
             }
             per_case.push(row);
         }
@@ -685,7 +706,11 @@ impl<'a> Lowerer<'a> {
             let ir = fl.l.ir_ty(&t)?;
             let v = fl.fb.new_val(ir);
             fl.fb.func.params.push(v);
-            let agg = if ir == IrTy::Ptr { fl.l.agg_of(&t)? } else { None };
+            let agg = if ir == IrTy::Ptr {
+                fl.l.agg_of(&t)?
+            } else {
+                None
+            };
             // Only spill when the body actually needs an address for it.
             let needs = param_needs_slot(&f.body, *pname);
             fl.bind_param(*pname, v, ir, agg, &t, needs);
@@ -693,13 +718,12 @@ impl<'a> Lowerer<'a> {
             // caller's reference cannot die during the call (§5.2.3).
             if ir == IrTy::Ptr {
                 let fname = fl.l.intern.get(f.sig.name);
-                if let Some(fo) = fl
-                    .l
-                    .co
-                    .ownership
-                    .functions
-                    .iter()
-                    .find(|x| x.function == fname)
+                if let Some(fo) =
+                    fl.l.co
+                        .ownership
+                        .functions
+                        .iter()
+                        .find(|x| x.function == fname)
                 {
                     let pn = fl.l.intern.get(*pname);
                     if let Some(vs) = fo.values.iter().find(|v| v.name == pn) {
@@ -731,11 +755,7 @@ impl<'a> Lowerer<'a> {
             fl.emit_return(body)?;
         }
         let mut func = fl.fb.finish();
-        func.exported = self
-            .co
-            .exports
-            .iter()
-            .any(|e| e == &self.sym(f.sig.name))
+        func.exported = self.co.exports.iter().any(|e| e == &self.sym(f.sig.name))
             || self.sym(f.sig.name) == "main";
         Ok(func)
     }
@@ -805,7 +825,11 @@ impl<'a> Lowerer<'a> {
         let Some(t) = found else { return Ok(None) };
         let display = t.display(self.intern);
         let ir = self.ir_ty(&t)?;
-        let agg = if ir == IrTy::Ptr { self.agg_of(&t)? } else { None };
+        let agg = if ir == IrTy::Ptr {
+            self.agg_of(&t)?
+        } else {
+            None
+        };
         let agg = match agg {
             Some(a) => Some(a),
             None => {
@@ -824,7 +848,11 @@ impl<'a> Lowerer<'a> {
                 }
             }
         };
-        Ok(Some(ErrChannel { ty: ir, agg, display }))
+        Ok(Some(ErrChannel {
+            ty: ir,
+            agg,
+            display,
+        }))
     }
 }
 
@@ -846,9 +874,11 @@ fn worth_memoizing(f: &CheckedFn, ret: &Type) -> bool {
     if n != 1 && n != 2 {
         return false;
     }
-    let args_ok = f.sig.params.iter().all(|(_, t, is_dict)| {
-        !*is_dict && t.as_prim().map(|p| p.is_int()).unwrap_or(false)
-    });
+    let args_ok = f
+        .sig
+        .params
+        .iter()
+        .all(|(_, t, is_dict)| !*is_dict && t.as_prim().map(|p| p.is_int()).unwrap_or(false));
     let ret_ok = ret.as_prim().map(|p| p.is_int()).unwrap_or(false);
     if !args_ok || !ret_ok {
         return false;
@@ -909,10 +939,7 @@ fn align_up(v: u32, a: u32) -> u32 {
 
 /// Lay fields out in declaration order with natural alignment, the same rule a
 /// C compiler applies to a struct with no packing attributes.
-fn layout_sequential(
-    mut fields: Vec<FieldDef>,
-    sizes: &[(u32, u32)],
-) -> (Vec<FieldDef>, u32, u32) {
+fn layout_sequential(mut fields: Vec<FieldDef>, sizes: &[(u32, u32)]) -> (Vec<FieldDef>, u32, u32) {
     let mut cursor = 0u32;
     let mut align = 1u32;
     for (f, (size, al)) in fields.iter_mut().zip(sizes) {
@@ -926,7 +953,13 @@ fn layout_sequential(
 
 fn sanitize(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -1137,7 +1170,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
         self.ir_of_node(e.id).map_err(|err| {
             format!(
                 "{}:{}: {err} (in {})",
-                e.span.start, e.span.end, expr_kind_name(&e.kind)
+                e.span.start,
+                e.span.end,
+                expr_kind_name(&e.kind)
             )
         })
     }
@@ -1165,12 +1200,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
     /// Two spellings reach here: named (`Some { value: x }`) and positional
     /// (`Some(x)`, which the parser records as `_0`, `_1`, ...). Positional
     /// names index the case's declared field order.
-    fn case_field(
-        &self,
-        agg: TypeId,
-        case: &VariantCase,
-        name: &str,
-    ) -> Result<u32, String> {
+    fn case_field(&self, agg: TypeId, case: &VariantCase, name: &str) -> Result<u32, String> {
         if let Some(rest) = name.strip_prefix('_') {
             if let Ok(i) = rest.parse::<usize>() {
                 return case.fields.get(i).copied().ok_or_else(|| {
@@ -1384,9 +1414,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
             }
             ExprKind::Region { name, body } => self.region_expr(name, body),
             ExprKind::Call { callee, args } => self.call(callee, args, e),
-            ExprKind::Lambda { params, ret, body } => {
-                self.lambda(params, ret.as_ref(), body, e)
-            }
+            ExprKind::Lambda { params, ret, body } => self.lambda(params, ret.as_ref(), body, e),
             ExprKind::Par { bindings } => {
                 // v0.3: structured concurrency. Disjointness was checked;
                 // sequential evaluation is observationally identical when
@@ -1395,7 +1423,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     let _ = self.let_stmt(l)?;
                 }
                 self.undef_of(e)
-            },
+            }
             ExprKind::Hole => Err("native backend: program still contains a hole".into()),
         }
     }
@@ -1415,7 +1443,11 @@ impl<'l, 'a> FnLower<'l, 'a> {
     ) -> Result<LVal, String> {
         let _ = ret;
         let mut captured = Vec::new();
-        collect_free_names(body, &params.iter().map(|p| p.name.name).collect::<Vec<_>>(), &mut captured);
+        collect_free_names(
+            body,
+            &params.iter().map(|p| p.name.name).collect::<Vec<_>>(),
+            &mut captured,
+        );
         for name in &captured {
             if self.lookup(*name).is_some() {
                 let cap = self.l.sym(*name);
@@ -1431,7 +1463,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
         // checker, not from re-reading the syntax.
         let fty = self.ty_of_node(e.id);
         let (ptys, rty) = match &fty {
-            Type::Fn { params: ps, ret, .. } => (ps.clone(), (**ret).clone()),
+            Type::Fn {
+                params: ps, ret, ..
+            } => (ps.clone(), (**ret).clone()),
             other => {
                 return Err(format!(
                     "native backend: lambda has non-function type `{}`",
@@ -1473,7 +1507,11 @@ impl<'l, 'a> FnLower<'l, 'a> {
             let ir = inner.l.ir_ty(pty)?;
             let v = inner.fb.new_val(ir);
             inner.fb.func.params.push(v);
-            let agg = if ir == IrTy::Ptr { inner.l.agg_of(pty)? } else { None };
+            let agg = if ir == IrTy::Ptr {
+                inner.l.agg_of(pty)?
+            } else {
+                None
+            };
             let needs = param_needs_slot(body, p.name.name);
             inner.bind_param(p.name.name, v, ir, agg, pty, needs);
         }
@@ -1879,8 +1917,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
         let ok_b = self.fb.new_block();
         self.fb.set_term(Term::Br {
             cond: is_zero,
-            then_e: Edge { to: bad, args: vec![] },
-            else_e: Edge { to: ok_b, args: vec![] },
+            then_e: Edge {
+                to: bad,
+                args: vec![],
+            },
+            else_e: Edge {
+                to: ok_b,
+                args: vec![],
+            },
         });
         self.fb.switch_to(bad);
         self.fb.set_term(Term::Abort(AbortCode::DivExactZero));
@@ -2011,9 +2055,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     // elide the copy; sharing storage is never correct when
                     // the source is used again.
                     let a = val.agg.unwrap();
-                    let slot = self
-                        .fb
-                        .alloc_slot(SlotKind::Agg(a), &self.l.sym(id.name));
+                    let slot = self.fb.alloc_slot(SlotKind::Agg(a), &self.l.sym(id.name));
                     self.fb.push_void(Op::CopyAgg {
                         ty: a,
                         dst: slot,
@@ -2075,7 +2117,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 Ok(())
             }
             PatKind::Tuple(ps) => {
-                let agg = val.agg.ok_or("internal: tuple pattern on a non-aggregate")?;
+                let agg = val
+                    .agg
+                    .ok_or("internal: tuple pattern on a non-aggregate")?;
                 for (i, sub) in ps.iter().enumerate() {
                     let f = self.field_index(val, agg, i as u32)?;
                     self.bind_pattern(sub, f, mutable)?;
@@ -2083,7 +2127,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 Ok(())
             }
             PatKind::Variant { name, fields } => {
-                let agg = val.agg.ok_or("internal: variant pattern on a non-aggregate")?;
+                let agg = val
+                    .agg
+                    .ok_or("internal: variant pattern on a non-aggregate")?;
                 let case = self
                     .l
                     .prog
@@ -2091,7 +2137,10 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     .case(&self.l.sym(name.name))
                     .cloned()
                     .ok_or_else(|| {
-                        format!("native backend: unknown variant `{}`", self.l.sym(name.name))
+                        format!(
+                            "native backend: unknown variant `{}`",
+                            self.l.sym(name.name)
+                        )
                     })?;
                 for (n, sub) in fields {
                     let idx = self.case_field(agg, &case, &self.l.sym(n.name))?;
@@ -2129,9 +2178,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 // Variant payload fields are stored as `Case_field`.
                 let a = self.l.prog.agg(agg);
                 match &a.kind {
-                    AggKind::Variant { cases } => cases.iter().find_map(|c| {
-                        a.field_index(&format!("{}_{}", c.name, name))
-                    }),
+                    AggKind::Variant { cases } => cases
+                        .iter()
+                        .find_map(|c| a.field_index(&format!("{}_{}", c.name, name))),
                     AggKind::Record => None,
                 }
             })
@@ -2238,12 +2287,10 @@ impl<'l, 'a> FnLower<'l, 'a> {
         for (n, ex) in fs {
             let v = self.expr(ex)?;
             let name = self.l.sym(n.name);
-            let idx = self
-                .l
-                .prog
-                .agg(agg)
-                .field_index(&name)
-                .ok_or_else(|| format!("native backend: no field `{name}` in record literal"))?;
+            let idx =
+                self.l.prog.agg(agg).field_index(&name).ok_or_else(|| {
+                    format!("native backend: no field `{name}` in record literal")
+                })?;
             self.store_field(slot, agg, idx, v)?;
         }
         Ok(LVal {
@@ -2253,13 +2300,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
         })
     }
 
-    fn store_field(
-        &mut self,
-        base: ValId,
-        agg: TypeId,
-        idx: u32,
-        v: LVal,
-    ) -> Result<(), String> {
+    fn store_field(&mut self, base: ValId, agg: TypeId, idx: u32, v: LVal) -> Result<(), String> {
         let f = self.l.prog.agg(agg).field(idx).clone();
         let ptr = self.fb.field_ptr(agg, idx, base);
         match f.agg {
@@ -2349,10 +2390,13 @@ impl<'l, 'a> FnLower<'l, 'a> {
             }
             ExprKind::Path(p) => {
                 // `a.b = v` written as a path.
-                let base = self.path(&Path {
-                    segs: p.segs[..p.segs.len() - 1].to_vec(),
-                    span: p.span,
-                }, e)?;
+                let base = self.path(
+                    &Path {
+                        segs: p.segs[..p.segs.len() - 1].to_vec(),
+                        span: p.span,
+                    },
+                    e,
+                )?;
                 let name = self.l.sym(p.segs[p.segs.len() - 1].name);
                 self.field_place(base, &name)
             }
@@ -2376,7 +2420,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 let b = self.expr(base)?;
                 let i = self.expr(index)?;
                 let (ir, agg) = self.ir_of_node(e.id)?;
-                let b_agg = b.agg.ok_or("native backend: indexed assign to a non-slice")?;
+                let b_agg = b
+                    .agg
+                    .ok_or("native backend: indexed assign to a non-slice")?;
                 let a = self.l.prog.agg(b_agg).clone();
                 let data_idx = a
                     .field_index("data")
@@ -2443,7 +2489,10 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 addr: ptr,
                 agg: inner,
             }),
-            None => Ok(Place::Scalar { addr: ptr, ty: f.ty }),
+            None => Ok(Place::Scalar {
+                addr: ptr,
+                ty: f.ty,
+            }),
         }
     }
 
@@ -2675,7 +2724,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 Ok(acc)
             }
             PatKind::Tuple(ps) => {
-                let agg = val.agg.ok_or("internal: tuple pattern on a non-aggregate")?;
+                let agg = val
+                    .agg
+                    .ok_or("internal: tuple pattern on a non-aggregate")?;
                 let mut acc = self.fb.const_bool(true);
                 for (i, sub) in ps.iter().enumerate() {
                     if self.pat_is_trivial(sub) {
@@ -2828,12 +2879,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
         })
     }
 
-    fn for_expr_inner(
-        &mut self,
-        pat: &Pattern,
-        iter: &Expr,
-        body: &Expr,
-    ) -> Result<LVal, String> {
+    fn for_expr_inner(&mut self, pat: &Pattern, iter: &Expr, body: &Expr) -> Result<LVal, String> {
         if let Some((lo, hi)) = self.range_bounds(iter)? {
             let i_slot = self.fb.alloc_slot(SlotKind::Scalar(IrTy::U64), "i");
             self.fb.store(IrTy::U64, i_slot, lo);
@@ -2948,10 +2994,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
         });
         self.fb.switch_to(body_bb);
         let step = self.fb.new_block();
-        self.loops.push(LoopTargets {
-            head: step,
-            exit,
-        });
+        self.loops.push(LoopTargets { head: step, exit });
         self.push_scope();
         let i = self.fb.load(IrTy::U64, i_slot);
         let ep = self.fb.push(
@@ -3119,7 +3162,12 @@ impl<'l, 'a> FnLower<'l, 'a> {
     fn hoist_recips(&mut self, regions: &[&Expr], loop_var: Option<Symbol>) -> Vec<ValId> {
         let mut names = Vec::new();
         for r in regions {
-            collect_invariant_divisors(r, &self.l.co.nonzero_div, &self.l.co.nonzero_div_needs_guard, &mut names);
+            collect_invariant_divisors(
+                r,
+                &self.l.co.nonzero_div,
+                &self.l.co.nonzero_div_needs_guard,
+                &mut names,
+            );
         }
         names.sort_by_key(|s| s.0);
         names.dedup();
@@ -3128,7 +3176,10 @@ impl<'l, 'a> FnLower<'l, 'a> {
             if loop_var == Some(name) {
                 continue;
             }
-            if regions.iter().any(|r| assigns_to(r, name) || takes_address_of(r, name)) {
+            if regions
+                .iter()
+                .any(|r| assigns_to(r, name) || takes_address_of(r, name))
+            {
                 continue;
             }
             let Some(local) = self.lookup(name) else {
@@ -3381,7 +3432,8 @@ impl<'l, 'a> FnLower<'l, 'a> {
         // No arm matched: the error keeps propagating, matching the oracle. An
         // infallible enclosing function has nowhere to send it, so it aborts.
         if self.fb.func.is_fallible() {
-            if let (Some(d), Some(a)) = (self.err_dest, self.fb.func.err.as_ref().and_then(|c| c.agg))
+            if let (Some(d), Some(a)) =
+                (self.err_dest, self.fb.func.err.as_ref().and_then(|c| c.agg))
             {
                 if a == err_agg {
                     self.fb.push_void(Op::CopyAgg {
@@ -3565,15 +3617,12 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 );
                 let loaded = self.fb.load(IrTy::I64, tmp);
                 let opt_ty = self.ty_of_node(e.id);
-                let opt = self
-                    .l
-                    .agg_of(&opt_ty)?
-                    .ok_or_else(|| {
-                        format!(
-                            "map.get: no Option layout for {}",
-                            opt_ty.display(self.l.intern)
-                        )
-                    })?;
+                let opt = self.l.agg_of(&opt_ty)?.ok_or_else(|| {
+                    format!(
+                        "map.get: no Option layout for {}",
+                        opt_ty.display(self.l.intern)
+                    )
+                })?;
                 let slot = self.fb.alloc_slot(SlotKind::Agg(opt), "mapopt");
                 let some = self
                     .l
@@ -3687,13 +3736,19 @@ impl<'l, 'a> FnLower<'l, 'a> {
         e: &Expr,
     ) -> Result<Option<LVal>, String> {
         let name = name.to_string();
-        if matches!(name.as_str(), "len" | "get" | "insert" | "put" | "contains" | "add") {
+        if matches!(
+            name.as_str(),
+            "len" | "get" | "insert" | "put" | "contains" | "add"
+        ) {
             let recv_ty = self.ty_of_node(base.id);
             if type_is_map(&recv_ty, self.l.intern) {
                 return self.lower_map_method(base, &name, args, e);
             }
         }
-        if !matches!(name.as_str(), "len" | "at" | "get" | "push" | "set" | "reserve" | "eq") {
+        if !matches!(
+            name.as_str(),
+            "len" | "at" | "get" | "push" | "set" | "reserve" | "eq"
+        ) {
             return Ok(None);
         }
         // Module-qualified calls (`fs.read`) also parse as field access.
@@ -3812,8 +3867,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
                         let bad = self.fb.new_block();
                         self.fb.set_term(Term::Br {
                             cond: in_bounds,
-                            then_e: Edge { to: ok, args: vec![] },
-                            else_e: Edge { to: bad, args: vec![] },
+                            then_e: Edge {
+                                to: ok,
+                                args: vec![],
+                            },
+                            else_e: Edge {
+                                to: bad,
+                                args: vec![],
+                            },
                         });
                         self.fb.switch_to(bad);
                         self.fb.set_term(Term::Abort(AbortCode::IndexOutOfBounds));
@@ -3861,8 +3922,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 let join = self.fb.new_block();
                 self.fb.set_term(Term::Br {
                     cond: in_bounds,
-                    then_e: Edge { to: some_b, args: vec![] },
-                    else_e: Edge { to: none_b, args: vec![] },
+                    then_e: Edge {
+                        to: some_b,
+                        args: vec![],
+                    },
+                    else_e: Edge {
+                        to: none_b,
+                        args: vec![],
+                    },
                 });
                 self.fb.switch_to(some_b);
                 if let Some(c) = some {
@@ -3893,13 +3960,19 @@ impl<'l, 'a> FnLower<'l, 'a> {
                         self.store_field(slot, opt, *fi, val)?;
                     }
                 }
-                self.fb.set_term(Term::Jump(Edge { to: join, args: vec![] }));
+                self.fb.set_term(Term::Jump(Edge {
+                    to: join,
+                    args: vec![],
+                }));
                 self.fb.switch_to(none_b);
                 if let Some(c) = none {
                     let tag = self.fb.const_int(c.tag as i128, IrTy::I32);
                     self.fb.store(IrTy::I32, slot, tag);
                 }
-                self.fb.set_term(Term::Jump(Edge { to: join, args: vec![] }));
+                self.fb.set_term(Term::Jump(Edge {
+                    to: join,
+                    args: vec![],
+                }));
                 self.fb.switch_to(join);
                 Ok(Some(LVal {
                     v: slot,
@@ -3937,8 +4010,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 let store_b = self.fb.new_block();
                 self.fb.set_term(Term::Br {
                     cond: full,
-                    then_e: Edge { to: grow_b, args: vec![] },
-                    else_e: Edge { to: store_b, args: vec![] },
+                    then_e: Edge {
+                        to: grow_b,
+                        args: vec![],
+                    },
+                    else_e: Edge {
+                        to: store_b,
+                        args: vec![],
+                    },
                 });
                 self.fb.switch_to(grow_b);
                 let sz = self.fb.push(Op::SizeOf(elem_size), IrTy::U64);
@@ -3992,8 +4071,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     let bad = self.fb.new_block();
                     self.fb.set_term(Term::Br {
                         cond: in_bounds,
-                        then_e: Edge { to: ok, args: vec![] },
-                        else_e: Edge { to: bad, args: vec![] },
+                        then_e: Edge {
+                            to: ok,
+                            args: vec![],
+                        },
+                        else_e: Edge {
+                            to: bad,
+                            args: vec![],
+                        },
                     });
                     self.fb.switch_to(bad);
                     self.fb.set_term(Term::Abort(AbortCode::IndexOutOfBounds));
@@ -4245,7 +4330,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
         }
 
         // Does the callee raise? If so, thread the error slot and branch.
-        let callee_err = self.l.err_channel(&self.l.co.fns[idx].inferred.clone(), &map)?;
+        let callee_err = self
+            .l
+            .err_channel(&self.l.co.fns[idx].inferred.clone(), &map)?;
         if let Some(ch) = callee_err {
             let payload_agg = ch.agg.ok_or("internal: error channel without a layout")?;
             // Where does the callee's payload land? If its error type is the same
@@ -4273,11 +4360,12 @@ impl<'l, 'a> FnLower<'l, 'a> {
             };
             argv.push(err_slot);
             let (val, tag) = self.fb.push2(
-                Op::Call {
-                    f: fid,
-                    args: argv,
+                Op::Call { f: fid, args: argv },
+                if ret_agg.is_some() {
+                    IrTy::Unit
+                } else {
+                    ret_ir
                 },
-                if ret_agg.is_some() { IrTy::Unit } else { ret_ir },
                 IrTy::I32,
             );
             let raised = self.fb.new_block();
@@ -4336,11 +4424,12 @@ impl<'l, 'a> FnLower<'l, 'a> {
         }
 
         let v = self.fb.push(
-            Op::Call {
-                f: fid,
-                args: argv,
+            Op::Call { f: fid, args: argv },
+            if ret_agg.is_some() {
+                IrTy::Unit
+            } else {
+                ret_ir
             },
-            if ret_agg.is_some() { IrTy::Unit } else { ret_ir },
         );
         Ok(match (ret_slot, ret_agg) {
             (Some(s), Some(a)) => LVal {
@@ -4380,21 +4469,10 @@ enum Place {
 /// Prelude calls. Anything not handled here falls through to `call_user`,
 /// and an unknown name is a hard error rather than silently wrong code.
 impl<'l, 'a> FnLower<'l, 'a> {
-    fn try_builtin(
-        &mut self,
-        name: &str,
-        args: &[Expr],
-        e: &Expr,
-    ) -> Result<Option<LVal>, String> {
+    fn try_builtin(&mut self, name: &str, args: &[Expr], e: &Expr) -> Result<Option<LVal>, String> {
         // Never shadow a user function of the same name.
         let bare = name.rsplit('.').next().unwrap_or(name);
-        if self
-            .l
-            .co
-            .fns
-            .iter()
-            .any(|f| self.l.sym(f.sig.name) == bare)
-        {
+        if self.l.co.fns.iter().any(|f| self.l.sym(f.sig.name) == bare) {
             return Ok(None);
         }
         let unit = |s: &mut Self| LVal::scalar(s.fb.unit(), IrTy::Unit);
@@ -4405,8 +4483,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 let bad = self.fb.new_block();
                 self.fb.set_term(Term::Br {
                     cond: c.v,
-                    then_e: Edge { to: ok, args: vec![] },
-                    else_e: Edge { to: bad, args: vec![] },
+                    then_e: Edge {
+                        to: ok,
+                        args: vec![],
+                    },
+                    else_e: Edge {
+                        to: bad,
+                        args: vec![],
+                    },
                 });
                 self.fb.switch_to(bad);
                 self.fb.set_term(Term::Abort(AbortCode::Assert));
@@ -4468,8 +4552,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 let bad = self.fb.new_block();
                 self.fb.set_term(Term::Br {
                     cond: is_zero,
-                    then_e: Edge { to: bad, args: vec![] },
-                    else_e: Edge { to: ok, args: vec![] },
+                    then_e: Edge {
+                        to: bad,
+                        args: vec![],
+                    },
+                    else_e: Edge {
+                        to: ok,
+                        args: vec![],
+                    },
                 });
                 self.fb.switch_to(bad);
                 self.fb.set_term(Term::Abort(AbortCode::DivExactZero));
@@ -4483,7 +4573,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
             }
             "len" => {
                 let s = self.expr(&args[0])?;
-                let agg = s.agg.ok_or("native backend: `len` of a value with no layout")?;
+                let agg = s
+                    .agg
+                    .ok_or("native backend: `len` of a value with no layout")?;
                 let idx = self
                     .l
                     .prog
@@ -4636,9 +4728,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
             }
             "test.read_cap" => Ok(Some(self.lower_read_cap(args)?)),
             "fs.read" => Ok(Some(self.lower_fs_read(args, e)?)),
-            "json.decode_recs" | "json.decode" => {
-                Ok(Some(self.lower_json_decode(args, e)?))
-            }
+            "json.decode_recs" | "json.decode" => Ok(Some(self.lower_json_decode(args, e)?)),
             "parse_i32" => {
                 let s = self.expr(&args[0])?;
                 let out = self.fb.alloc_slot(SlotKind::Scalar(IrTy::I32), "");
@@ -4655,8 +4745,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 let bad = self.fb.new_block();
                 self.fb.set_term(Term::Br {
                     cond: ok,
-                    then_e: Edge { to: good, args: vec![] },
-                    else_e: Edge { to: bad, args: vec![] },
+                    then_e: Edge {
+                        to: good,
+                        args: vec![],
+                    },
+                    else_e: Edge {
+                        to: bad,
+                        args: vec![],
+                    },
                 });
                 self.fb.switch_to(bad);
                 let payload = self.error_payload("Invalid")?;
@@ -4810,8 +4906,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
         let join = self.fb.new_block();
         self.fb.set_term(Term::Br {
             cond: ok,
-            then_e: Edge { to: some_b, args: vec![] },
-            else_e: Edge { to: none_b, args: vec![] },
+            then_e: Edge {
+                to: some_b,
+                args: vec![],
+            },
+            else_e: Edge {
+                to: none_b,
+                args: vec![],
+            },
         });
         self.fb.switch_to(some_b);
         if let Some(c) = some {
@@ -4822,13 +4924,19 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 self.store_field(slot, agg, *fi, LVal::scalar(v, a.ty))?;
             }
         }
-        self.fb.set_term(Term::Jump(Edge { to: join, args: vec![] }));
+        self.fb.set_term(Term::Jump(Edge {
+            to: join,
+            args: vec![],
+        }));
         self.fb.switch_to(none_b);
         if let Some(c) = none {
             let tag = self.fb.const_int(c.tag as i128, IrTy::I32);
             self.fb.store(IrTy::I32, slot, tag);
         }
-        self.fb.set_term(Term::Jump(Edge { to: join, args: vec![] }));
+        self.fb.set_term(Term::Jump(Edge {
+            to: join,
+            args: vec![],
+        }));
         self.fb.switch_to(join);
         let _ = e;
         Ok(LVal {
@@ -4877,12 +4985,12 @@ impl<'l, 'a> FnLower<'l, 'a> {
             };
             let prim = self.ty_of_node(a.id).as_prim();
             match (l, prim) {
-                (Lit::Int { value, .. }, Some(p)) if p.is_int() => vals.push(
-                    crate::interp::Value::Int {
+                (Lit::Int { value, .. }, Some(p)) if p.is_int() => {
+                    vals.push(crate::interp::Value::Int {
                         bits: p.wrap_i128(*value),
                         prim: p,
-                    },
-                ),
+                    })
+                }
                 (Lit::Float { value, .. }, Some(Prim::F32)) => {
                     vals.push(crate::interp::Value::f32(*value as f32))
                 }
@@ -4902,9 +5010,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
         let folded = crate::interp::fold_call(self.l.intern, self.l.co, bare, vals, FOLD_STEPS);
         let Some(v) = folded else { return Ok(None) };
         Ok(Some(match v {
-            crate::interp::Value::Int { bits, .. } => {
-                LVal::scalar(self.fb.const_int(bits, ir), ir)
-            }
+            crate::interp::Value::Int { bits, .. } => LVal::scalar(self.fb.const_int(bits, ir), ir),
             crate::interp::Value::Bool(b) => LVal::scalar(self.fb.const_bool(b), IrTy::Bool),
             crate::interp::Value::Float { bits, prim } => {
                 let x = if prim == Prim::F32 {
@@ -4935,7 +5041,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
         // them as arrays. A single entry is the common case in tests.
         let mut extra = Vec::new();
         for i in 1..entries.len() {
-            let n = self.fb.alloc_slot(SlotKind::Agg(str_agg), &format!("cap_names{i}"));
+            let n = self
+                .fb
+                .alloc_slot(SlotKind::Agg(str_agg), &format!("cap_names{i}"));
             let c = self
                 .fb
                 .alloc_slot(SlotKind::Agg(str_agg), &format!("cap_contents{i}"));
@@ -4943,8 +5051,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
         }
         if entries.len() > 1 {
             return Err(
-                "native backend: `test.read_cap` currently supports one file per capability"
-                    .into(),
+                "native backend: `test.read_cap` currently supports one file per capability".into(),
             );
         }
         for (i, (name, value)) in entries.iter().enumerate() {
@@ -5001,8 +5108,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
         let bad = self.fb.new_block();
         self.fb.set_term(Term::Br {
             cond: ok,
-            then_e: Edge { to: good, args: vec![] },
-            else_e: Edge { to: bad, args: vec![] },
+            then_e: Edge {
+                to: good,
+                args: vec![],
+            },
+            else_e: Edge {
+                to: bad,
+                args: vec![],
+            },
         });
         self.fb.switch_to(bad);
         let payload = self.error_payload_for("fs.Error", "NotFound")?;
@@ -5043,8 +5156,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
         let bad = self.fb.new_block();
         self.fb.set_term(Term::Br {
             cond: ok,
-            then_e: Edge { to: good, args: vec![] },
-            else_e: Edge { to: bad, args: vec![] },
+            then_e: Edge {
+                to: good,
+                args: vec![],
+            },
+            else_e: Edge {
+                to: bad,
+                args: vec![],
+            },
         });
         self.fb.switch_to(bad);
         let payload = self.error_payload_for("json.Error", "Invalid")?;
@@ -5178,8 +5297,20 @@ impl<'l, 'a> FnLower<'l, 'a> {
         });
         let tag_ptr = fb.field_ptr(ord_agg, VARIANT_TAG_FIELD, out);
         let tag = fb.load(IrTy::I32, tag_ptr);
-        let lt = self.l.prog.agg(ord_agg).case("Lt").map(|c| c.tag).unwrap_or(0);
-        let gt = self.l.prog.agg(ord_agg).case("Gt").map(|c| c.tag).unwrap_or(2);
+        let lt = self
+            .l
+            .prog
+            .agg(ord_agg)
+            .case("Lt")
+            .map(|c| c.tag)
+            .unwrap_or(0);
+        let gt = self
+            .l
+            .prog
+            .agg(ord_agg)
+            .case("Gt")
+            .map(|c| c.tag)
+            .unwrap_or(2);
         let lt_v = fb.const_int(lt as i128, IrTy::I32);
         let gt_v = fb.const_int(gt as i128, IrTy::I32);
         let is_lt = fb.bin(BinKind::Eq, tag, lt_v);
@@ -5313,13 +5444,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
             .error_agg()
             .ok_or_else(|| format!("native backend: raising `{case}` needs an err[E] row"))?;
         let slot = self.fb.alloc_slot(SlotKind::Agg(agg), "");
-        let tag = self
-            .l
-            .prog
-            .agg(agg)
-            .case(case)
-            .map(|c| c.tag)
-            .unwrap_or(0);
+        let tag = self.l.prog.agg(agg).case(case).map(|c| c.tag).unwrap_or(0);
         let t = self.fb.const_int(tag as i128, IrTy::I32);
         self.fb.store(IrTy::I32, slot, t);
         Ok(LVal {
@@ -5368,7 +5493,6 @@ fn callee_name(callee: &Expr, intern: &Interner) -> Option<String> {
         _ => None,
     }
 }
-
 
 /// Short name of an expression form, for lowering diagnostics.
 fn expr_kind_name(k: &ExprKind) -> &'static str {
@@ -5472,7 +5596,11 @@ fn walk_free(e: &Expr, bound: &mut Vec<Symbol>, out: &mut Vec<Symbol>) {
             }
             bound.truncate(depth);
         }
-        ExprKind::If { cond, then_b, else_b } => {
+        ExprKind::If {
+            cond,
+            then_b,
+            else_b,
+        } => {
             walk_free(cond, bound, out);
             walk_free(then_b, bound, out);
             if let Some(x) = else_b {
@@ -5588,7 +5716,9 @@ fn collect_invariant_divisors(
             }
         }
     }
-    each_child(e, &mut |c| collect_invariant_divisors(c, nonzero, needs_guard, out));
+    each_child(e, &mut |c| {
+        collect_invariant_divisors(c, nonzero, needs_guard, out)
+    });
 }
 
 /// Vecs filled by lockstep `push` in the same loop, never reassigned.
@@ -5616,9 +5746,7 @@ fn walk_same_len(e: &Expr, intern: &Interner, out: &mut Vec<(Symbol, Symbol)>) {
                 walk_same_len(t, intern, out);
             }
         }
-        ExprKind::If {
-            then_b, else_b, ..
-        } => {
+        ExprKind::If { then_b, else_b, .. } => {
             walk_same_len(then_b, intern, out);
             if let Some(el) = else_b {
                 walk_same_len(el, intern, out);
@@ -5667,9 +5795,7 @@ fn gather_pushes(e: &Expr, intern: &Interner, out: &mut Vec<Symbol>) {
                 gather_pushes(t, intern, out);
             }
         }
-        ExprKind::If {
-            then_b, else_b, ..
-        } => {
+        ExprKind::If { then_b, else_b, .. } => {
             gather_pushes(then_b, intern, out);
             if let Some(el) = else_b {
                 gather_pushes(el, intern, out);
@@ -5729,13 +5855,9 @@ fn grows_vec(e: &Expr, name: Symbol, intern: &Interner) -> bool {
             stmts.iter().any(|s| match &s.kind {
                 StmtKind::Expr(x) => grows_vec(x, name, intern),
                 StmtKind::Let(l) => grows_vec(&l.init, name, intern),
-            }) || tail
-                .as_ref()
-                .is_some_and(|t| grows_vec(t, name, intern))
+            }) || tail.as_ref().is_some_and(|t| grows_vec(t, name, intern))
         }
-        ExprKind::If {
-            then_b, else_b, ..
-        } => {
+        ExprKind::If { then_b, else_b, .. } => {
             grows_vec(then_b, name, intern)
                 || else_b
                     .as_ref()
@@ -5803,7 +5925,11 @@ fn walk_assigns(e: &Expr, name: Symbol, found: &mut bool) {
                 walk_assigns(t, name, found);
             }
         }
-        ExprKind::If { cond, then_b, else_b } => {
+        ExprKind::If {
+            cond,
+            then_b,
+            else_b,
+        } => {
             walk_assigns(cond, name, found);
             walk_assigns(then_b, name, found);
             if let Some(x) = else_b {
@@ -5824,9 +5950,7 @@ fn walk_assigns(e: &Expr, name: Symbol, found: &mut bool) {
             walk_assigns(cond, name, found);
             walk_assigns(body, name, found);
         }
-        ExprKind::Loop { body } | ExprKind::Region { body, .. } => {
-            walk_assigns(body, name, found)
-        }
+        ExprKind::Loop { body } | ExprKind::Region { body, .. } => walk_assigns(body, name, found),
         ExprKind::Let(l) => walk_assigns(&l.init, name, found),
         ExprKind::Lambda { body, .. } => walk_assigns(body, name, found),
         ExprKind::Record(fs) | ExprKind::Variant { fields: fs, .. } => {
@@ -5855,7 +5979,10 @@ fn walk_assigns(e: &Expr, name: Symbol, found: &mut bool) {
                 walk_assigns(&l.init, name, found);
             }
         }
-        ExprKind::Lit(_) | ExprKind::Path(_) | ExprKind::Hole | ExprKind::Break
+        ExprKind::Lit(_)
+        | ExprKind::Path(_)
+        | ExprKind::Hole
+        | ExprKind::Break
         | ExprKind::Continue => {}
     }
 }
@@ -5982,7 +6109,10 @@ fn each_child(e: &Expr, f: &mut impl FnMut(&Expr)) {
             f(lhs);
             f(rhs);
         }
-        ExprKind::Lit(_) | ExprKind::Path(_) | ExprKind::Hole | ExprKind::Break
+        ExprKind::Lit(_)
+        | ExprKind::Path(_)
+        | ExprKind::Hole
+        | ExprKind::Break
         | ExprKind::Continue => {}
     }
 }

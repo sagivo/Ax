@@ -49,7 +49,11 @@ fn the_rust_control_arm_uses_its_protocol() {
             cheaper += 1;
         }
     }
-    assert_eq!(probed, tasks.len(), "every task must be probed, not built blind");
+    assert_eq!(
+        probed,
+        tasks.len(),
+        "every task must be probed, not built blind"
+    );
     assert_eq!(
         cheaper,
         tasks.len(),
@@ -85,7 +89,11 @@ fn unsupported_tasks_are_excluded_not_failed() {
     for c in &r.cells {
         assert_eq!(
             c.scored + c.excluded,
-            if c.scored == 0 && c.excluded == 0 { 0 } else { r.n },
+            if c.scored == 0 && c.excluded == 0 {
+                0
+            } else {
+                r.n
+            },
             "cell {} loses tasks: scored {} + excluded {} != n {}",
             c.arm,
             c.scored,

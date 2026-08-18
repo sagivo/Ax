@@ -374,7 +374,14 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
             "core::fn:try_to_u8",
             "try_to_u8",
             vec![(x, Type::i64(), false)],
-            result_type(b, Type::Prim(Prim::U8), Type::Named { def: b.parse_error, args: vec![] }),
+            result_type(
+                b,
+                Type::Prim(Prim::U8),
+                Type::Named {
+                    def: b.parse_error,
+                    args: vec![],
+                },
+            ),
             EffectSet::empty(),
         ),
     ));
@@ -893,7 +900,10 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
             intern,
             "core::fn:str.from_byte",
             "from_byte",
-            vec![(alloc, alloc_type(b), false), (bte, Type::Prim(Prim::U8), false)],
+            vec![
+                (alloc, alloc_type(b), false),
+                (bte, Type::Prim(Prim::U8), false),
+            ],
             string_type(b),
             alloc_eff,
         ),

@@ -26,15 +26,19 @@ boundary is explicit.
 ## File (what an agent writes)
 ```
 #add(a I, b I) I = a + b
+#sum(n Z) Z = +/n
 #main() Z = { s Z:= 1; i~n { s = s * 6364136223846793005 + i }; s }
 #pick(b B) I = $b{1}{0}
-#get(m M[S, L], k S) L = m.get(k)?0
+#get(m M[S, L], k S) L = m.get(k)?0}
 ```
 
 `#name(a T) R = body` is a function. `name T:= e` is `let mut`.
 `i~n` is `for i in range(0, n)`. `$c{t}{e}` is if/else. `e?d` is
 Option unwrap-or. `e|d` is Result unwrap-or. `@c{body}` is while.
 `^e` is return. `%` is `map.new(test.alloc)`. `7L` is `7i64`.
+`s += e` is `s = s + e` (also `-=` `*=` `/=` `%=` `&=` `|=` `^=`).
+`+/n` / `+/a..b` is the usz-sum of the range; `*/n` is the usz-product.
+Both expand to the same `range` loop as writing it out.
 
 Type atoms: `I` i32 · `L` i64 · `Y` isz · `U` u32 · `W` u64 · `Z` usz ·
 `B` bool · `F` f64 · `f` f32 · `S` String · `O` Option · `R` Result ·
@@ -60,8 +64,8 @@ divisor may be zero. `get` → Option. `at` always bounds-checks → abort.
 
 ## Control
 `$c{t}{e}`  `match s { p => e; … }`  `i~n { … }`  `@c{body}`  `loop`
-`break` `continue` `^e`. `for` over a finite sequence is bounded;
-`while`/`loop` add `diverge`.
+`break` `continue` `^e`  `s += e`  `+/n`  `*/n`. `for` over a
+finite sequence is bounded; `while`/`loop` add `diverge`.
 
 ## Effects
 Inferred in body, checked against declaration. Omitted row reconstructs

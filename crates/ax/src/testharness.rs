@@ -69,10 +69,7 @@ pub enum Expect {
     /// Compile only (no run).
     Compile,
     /// Compile, run, exit 0. Optional exact stdout (trimmed).
-    Run {
-        stdout: Option<String>,
-        exit: i32,
-    },
+    Run { stdout: Option<String>, exit: i32 },
     /// `main` returns this canonical value (interpreter + backends).
     Value(String),
     /// Program aborts with this message substring.
@@ -86,7 +83,10 @@ pub enum Expect {
     /// rustc companion + ax, byte-identical stdout/stderr/exit ([T-2.1.1]).
     RustcOracle,
     /// Compile, run, and require a perf finding id.
-    PerfFinding { value: Option<String>, finding: String },
+    PerfFinding {
+        value: Option<String>,
+        finding: String,
+    },
 }
 
 /// Machine-parseable header ([T-1.2.1]).
@@ -170,10 +170,7 @@ pub fn parse_header(src: &str) -> Result<Header, String> {
                 "upstream" => upstream = v.to_string(),
                 "license" => license = v.to_string(),
                 "port" => {
-                    port = Some(
-                        PortKind::parse(v)
-                            .ok_or_else(|| format!("unknown port: {v}"))?,
-                    );
+                    port = Some(PortKind::parse(v).ok_or_else(|| format!("unknown port: {v}"))?);
                 }
                 "expect" => expect_raw = v.to_string(),
                 "skip-native" => skip_native = Some(v.to_string()),
@@ -345,7 +342,10 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<Case>) -> Result<(), String> {
     Ok(())
 }
 
-fn compile_src(name: &str, src: &str) -> (Session, Result<crate::check::CheckOutput, Vec<Diagnostic>>) {
+fn compile_src(
+    name: &str,
+    src: &str,
+) -> (Session, Result<crate::check::CheckOutput, Vec<Diagnostic>>) {
     let mut s = Session::new();
     match s.parse(name, src) {
         Err(d) => (s, Err(d)),
@@ -433,7 +433,9 @@ pub fn run_case_once(case: &Case, out_dir: &Path) -> Result<(), String> {
         Expect::Value(want) => run_value(case, &src, &stem, out_dir, want),
         Expect::Abort(want) => run_abort(case, &src, &stem, out_dir, want),
         Expect::Tests => run_tests_expect(case, &src, &stem),
-        Expect::Run { stdout, exit } => run_stdout(case, &src, &stem, out_dir, stdout.as_deref(), *exit),
+        Expect::Run { stdout, exit } => {
+            run_stdout(case, &src, &stem, out_dir, stdout.as_deref(), *exit)
+        }
         Expect::PerfFinding { value, finding } => {
             let (s, r) = compile_src(&stem, &src);
             let out = r.map_err(|d| format!("compile failed: [{}]", codes_of(&d).join(", ")))?;
@@ -465,13 +467,7 @@ pub fn run_case_once(case: &Case, out_dir: &Path) -> Result<(), String> {
     }
 }
 
-fn run_value(
-    case: &Case,
-    src: &str,
-    stem: &str,
-    out_dir: &Path,
-    want: &str,
-) -> Result<(), String> {
+fn run_value(case: &Case, src: &str, stem: &str, out_dir: &Path, want: &str) -> Result<(), String> {
     let (s, r) = compile_src(stem, src);
     let out = r.map_err(|d| format!("compile failed: [{}]", codes_of(&d).join(", ")))?;
     match run_main(&s.intern, &out, 0) {
@@ -497,13 +493,7 @@ fn run_value(
     Ok(())
 }
 
-fn run_abort(
-    case: &Case,
-    src: &str,
-    stem: &str,
-    out_dir: &Path,
-    want: &str,
-) -> Result<(), String> {
+fn run_abort(case: &Case, src: &str, stem: &str, out_dir: &Path, want: &str) -> Result<(), String> {
     let (s, r) = compile_src(stem, src);
     let out = r.map_err(|d| format!("compile failed: [{}]", codes_of(&d).join(", ")))?;
     match run_main(&s.intern, &out, 0) {
@@ -581,18 +571,10 @@ fn run_stdout(
 }
 
 /// [T-2.1.1] rustc -C overflow-checks=on vs `ax build --release`.
-fn run_rustc_oracle(
-    case: &Case,
-    src: &str,
-    stem: &str,
-    out_dir: &Path,
-) -> Result<(), String> {
+fn run_rustc_oracle(case: &Case, src: &str, stem: &str, out_dir: &Path) -> Result<(), String> {
     let rs = case.path.with_extension("rs");
     if !rs.exists() {
-        return Err(format!(
-            "rustc-oracle requires companion {}",
-            rs.display()
-        ));
+        return Err(format!("rustc-oracle requires companion {}", rs.display()));
     }
     std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
     let rust_bin = out_dir.join(format!("{stem}.rustc"));
@@ -712,8 +694,8 @@ pub fn requirement_coverage(cases: &[Case], known: &[&str]) -> (BTreeSet<String>
 /// Requirement IDs the v1 suite is obligated to cover. A requirement with
 /// zero referencing tests is a CI failure ([T-1.2.3]).
 pub const REQUIRED_IDS: &[&str] = &[
-    "R-1.1.2", "R-1.2.2", "R-1.3.1", "R-2.1", "R-3.3.1", "R-5.2.3", "R-5.2.4",
-    "R-5.2.5", "R-7.6", "R-8.1.3", "R-8.4", "R-9.3", "R-5.6.1",
+    "R-1.1.2", "R-1.2.2", "R-1.3.1", "R-2.1", "R-3.3.1", "R-5.2.3", "R-5.2.4", "R-5.2.5", "R-7.6",
+    "R-8.1.3", "R-8.4", "R-9.3", "R-5.6.1",
 ];
 
 /// Catalog codes that are reserved but not yet emitted by this compiler.
@@ -1055,22 +1037,61 @@ pub fn fault_injection_report() -> Vec<FaultVariant> {
     // 6–30: structural sentinels. Each names the test that would catch it.
     // A variant whose `caught_by` file is missing is a CI failure.
     let rest: &[(&str, &str)] = &[
-        ("alias_sets_merged_unsoundly", "tests/ownership/branch_join_copy.ax"),
-        ("region_escape_closure_capture", "tests/soundness/read_escape_closure.ax"),
-        ("read_param_dropped", "tests/soundness/read_callee_cannot_drop.ax"),
-        ("read_via_module_state", "tests/soundness/read_no_mutable_globals.ax"),
-        ("read_reentrant_drop", "tests/soundness/read_caller_suspended.ax"),
-        ("read_across_par", "tests/soundness/read_not_thread_visible.ax"),
+        (
+            "alias_sets_merged_unsoundly",
+            "tests/ownership/branch_join_copy.ax",
+        ),
+        (
+            "region_escape_closure_capture",
+            "tests/soundness/read_escape_closure.ax",
+        ),
+        (
+            "read_param_dropped",
+            "tests/soundness/read_callee_cannot_drop.ax",
+        ),
+        (
+            "read_via_module_state",
+            "tests/soundness/read_no_mutable_globals.ax",
+        ),
+        (
+            "read_reentrant_drop",
+            "tests/soundness/read_caller_suspended.ax",
+        ),
+        (
+            "read_across_par",
+            "tests/soundness/read_not_thread_visible.ax",
+        ),
         ("own_reuse_loop", "tests/affine/reuse_in_loop.ax"),
         ("own_reuse_direct", "tests/affine/use_after_move.ax"),
-        ("plain_copy_on_conflict", "tests/ownership/copy_on_conflict.ax"),
-        ("elision_ref_purity", "tests/rust_ported/elision/ampersand_is_hint.ax"),
-        ("elision_clone_purity", "tests/rust_ported/elision/clone_is_identity.ax"),
-        ("div_min_neg_one", "tests/conformance/numeric/div_min_by_neg_one.ax"),
-        ("shift_masked", "tests/conformance/numeric/shift_count_masked.ax"),
+        (
+            "plain_copy_on_conflict",
+            "tests/ownership/copy_on_conflict.ax",
+        ),
+        (
+            "elision_ref_purity",
+            "tests/rust_ported/elision/ampersand_is_hint.ax",
+        ),
+        (
+            "elision_clone_purity",
+            "tests/rust_ported/elision/clone_is_identity.ax",
+        ),
+        (
+            "div_min_neg_one",
+            "tests/conformance/numeric/div_min_by_neg_one.ax",
+        ),
+        (
+            "shift_masked",
+            "tests/conformance/numeric/shift_count_masked.ax",
+        ),
         ("nan_neq", "tests/conformance/float/nan_neq.ax"),
-        ("json_reject_trailing", "tests/conformance/json/n_trailing_comma.ax"),
-        ("utf8_overlong", "tests/conformance/unicode/utf8_overlong_rejected.ax"),
+        (
+            "json_reject_trailing",
+            "tests/conformance/json/n_trailing_comma.ax",
+        ),
+        (
+            "utf8_overlong",
+            "tests/conformance/unicode/utf8_overlong_rejected.ax",
+        ),
         ("sort_stable", "tests/conformance/sort/stability.ax"),
         ("cap_dotdot", "tests/capability/path_dotdot.ax"),
         ("cap_absolute", "tests/capability/path_absolute.ax"),
@@ -1220,16 +1241,66 @@ pub fn f32_core_vectors() -> &'static [F32Vec] {
     // NaN is 0x7fc00000 on this implementation.
     const QNAN: u32 = 0x7fc0_0000;
     &[
-        F32Vec { op: "add", a: 0x3f800000, b: 0x3f800000, expect: 0x40000000 }, // 1+1=2
-        F32Vec { op: "add", a: 0x00000000, b: 0x00000000, expect: 0x00000000 },
-        F32Vec { op: "add", a: 0x7f800000, b: 0x3f800000, expect: 0x7f800000 }, // +inf
-        F32Vec { op: "add", a: 0x7f800000, b: 0xff800000, expect: QNAN },
-        F32Vec { op: "sub", a: 0x3f800000, b: 0x3f800000, expect: 0x00000000 },
-        F32Vec { op: "mul", a: 0x40000000, b: 0x40000000, expect: 0x40800000 }, // 2*2=4
-        F32Vec { op: "mul", a: 0x7f800000, b: 0x00000000, expect: QNAN },
-        F32Vec { op: "div", a: 0x3f800000, b: 0x3f800000, expect: 0x3f800000 },
-        F32Vec { op: "div", a: 0x3f800000, b: 0x00000000, expect: 0x7f800000 },
-        F32Vec { op: "div", a: 0x00000000, b: 0x00000000, expect: QNAN },
+        F32Vec {
+            op: "add",
+            a: 0x3f800000,
+            b: 0x3f800000,
+            expect: 0x40000000,
+        }, // 1+1=2
+        F32Vec {
+            op: "add",
+            a: 0x00000000,
+            b: 0x00000000,
+            expect: 0x00000000,
+        },
+        F32Vec {
+            op: "add",
+            a: 0x7f800000,
+            b: 0x3f800000,
+            expect: 0x7f800000,
+        }, // +inf
+        F32Vec {
+            op: "add",
+            a: 0x7f800000,
+            b: 0xff800000,
+            expect: QNAN,
+        },
+        F32Vec {
+            op: "sub",
+            a: 0x3f800000,
+            b: 0x3f800000,
+            expect: 0x00000000,
+        },
+        F32Vec {
+            op: "mul",
+            a: 0x40000000,
+            b: 0x40000000,
+            expect: 0x40800000,
+        }, // 2*2=4
+        F32Vec {
+            op: "mul",
+            a: 0x7f800000,
+            b: 0x00000000,
+            expect: QNAN,
+        },
+        F32Vec {
+            op: "div",
+            a: 0x3f800000,
+            b: 0x3f800000,
+            expect: 0x3f800000,
+        },
+        F32Vec {
+            op: "div",
+            a: 0x3f800000,
+            b: 0x00000000,
+            expect: 0x7f800000,
+        },
+        F32Vec {
+            op: "div",
+            a: 0x00000000,
+            b: 0x00000000,
+            expect: QNAN,
+        },
     ]
 }
 
@@ -1250,16 +1321,16 @@ pub fn eval_f32_bits(op: &str, a: u32, b: u32) -> u32 {
 /// by a strict UTF-8 validator.
 pub fn utf8_reject_vectors() -> &'static [&'static [u8]] {
     &[
-        &[0xc0, 0xaf],             // overlong slash
-        &[0xe0, 0x80, 0xaf],       // overlong slash 3-byte
-        &[0xf0, 0x80, 0x80, 0xaf], // overlong slash 4-byte
-        &[0xed, 0xa0, 0x80],       // surrogate U+D800
-        &[0xed, 0xbf, 0xbf],       // surrogate U+DFFF
-        &[0xf8, 0x80, 0x80, 0x80, 0x80], // 5-byte
+        &[0xc0, 0xaf],                         // overlong slash
+        &[0xe0, 0x80, 0xaf],                   // overlong slash 3-byte
+        &[0xf0, 0x80, 0x80, 0xaf],             // overlong slash 4-byte
+        &[0xed, 0xa0, 0x80],                   // surrogate U+D800
+        &[0xed, 0xbf, 0xbf],                   // surrogate U+DFFF
+        &[0xf8, 0x80, 0x80, 0x80, 0x80],       // 5-byte
         &[0xfc, 0x80, 0x80, 0x80, 0x80, 0x80], // 6-byte
-        &[0x80],                   // lone continuation
-        &[0xc2],                   // truncated 2-byte
-        &[0xe0, 0x80],             // truncated 3-byte
+        &[0x80],                               // lone continuation
+        &[0xc2],                               // truncated 2-byte
+        &[0xe0, 0x80],                         // truncated 3-byte
     ]
 }
 
@@ -1277,19 +1348,71 @@ pub struct JsonCase {
 
 pub fn json_core_cases() -> &'static [JsonCase] {
     &[
-        JsonCase { name: "y_array_empty", input: "[]", accept: true },
-        JsonCase { name: "y_object_empty", input: "{}", accept: true },
-        JsonCase { name: "y_array_number", input: "[1]", accept: true },
-        JsonCase { name: "y_object_string", input: "{\"a\":\"b\"}", accept: true },
-        JsonCase { name: "y_null", input: "null", accept: true },
-        JsonCase { name: "y_true", input: "true", accept: true },
-        JsonCase { name: "y_false", input: "false", accept: true },
-        JsonCase { name: "n_trailing_comma_array", input: "[1,]", accept: false },
-        JsonCase { name: "n_trailing_comma_object", input: "{\"a\":1,}", accept: false },
-        JsonCase { name: "n_bare", input: "hello", accept: false },
-        JsonCase { name: "n_single_quote", input: "{'a':1}", accept: false },
-        JsonCase { name: "n_unclosed_array", input: "[1", accept: false },
-        JsonCase { name: "n_extra", input: "[1][2]", accept: false },
+        JsonCase {
+            name: "y_array_empty",
+            input: "[]",
+            accept: true,
+        },
+        JsonCase {
+            name: "y_object_empty",
+            input: "{}",
+            accept: true,
+        },
+        JsonCase {
+            name: "y_array_number",
+            input: "[1]",
+            accept: true,
+        },
+        JsonCase {
+            name: "y_object_string",
+            input: "{\"a\":\"b\"}",
+            accept: true,
+        },
+        JsonCase {
+            name: "y_null",
+            input: "null",
+            accept: true,
+        },
+        JsonCase {
+            name: "y_true",
+            input: "true",
+            accept: true,
+        },
+        JsonCase {
+            name: "y_false",
+            input: "false",
+            accept: true,
+        },
+        JsonCase {
+            name: "n_trailing_comma_array",
+            input: "[1,]",
+            accept: false,
+        },
+        JsonCase {
+            name: "n_trailing_comma_object",
+            input: "{\"a\":1,}",
+            accept: false,
+        },
+        JsonCase {
+            name: "n_bare",
+            input: "hello",
+            accept: false,
+        },
+        JsonCase {
+            name: "n_single_quote",
+            input: "{'a':1}",
+            accept: false,
+        },
+        JsonCase {
+            name: "n_unclosed_array",
+            input: "[1",
+            accept: false,
+        },
+        JsonCase {
+            name: "n_extra",
+            input: "[1][2]",
+            accept: false,
+        },
     ]
 }
 
@@ -1311,24 +1434,66 @@ pub struct IntEdge {
 
 pub fn int_edge_cases() -> &'static [IntEdge] {
     &[
-        IntEdge { op: "add", width: 8, signed: true, a: 127, b: 1, expect: Some(-128) },
-        IntEdge { op: "sub", width: 8, signed: false, a: 0, b: 1, expect: Some(255) },
-        IntEdge { op: "mul", width: 32, signed: true, a: 1 << 16, b: 1 << 16, expect: Some(0) },
-        IntEdge { op: "div", width: 32, signed: true, a: i32::MIN as i128, b: -1, expect: Some(i32::MIN as i128) },
-        IntEdge { op: "rem", width: 32, signed: true, a: -7, b: 3, expect: Some(-1) },
-        IntEdge { op: "shl", width: 32, signed: true, a: 1, b: 32, expect: Some(1) },
+        IntEdge {
+            op: "add",
+            width: 8,
+            signed: true,
+            a: 127,
+            b: 1,
+            expect: Some(-128),
+        },
+        IntEdge {
+            op: "sub",
+            width: 8,
+            signed: false,
+            a: 0,
+            b: 1,
+            expect: Some(255),
+        },
+        IntEdge {
+            op: "mul",
+            width: 32,
+            signed: true,
+            a: 1 << 16,
+            b: 1 << 16,
+            expect: Some(0),
+        },
+        IntEdge {
+            op: "div",
+            width: 32,
+            signed: true,
+            a: i32::MIN as i128,
+            b: -1,
+            expect: Some(i32::MIN as i128),
+        },
+        IntEdge {
+            op: "rem",
+            width: 32,
+            signed: true,
+            a: -7,
+            b: 3,
+            expect: Some(-1),
+        },
+        IntEdge {
+            op: "shl",
+            width: 32,
+            signed: true,
+            a: 1,
+            b: 32,
+            expect: Some(1),
+        },
     ]
 }
 
 /// [T-6.4.1] formatter idempotence over a source string.
 pub fn fmt_idempotent(src: &str) -> Result<(), String> {
     let mut intern = Interner::new();
-    let file = Parser::parse_file(src, FileId(0), &mut intern)
-        .map_err(|d| format!("parse: {d:?}"))?;
+    let file =
+        Parser::parse_file(src, FileId(0), &mut intern).map_err(|d| format!("parse: {d:?}"))?;
     let a = crate::fmt::format_file(&file, &intern);
     let mut intern2 = Interner::new();
-    let file2 = Parser::parse_file(&a, FileId(0), &mut intern2)
-        .map_err(|d| format!("reparse: {d:?}"))?;
+    let file2 =
+        Parser::parse_file(&a, FileId(0), &mut intern2).map_err(|d| format!("reparse: {d:?}"))?;
     let b = crate::fmt::format_file(&file2, &intern2);
     if a != b {
         return Err("fmt(fmt(x)) != fmt(x)".into());

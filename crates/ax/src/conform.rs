@@ -113,9 +113,7 @@ pub fn discover(root: &Path) -> Result<Vec<Case>, String> {
 
 fn collect(root: &Path, dir: &Path, out: &mut Vec<Case>) -> Result<(), String> {
     let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let mut paths: Vec<PathBuf> = entries
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .collect();
+    let mut paths: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
     paths.sort();
     for p in paths {
         if p.is_dir() {

@@ -47,13 +47,18 @@ fn dense_loop_and_bind_same_value() {
     let mut b = Session::new();
     b.surface = Surface::Dense;
     let oa = a.compile("a.ax", conv).unwrap();
-    let ob = b.compile("b.ax", &dense).unwrap_or_else(|d| panic!("dense={dense}\n{d:?}"));
+    let ob = b
+        .compile("b.ax", &dense)
+        .unwrap_or_else(|d| panic!("dense={dense}\n{d:?}"));
     let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
     let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
     assert_eq!(va.display(), vb.display());
     let ax_t = ax::tokens::count(conv).tokens;
     let d_t = ax::tokens::count(&dense).tokens;
-    assert!(d_t < ax_t, "dense {d_t} should be < conventional {ax_t}\n{dense}");
+    assert!(
+        d_t < ax_t,
+        "dense {d_t} should be < conventional {ax_t}\n{dense}"
+    );
 }
 
 #[test]
@@ -112,7 +117,88 @@ fn main() -> i64 !{alloc[a], diverge} = {
 #[test]
 fn looks_like_dense_detects_hash_fn() {
     assert!(ax::frontend::looks_like_dense("#main() I = 1"));
+    assert!(ax::frontend::looks_like_dense("s += 1"));
+    assert!(ax::frontend::looks_like_dense("+/n"));
     assert!(!ax::frontend::looks_like_dense("fn main() -> i32 = 1"));
+}
+
+#[test]
+fn dense_compound_assign_same_value() {
+    let conv = "module t;\nfn main() -> i32 = { let mut s: i32 = 1; s = s + 2; s };\n";
+    let dense = to_dense(conv);
+    assert!(dense.contains("+="), "{dense}");
+    let mut a = Session::new();
+    let mut b = Session::new();
+    b.surface = Surface::Dense;
+    let oa = a.compile("a.ax", conv).unwrap();
+    let ob = b
+        .compile("b.ax", &dense)
+        .unwrap_or_else(|d| panic!("dense={dense}\n{d:?}"));
+    let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
+    let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
+    assert_eq!(va.display(), vb.display());
+    assert_eq!(va.display(), "3i32");
+    assert!(
+        ax::tokens::count("s += i").tokens < ax::tokens::count("s = s + i").tokens,
+        "+= must be cheaper than s = s + i"
+    );
+}
+
+#[test]
+fn dense_k_reduce_sum_same_value() {
+    let conv = "module t;\nfn main() -> usz = { let mut s: usz = 0; for i in range(0, 10) { s = s + i; }; s };\n";
+    let dense = to_dense(conv);
+    assert!(dense.contains("+/"), "expected +/ pack, got {dense}");
+    let mut a = Session::new();
+    let mut b = Session::new();
+    b.surface = Surface::Dense;
+    let oa = a.compile("a.ax", conv).unwrap();
+    let ob = b
+        .compile("b.ax", &dense)
+        .unwrap_or_else(|d| panic!("dense={dense}\n{d:?}"));
+    let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
+    let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
+    assert_eq!(va.display(), vb.display());
+    assert_eq!(va.display(), "45usz");
+    // Written form, not packed: agent writes +/n.
+    let written = "#main() Z = +/10Z\n";
+    let mut c = Session::new();
+    c.surface = Surface::Dense;
+    let oc = c
+        .compile("c.ax", written)
+        .unwrap_or_else(|d| panic!("written={written}\n{d:?}"));
+    let vc = ax::driver::run_main(&c.intern, &oc, 0).unwrap();
+    assert_eq!(vc.display(), "45usz");
+    // Bare `+/10` — integer literals infer as usz from `range`.
+    let bare = "#main() Z = +/10\n";
+    let mut d = Session::new();
+    d.surface = Surface::Dense;
+    let od = d
+        .compile("d10.ax", bare)
+        .unwrap_or_else(|err| panic!("bare={bare}\n{err:?}"));
+    let vd = ax::driver::run_main(&d.intern, &od, 0).unwrap();
+    assert_eq!(vd.display(), "45usz");
+    assert_eq!(ax::tokens::count("+/n").tokens, 2);
+}
+
+#[test]
+fn dense_k_reduce_product_and_range() {
+    let prod = "#main() Z = */1..5\n";
+    let mut s = Session::new();
+    s.surface = Surface::Dense;
+    let out = s.compile("p.ax", prod).unwrap_or_else(|d| panic!("{d:?}"));
+    let v = ax::driver::run_main(&s.intern, &out, 0).unwrap();
+    assert_eq!(v.display(), "24usz"); // 1*2*3*4
+}
+
+#[test]
+fn dense_compound_does_not_eat_division() {
+    let src = "#main() I = { a I:= 8; b I:= 2; a / b }\n";
+    let mut s = Session::new();
+    s.surface = Surface::Dense;
+    let out = s.compile("d.ax", src).unwrap_or_else(|d| panic!("{d:?}"));
+    let v = ax::driver::run_main(&s.intern, &out, 0).unwrap();
+    assert_eq!(v.display(), "4i32");
 }
 
 #[test]
@@ -134,7 +220,9 @@ fn verbose_rejects_unannotated_let() {
     s.surface = Surface::Verbose;
     match s.compile("t.ax", src) {
         Ok(_) => panic!("verbose must require let annotations"),
-        Err(d) => assert!(d.iter().any(|x| x.msg.contains("S-verbose") || x.code == "E0101")),
+        Err(d) => assert!(d
+            .iter()
+            .any(|x| x.msg.contains("S-verbose") || x.code == "E0101")),
     }
 }
 
@@ -154,7 +242,18 @@ fn indep_effect_agrees_on_pure() {
     let checked = s.check(&file);
     let facts = indep::TypeFacts::new(&checked.node_types, &checked.nonzero_div);
     let rs = indep::infer_effects(&file, &s.intern, facts);
-    assert!(rs.iter().all(|r| r.permitted), "{:?}", rs.iter().map(|r| format!("{} {} ⊆ {}", r.fn_name, r.inferred.display(), r.declared.display())).collect::<Vec<_>>());
+    assert!(
+        rs.iter().all(|r| r.permitted),
+        "{:?}",
+        rs.iter()
+            .map(|r| format!(
+                "{} {} ⊆ {}",
+                r.fn_name,
+                r.inferred.display(),
+                r.declared.display()
+            ))
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -169,7 +268,10 @@ fn indep_effect_catches_undeclared_io() {
 
 #[test]
 fn region_rule_rejects_escape_accepts_inward() {
-    assert!(store_legal(0, 1), "static ref may be stored in nested location");
+    assert!(
+        store_legal(0, 1),
+        "static ref may be stored in nested location"
+    );
     assert!(store_legal(1, 1), "same-depth store is inward");
     assert!(!store_legal(1, 0), "nested ref must not escape to static");
     // inverted v0.1 rule disagrees on the escape case — regression sentinel
@@ -229,13 +331,7 @@ fn replay_round_trip() {
     let mut s = Session::new();
     let out = s.compile("t.ax", src).unwrap();
     let v = ax::driver::run_main(&s.intern, &out, 7).unwrap();
-    let tr = workspace::encode_trace(
-        7,
-        src,
-        &v.display(),
-        &hex::encode(v.canonical_bytes()),
-        &[],
-    );
+    let tr = workspace::encode_trace(7, src, &v.display(), &hex::encode(v.canonical_bytes()), &[]);
     assert_eq!(tr.source_hash, hash::sha256_hex(src.as_bytes()));
     let v2 = ax::driver::run_main(&s.intern, &out, tr.seed).unwrap();
     assert_eq!(hex::encode(v2.canonical_bytes()), tr.canonical);

@@ -164,10 +164,7 @@ fn native_build_hello() {
     let hello = example("hello.ax");
     let (c, stdout, stderr) = run_ax(&["build", "-o", out.to_str().unwrap(), &hello]);
     assert_eq!(c, 0, "{stderr}");
-    assert!(
-        out.exists() || stdout.contains("hello"),
-        "{stdout}{stderr}"
-    );
+    assert!(out.exists() || stdout.contains("hello"), "{stdout}{stderr}");
 }
 
 /// Snippets shown in the spec must compile. This lost its `#[test]` attribute at

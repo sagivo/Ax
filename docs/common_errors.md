@@ -94,3 +94,8 @@ Why: v1 function values are bare pointers; they do not carry an environment.
 Wrong: treating `#fn` / `:=` / `$if` as an opt-in dense mode
 Right: that **is** Ax; `ax fmt` prints it; a file that opens with `(` is the tree
 Why: there is no `--surface dense` an agent must pick (`spec/dense.md`).
+
+## `+/` is not division
+Wrong: `a+/n` for `a + (sum 0..n)`
+Right: `a + +/n` or `a+(+/n)`
+Why: `+/` is K plus-over and must not sit against an ident (`spec/dense.md`).

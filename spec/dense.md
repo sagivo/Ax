@@ -16,6 +16,9 @@ newlines cost; spaces are free.
 | `i32` / `usz` / `bool` | 2 / 1 / 1 | `I` / `Z` / `B` | 1 |
 | `let mut s: usz =` | 7 | `s Z:=` | 3 |
 | `for i in range(0, n)` | 10 | `i~n` | 3 |
+| `s = s + i` | 5 | `s += i` | 3 |
+| `{ s:= 0; i~n { s += i }; s }` | ~14 | `+/n` | 2 |
+| `{ s:= 1; i~n { s *= i }; s }` | ~14 | `*/n` | 2 |
 | `return` | 1 | `^` | 1 |
 | `if c { t } else { e }` | 6+ | `$c{t}{e}` | 3+braces |
 | `match e { Some(v) => v; None => d }` | ~12 | `e?d` | 2+ |
@@ -37,6 +40,10 @@ name T:= e                        let mut name: T = e
 name:= e                          let mut name = e
 i~n { … }                         for i in range(0, n)
 i~lo..hi { … }                    for i in range(lo, hi)
+s += e                            s = s + e   (also -= *= /= %= &= |= ^=)
++/n                               sum of 0..n as usz   (K plus-over; same loop)
++/lo..hi                          sum of lo..hi as usz
+*/n                               product of 0..n as usz
 ^ e                               return e
 $c{t}{e}                          if c { t } else { e }
 e?d                               match e { Some(v) => v; None => d }
@@ -54,7 +61,11 @@ Type atoms: `I` i32 · `L` i64 · `Y` isz · `U` u32 · `W` u64 · `Z` usz ·
 
 ```
 #main() Z = { s Z:= 1; i~n { s = s * 6364136223846793005 + i }; s }
+#sum(n Z) Z = +/n
 ```
 
-is the int_sum kernel. `ax fmt` prints this form. Token counts:
-`ax bench tokens` and `docs/usecases.md`.
+is the int_sum kernel, then the range-sum that `+/` is for. `ax fmt`
+prints this form. Token counts: `ax bench tokens` and `docs/usecases.md`.
+
+`+=` and `+/` are surface only: they expand to the same `s = s + i`
+loop the C backend already sees. No new IR, no new runtime.

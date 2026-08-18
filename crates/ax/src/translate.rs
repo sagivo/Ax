@@ -85,7 +85,13 @@ pub fn translate_rust(src: &str) -> TranslateReport {
                 i += 1;
             }
             let word = &src[start..i];
-            if i < b.len() && b[i] == b'!' && word != "vec" && word != "format" && word != "println" && word != "print" {
+            if i < b.len()
+                && b[i] == b'!'
+                && word != "vec"
+                && word != "format"
+                && word != "println"
+                && word != "print"
+            {
                 rejected.push(format!("macro {word}!"));
                 out.push_str("/* rejected macro ");
                 out.push_str(word);
@@ -136,7 +142,9 @@ fn try_rewrite<'a>(src: &'a str, i: usize) -> Option<(usize, &'static str, Optio
     // Lifetimes: `'a ` / `'static `
     if rest.starts_with('\'') && rest.len() > 1 && rest.as_bytes()[1].is_ascii_alphabetic() {
         let mut n = 1;
-        while n < rest.len() && (rest.as_bytes()[n].is_ascii_alphanumeric() || rest.as_bytes()[n] == b'_') {
+        while n < rest.len()
+            && (rest.as_bytes()[n].is_ascii_alphanumeric() || rest.as_bytes()[n] == b'_')
+        {
             n += 1;
         }
         return Some((n, "", Some("stripped lifetime".into())));
@@ -173,7 +181,11 @@ fn try_rewrite<'a>(src: &'a str, i: usize) -> Option<(usize, &'static str, Optio
     }
     // format!("…") / println!("…") → f"…" / print(f"…")
     if let Some(n) = eat_macro(rest, "format") {
-        return Some((n.0, "", Some("format! → f-string (payload kept as f\"…\")".into())));
+        return Some((
+            n.0,
+            "",
+            Some("format! → f-string (payload kept as f\"…\")".into()),
+        ));
     }
     None
 }

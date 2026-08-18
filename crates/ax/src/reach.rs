@@ -178,7 +178,9 @@ fn shortest_path(
     }
     // Also: the start function itself may call the primitive.
     if let Some(cs) = callees.get(start) {
-        if cs.iter().any(|n| n == target || n.ends_with(&target[target.find('.').map(|i| i + 1).unwrap_or(0)..])) {
+        if cs.iter().any(|n| {
+            n == target || n.ends_with(&target[target.find('.').map(|i| i + 1).unwrap_or(0)..])
+        }) {
             return Some(vec![start.to_string(), target.to_string()]);
         }
     }
@@ -269,7 +271,11 @@ fn collect_calls(intern: &Interner, e: &Expr, out: &mut Vec<String>) {
                 collect_calls(intern, &l.init, out);
             }
         }
-        ExprKind::Lit(_) | ExprKind::Path(_) | ExprKind::Hole | ExprKind::Break | ExprKind::Continue => {}
+        ExprKind::Lit(_)
+        | ExprKind::Path(_)
+        | ExprKind::Hole
+        | ExprKind::Break
+        | ExprKind::Continue => {}
     }
 }
 

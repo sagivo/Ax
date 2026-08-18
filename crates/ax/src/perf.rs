@@ -96,11 +96,7 @@ const CONTRACTS: &[&str] = &[
     "inline",
 ];
 
-pub fn analyze_module(
-    intern: &Interner,
-    checked: &CheckOutput,
-    file_name: &str,
-) -> ModulePerf {
+pub fn analyze_module(intern: &Interner, checked: &CheckOutput, file_name: &str) -> ModulePerf {
     let (own, _affine) = ownership::analyze(intern, checked);
     let mut functions = Vec::new();
     let mut contracts = Vec::new();
@@ -134,7 +130,8 @@ pub fn analyze_module(
                         "hoist the allocation above the branch, or restructure so the value is used once",
                     ));
                 }
-                if v.strategy == Strategy::RcNonatomic && v.use_kind != crate::ownership::UseKind::Escape
+                if v.strategy == Strategy::RcNonatomic
+                    && v.use_kind != crate::ownership::UseKind::Escape
                 {
                     // already reported as rc_not_elided
                 }
@@ -238,7 +235,10 @@ fn check_contract(
             if fo.total_allocs == 0 {
                 (true, "zero heap allocations".into())
             } else {
-                (false, format!("{} heap allocations on some path", fo.total_allocs))
+                (
+                    false,
+                    format!("{} heap allocations on some path", fo.total_allocs),
+                )
             }
         }
         "no_rc" => {
@@ -255,7 +255,10 @@ fn check_contract(
                 (false, format!("{bounds} surviving bounds checks"))
             }
         }
-        "max_alloc" => (fo.total_allocs <= 4, format!("{} allocations", fo.total_allocs)),
+        "max_alloc" => (
+            fo.total_allocs <= 4,
+            format!("{} allocations", fo.total_allocs),
+        ),
         "no_panic" | "pure" | "total" | "inline" => (true, "accepted (static subset)".into()),
         _ => (true, "unknown contract treated as ok".into()),
     }
@@ -377,7 +380,11 @@ fn count_index(e: &Expr, n: &mut u32) {
                 count_index(&l.init, n);
             }
         }
-        ExprKind::Lit(_) | ExprKind::Path(_) | ExprKind::Hole | ExprKind::Break | ExprKind::Continue => {}
+        ExprKind::Lit(_)
+        | ExprKind::Path(_)
+        | ExprKind::Hole
+        | ExprKind::Break
+        | ExprKind::Continue => {}
     }
 }
 
@@ -459,11 +466,7 @@ pub fn complete_at(
         let name = intern.get(f.sig.name).to_string();
         completions.push(Completion {
             name: name.clone(),
-            signature: format!(
-                "(fn {} (…) {})",
-                name,
-                f.sig.ret.display_tree(intern)
-            ),
+            signature: format!("(fn {} (…) {})", name, f.sig.ret.display_tree(intern)),
             kind: "fn".into(),
         });
     }
@@ -493,7 +496,10 @@ pub fn complete_at(
     }
     CompleteReport {
         gbnf_fragment: crate::gbnf::fragment_at(
-            &completions.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+            &completions
+                .iter()
+                .map(|c| c.name.clone())
+                .collect::<Vec<_>>(),
         ),
         completions,
     }

@@ -153,11 +153,7 @@ fn main() -> i32 = {
     assert_eq!(r.schema_version, "1.0");
     for f in &r.functions {
         for find in &f.findings {
-            assert!(
-                !find.fixes.is_empty(),
-                "finding {} has no fix",
-                find.id
-            );
+            assert!(!find.fixes.is_empty(), "finding {} has no fix", find.id);
         }
     }
 }
@@ -190,7 +186,9 @@ fn main() -> i64 = checksum_no_alloc(2);
     let (s, out) = compile(src);
     let r = ax::perf::analyze_module(&s.intern, &out, "t.ax");
     assert!(
-        r.contracts.iter().any(|c| c.attribute == "no_alloc" && c.ok),
+        r.contracts
+            .iter()
+            .any(|c| c.attribute == "no_alloc" && c.ok),
         "contracts: {:?}",
         r.contracts
     );
@@ -216,14 +214,21 @@ pub fn add<'a>(x: &'a i32, y: &'a i32) -> i32 {
     assert!(!r.source.contains("Box::new"), "{}", r.source);
     assert!(!r.source.contains(".clone()"), "{}", r.source);
     assert!(!r.source.contains("'a"), "{}", r.source);
-    assert!(r.notes.iter().any(|n| n.contains("lifetime") || n.contains("Box") || n.contains("clone")));
+    assert!(r
+        .notes
+        .iter()
+        .any(|n| n.contains("lifetime") || n.contains("Box") || n.contains("clone")));
 }
 
 #[test]
 fn translate_rejects_unknown_macros() {
     let rust = r#"fn f() { println!("hi"); todo!("no"); }"#;
     let r = ax::translate::translate_rust(rust);
-    assert!(r.rejected.iter().any(|x| x.contains("todo")), "{:?}", r.rejected);
+    assert!(
+        r.rejected.iter().any(|x| x.contains("todo")),
+        "{:?}",
+        r.rejected
+    );
 }
 
 #[test]
@@ -235,7 +240,11 @@ fn main() -> u64 !{io[fs], abort} = inner();
 "#;
     let (s, out) = compile(src);
     let r = ax::reach::analyze(&s.intern, &out);
-    let io = r.capabilities.iter().find(|c| c.cap == "io").expect("io cap");
+    let io = r
+        .capabilities
+        .iter()
+        .find(|c| c.cap == "io")
+        .expect("io cap");
     assert!(io.reachable, "{r:?}");
     assert!(io.path.len() >= 2, "path {:?}", io.path);
 }
@@ -291,7 +300,9 @@ fn main() -> i64 !{alloc[a]} = {
     let out = s.compile("t.ax", src).unwrap_or_else(|d| panic!("{d:?}"));
     let dir = std::env::temp_dir().join("ax-mapget");
     let br = ax::codegen::build_native(&s.intern, &out, "mapget", &dir).expect("build");
-    let run = std::process::Command::new(&br.bin_path).output().expect("run");
+    let run = std::process::Command::new(&br.bin_path)
+        .output()
+        .expect("run");
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert!(stdout.contains("7"), "{stdout}");
 }
@@ -338,9 +349,13 @@ fn main() -> i32 { 0 }
 
 #[test]
 fn daemon_check_roundtrip() {
-    let line = r#"{"id":1,"method":"check","params":{"source":"module t;\nfn main() -> i32 = 1;\n"}}"#;
+    let line =
+        r#"{"id":1,"method":"check","params":{"source":"module t;\nfn main() -> i32 = 1;\n"}}"#;
     let resp = ax::daemon::handle_line(line);
-    assert!(resp.contains("\"ok\":true") || resp.contains("\"ok\": true"), "{resp}");
+    assert!(
+        resp.contains("\"ok\":true") || resp.contains("\"ok\": true"),
+        "{resp}"
+    );
 }
 
 #[test]
@@ -372,7 +387,10 @@ fn fs_read_returns_untrusted() {
         .find(|c| c.name == "fs.read" || c.name.ends_with(".read"))
         .expect("fs.read in prelude");
     let d = fs.ret.display(&s.intern);
-    assert!(d.contains("Untrusted"), "fs.read should return Untrusted[…], got {d}");
+    assert!(
+        d.contains("Untrusted"),
+        "fs.read should return Untrusted[…], got {d}"
+    );
 }
 
 #[test]
@@ -388,9 +406,14 @@ fn rc_vs_unique_same_value() {
     let interp = ax::driver::run_main(&s.intern, &out, 0).unwrap().as_i128();
     let dir = std::env::temp_dir().join("ax-rcuniq");
     let br = ax::codegen::build_native(&s.intern, &out, "rcuniq", &dir).expect("build");
-    let run = std::process::Command::new(&br.bin_path).output().expect("run");
+    let run = std::process::Command::new(&br.bin_path)
+        .output()
+        .expect("run");
     let stdout = String::from_utf8_lossy(&run.stdout);
-    assert!(stdout.contains(&interp.to_string()), "interp={interp} native={stdout}");
+    assert!(
+        stdout.contains(&interp.to_string()),
+        "interp={interp} native={stdout}"
+    );
 }
 
 #[test]
@@ -421,7 +444,13 @@ fn ax_mock_n200_validity() {
 #[test]
 fn fuzz_oracle_vs_native_small() {
     let r = ax::fuzz::differential_report(32, 7);
-    assert_eq!(r.fails, 0, "{} disagreements:\n{}", r.fails, r.details.join("\n"));
+    assert_eq!(
+        r.fails,
+        0,
+        "{} disagreements:\n{}",
+        r.fails,
+        r.details.join("\n")
+    );
 }
 
 #[test]

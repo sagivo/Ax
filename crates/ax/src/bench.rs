@@ -67,12 +67,13 @@ fn bench_tokens() -> Result<(), String> {
         } else {
             Vec::new()
         };
-        let outcome = |s: &Session, out: &crate::check::CheckOutput| {
-            match crate::driver::run_main_with_args(&s.intern, out, 0, &argv) {
+        let outcome =
+            |s: &Session, out: &crate::check::CheckOutput| match crate::driver::run_main_with_args(
+                &s.intern, out, 0, &argv,
+            ) {
                 Ok(v) => format!("ok {}", v.display()),
                 Err(e) => format!("err {e}"),
-            }
-        };
+            };
         let (o1, o2, o3) = (
             outcome(&s1, &out1),
             outcome(&s2, &out2),
@@ -437,7 +438,11 @@ fn time_cmd(bin: &Path, args: &[&str], iters: u32, warmup: u32) -> Result<(u128,
     Ok((median_ns(&samples), last))
 }
 
-fn time_fn(iters: u32, warmup: u32, mut f: impl FnMut() -> Result<String, String>) -> Result<(u128, String), String> {
+fn time_fn(
+    iters: u32,
+    warmup: u32,
+    mut f: impl FnMut() -> Result<String, String>,
+) -> Result<(u128, String), String> {
     for _ in 0..warmup {
         let _ = f()?;
     }
@@ -515,7 +520,12 @@ fn normalize_out(s: &str) -> String {
         "i8", "i16", "i32", "i64", "isz", "u8", "u16", "u32", "u64", "usz", "f32", "f64",
     ] {
         if let Some(rest) = t.strip_suffix(suf) {
-            if rest.chars().next_back().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+            if rest
+                .chars()
+                .next_back()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+            {
                 return rest.to_string();
             }
         }
@@ -669,11 +679,6 @@ func main() {
 "#
     .to_string()
 }
-
-
-
-
-
 
 fn ax_nested(n: u64) -> String {
     format!(
@@ -902,8 +907,7 @@ fn time_interp(
     // The oracle needs the same arguments the native binary gets, or a kernel
     // that reads `argv` cannot run here at all.
     time_fn(iters, warmup, || {
-        crate::driver::run_main_with_args(&s.intern, &out, 0, argv)
-            .map(|v| v.as_i128().to_string())
+        crate::driver::run_main_with_args(&s.intern, &out, 0, argv).map(|v| v.as_i128().to_string())
     })
 }
 
@@ -961,7 +965,6 @@ func main() {{
 "#
     )
 }
-
 
 fn go_nested(n: u64) -> String {
     format!(
@@ -2626,9 +2629,7 @@ fn bench_gate() -> Result<(), String> {
         ));
     }
     if !(c_ok && worst_ok && rs_ok && rc_ok && uniq_ok) {
-        println!(
-            "\n(advisory) one or more gates missed; set AX_GATE_ENFORCE=1 to fail the build"
-        );
+        println!("\n(advisory) one or more gates missed; set AX_GATE_ENFORCE=1 to fail the build");
     }
     Ok(())
 }

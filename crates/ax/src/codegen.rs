@@ -97,7 +97,12 @@ pub fn build_tier(
             cmd.args(["-O0", "-g"]);
         }
         Tier::Release => {
-            cmd.args(["-O3", "-flto", "-fno-asynchronous-unwind-tables", "-DNDEBUG"]);
+            cmd.args([
+                "-O3",
+                "-flto",
+                "-fno-asynchronous-unwind-tables",
+                "-DNDEBUG",
+            ]);
         }
         Tier::Portable => {
             cmd.args(["-O2", "-DNDEBUG", "--target=wasm32-wasi"]);

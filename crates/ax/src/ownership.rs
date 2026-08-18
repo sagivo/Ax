@@ -191,7 +191,8 @@ pub fn analyze(intern: &Interner, checked: &CheckOutput) -> (OwnershipReport, Ve
             } else {
                 UseKind::Read
             };
-            let (strategy, reason) = pick_strategy(ty, use_kind, use_list.len(), escaped.contains(&n));
+            let (strategy, reason) =
+                pick_strategy(ty, use_kind, use_list.len(), escaped.contains(&n));
             if matches!(strategy, Strategy::RcNonatomic | Strategy::RcAtomic) {
                 fn_rc += 1;
             }
@@ -239,7 +240,8 @@ pub fn analyze(intern: &Interner, checked: &CheckOutput) -> (OwnershipReport, Ve
             // a stack / register slot. Conservatively treat an escaped
             // non-primitive local as heapish; everything else is stack.
             let heapish = escaped.contains(n) && use_kind == UseKind::Escape;
-            let (strategy, reason) = pick_strategy_local(use_kind, use_list.len(), escaped.contains(n), heapish);
+            let (strategy, reason) =
+                pick_strategy_local(use_kind, use_list.len(), escaped.contains(n), heapish);
             if matches!(strategy, Strategy::RcNonatomic | Strategy::RcAtomic) {
                 fn_rc += 1;
             }
@@ -392,19 +394,56 @@ fn walk(
                     mutated.insert(intern.get(p.segs[0].name).to_string());
                 }
             }
-            walk(intern, lhs, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
-            walk(intern, rhs, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                lhs,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
+            walk(
+                intern,
+                rhs,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
         }
         ExprKind::Let(l) => {
             if let PatKind::Bind(id) = &l.pat.kind {
                 let n = intern.get(id.name).to_string();
                 assigned.insert(n.clone());
-                if l.ty.as_ref().map(|t| matches!(t.kind, TypeExprKind::Own(_))).unwrap_or(false) {
+                if l.ty
+                    .as_ref()
+                    .map(|t| matches!(t.kind, TypeExprKind::Own(_)))
+                    .unwrap_or(false)
+                {
                     affine.insert(n.clone());
                     affine_span.insert(n, l.span);
                 }
             }
-            walk(intern, &l.init, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                &l.init,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
         }
         ExprKind::Block { stmts, tail } => {
             for s in stmts {
@@ -435,16 +474,36 @@ fn walk(
                             ops,
                         );
                     }
-                    StmtKind::Expr(x) => {
-                        walk(intern, x, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops)
-                    }
+                    StmtKind::Expr(x) => walk(
+                        intern,
+                        x,
+                        uses,
+                        mutated,
+                        consumed,
+                        escaped,
+                        affine,
+                        affine_span,
+                        assigned,
+                        ops,
+                    ),
                 }
             }
             if let Some(t) = tail {
                 // Nested-block tails are not escapes. A function-level return
                 // of a local is recorded in `ExprKind::Return` / by the
                 // caller of `analyze` looking at the fn body's tail.
-                walk(intern, t, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+                walk(
+                    intern,
+                    t,
+                    uses,
+                    mutated,
+                    consumed,
+                    escaped,
+                    affine,
+                    affine_span,
+                    assigned,
+                    ops,
+                );
             }
         }
         ExprKind::Return(inner) => {
@@ -456,11 +515,33 @@ fn walk(
                         consumed.insert(n);
                     }
                 }
-                walk(intern, x, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+                walk(
+                    intern,
+                    x,
+                    uses,
+                    mutated,
+                    consumed,
+                    escaped,
+                    affine,
+                    affine_span,
+                    assigned,
+                    ops,
+                );
             }
         }
         ExprKind::Call { callee, args } => {
-            walk(intern, callee, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                callee,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
             for a in args {
                 if let ExprKind::Path(p) = &a.kind {
                     if p.segs.len() == 1 {
@@ -472,71 +553,306 @@ fn walk(
                         }
                     }
                 }
-                walk(intern, a, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+                walk(
+                    intern,
+                    a,
+                    uses,
+                    mutated,
+                    consumed,
+                    escaped,
+                    affine,
+                    affine_span,
+                    assigned,
+                    ops,
+                );
             }
         }
         ExprKind::Field { base, .. } | ExprKind::Unary { expr: base, .. } => {
-            walk(intern, base, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                base,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
         }
         ExprKind::Index { base, index } => {
-            walk(intern, base, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
-            walk(intern, index, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                base,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
+            walk(
+                intern,
+                index,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
         }
         ExprKind::Binary { lhs, rhs, .. } => {
-            walk(intern, lhs, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
-            walk(intern, rhs, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                lhs,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
+            walk(
+                intern,
+                rhs,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
         }
         ExprKind::If {
             cond,
             then_b,
             else_b,
         } => {
-            walk(intern, cond, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
-            walk(intern, then_b, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                cond,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
+            walk(
+                intern,
+                then_b,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
             if let Some(el) = else_b {
-                walk(intern, el, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+                walk(
+                    intern,
+                    el,
+                    uses,
+                    mutated,
+                    consumed,
+                    escaped,
+                    affine,
+                    affine_span,
+                    assigned,
+                    ops,
+                );
             }
         }
         ExprKind::Match { scrut, arms } | ExprKind::Catch { expr: scrut, arms } => {
-            walk(intern, scrut, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                scrut,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
             for a in arms {
-                walk(intern, &a.body, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+                walk(
+                    intern,
+                    &a.body,
+                    uses,
+                    mutated,
+                    consumed,
+                    escaped,
+                    affine,
+                    affine_span,
+                    assigned,
+                    ops,
+                );
             }
         }
         ExprKind::For { iter, body, .. } => {
-            walk(intern, iter, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
-            walk(intern, body, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                iter,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
+            walk(
+                intern,
+                body,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
         }
         ExprKind::While { cond, body } => {
-            walk(intern, cond, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
-            walk(intern, body, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                cond,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
+            walk(
+                intern,
+                body,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
         }
         ExprKind::Loop { body } | ExprKind::Region { body, .. } | ExprKind::Lambda { body, .. } => {
-            walk(intern, body, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                body,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
         }
         ExprKind::Record(fs) | ExprKind::Variant { fields: fs, .. } => {
             for (_, x) in fs {
-                walk(intern, x, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+                walk(
+                    intern,
+                    x,
+                    uses,
+                    mutated,
+                    consumed,
+                    escaped,
+                    affine,
+                    affine_span,
+                    assigned,
+                    ops,
+                );
             }
         }
         ExprKind::Raise(inner) | ExprKind::Attempt(inner) | ExprKind::Cast { expr: inner, .. } => {
-            walk(intern, inner, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                inner,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
         }
         ExprKind::Try(inner) => {
-            walk(intern, inner, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+            walk(
+                intern,
+                inner,
+                uses,
+                mutated,
+                consumed,
+                escaped,
+                affine,
+                affine_span,
+                assigned,
+                ops,
+            );
         }
         ExprKind::Par { bindings } => {
             for l in bindings {
-                walk(intern, &l.init, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+                walk(
+                    intern,
+                    &l.init,
+                    uses,
+                    mutated,
+                    consumed,
+                    escaped,
+                    affine,
+                    affine_span,
+                    assigned,
+                    ops,
+                );
             }
         }
         ExprKind::Interpolate { parts } => {
             for p in parts {
                 if let InterpPart::Expr(x) = p {
-                    walk(intern, x, uses, mutated, consumed, escaped, affine, affine_span, assigned, ops);
+                    walk(
+                        intern,
+                        x,
+                        uses,
+                        mutated,
+                        consumed,
+                        escaped,
+                        affine,
+                        affine_span,
+                        assigned,
+                        ops,
+                    );
                 }
             }
         }
-        ExprKind::Lit(_) | ExprKind::Path(_) | ExprKind::Hole | ExprKind::Break | ExprKind::Continue => {}
+        ExprKind::Lit(_)
+        | ExprKind::Path(_)
+        | ExprKind::Hole
+        | ExprKind::Break
+        | ExprKind::Continue => {}
     }
 }

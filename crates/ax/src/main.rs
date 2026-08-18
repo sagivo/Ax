@@ -324,7 +324,10 @@ fn cmd_fix(args: &[String]) -> ExitCode {
                 f.code,
                 f.before,
                 f.after,
-                f.note.as_ref().map(|n| format!("  ({n})")).unwrap_or_default()
+                f.note
+                    .as_ref()
+                    .map(|n| format!("  ({n})"))
+                    .unwrap_or_default()
             );
         }
         for f in &r.withheld {
@@ -469,11 +472,7 @@ fn cmd_hole(args: &[String]) -> ExitCode {
                 println!("    {}  {}    {}", f.rank, f.expr, f.note);
             }
             for f in h.fills.iter().filter(|f| !f.compiles).take(3) {
-                println!(
-                    "    -  {}    rejected: {}",
-                    f.expr,
-                    f.rejected_by.join(" ")
-                );
+                println!("    -  {}    rejected: {}", f.expr, f.rejected_by.join(" "));
             }
         }
         return ExitCode::SUCCESS;
@@ -686,11 +685,7 @@ fn cmd_test(args: &[String]) -> ExitCode {
             .as_deref()
             .and_then(ax::frontend::Surface::from_str)
             .unwrap_or_else(|| ax::tree::detect_surface(&src, ax::frontend::Surface::Tree));
-        let r = ax::evalloop::attempts_to_green(
-            path.to_str().unwrap_or("input.ax"),
-            &src,
-            surface,
-        );
+        let r = ax::evalloop::attempts_to_green(path.to_str().unwrap_or("input.ax"), &src, surface);
         if flags.json {
             println!("{}", serde_json::to_string_pretty(&r).unwrap());
         } else {
@@ -759,7 +754,10 @@ fn program_argv(args: &[String], src: &Path) -> Vec<String> {
         }
         // Skip `ax`'s own flags, and the value of a flag that takes one.
         if a.starts_with('-') {
-            if matches!(a.as_str(), "--seed" | "--trace" | "--into" | "--tx" | "--affected" | "--surface" | "-o") {
+            if matches!(
+                a.as_str(),
+                "--seed" | "--trace" | "--into" | "--tx" | "--affected" | "--surface" | "-o"
+            ) {
                 i += 1;
             }
             i += 1;
@@ -893,30 +891,27 @@ fn cmd_replay(args: &[String]) -> ExitCode {
             // Replay consumes the recorded transcript: effects return what they
             // returned before, so a file changing on disk cannot make a replay
             // silently disagree.
-            Ok(out) => match ax::driver::run_traced(
-                &s.intern,
-                &out,
-                tr.seed,
-                &[],
-                Some(tr.events.clone()),
-            ) {
-                Ok((v, _)) => {
-                    let canon = hex::encode(v.canonical_bytes());
-                    if canon != tr.canonical {
-                        eprintln!("replay failed: canonical output mismatch");
-                        eprintln!("  recorded {}", tr.canonical);
-                        eprintln!("  replayed {canon}");
-                        return ExitCode::from(1);
+            Ok(out) => {
+                match ax::driver::run_traced(&s.intern, &out, tr.seed, &[], Some(tr.events.clone()))
+                {
+                    Ok((v, _)) => {
+                        let canon = hex::encode(v.canonical_bytes());
+                        if canon != tr.canonical {
+                            eprintln!("replay failed: canonical output mismatch");
+                            eprintln!("  recorded {}", tr.canonical);
+                            eprintln!("  replayed {canon}");
+                            return ExitCode::from(1);
+                        }
+                        println!("{}", v.display());
+                        println!("replay ok  seed={}", tr.seed);
+                        ExitCode::SUCCESS
                     }
-                    println!("{}", v.display());
-                    println!("replay ok  seed={}", tr.seed);
-                    ExitCode::SUCCESS
+                    Err(e) => {
+                        eprintln!("{e}");
+                        ExitCode::from(1)
+                    }
                 }
-                Err(e) => {
-                    eprintln!("{e}");
-                    ExitCode::from(1)
-                }
-            },
+            }
             Err(d) => fail_diags(&s, &d, false),
         }
     } else {
@@ -1258,12 +1253,8 @@ fn cmd_translate(args: &[String]) -> ExitCode {
     };
     let r = ax::translate::translate_rust(&src);
     // [T-11.4] translated corpora are unshippable without provenance.
-    let stamped = ax::translate::with_provenance(
-        &r.source,
-        path,
-        "MIT OR Apache-2.0",
-        "unpinned-local",
-    );
+    let stamped =
+        ax::translate::with_provenance(&r.source, path, "MIT OR Apache-2.0", "unpinned-local");
     print!("{stamped}");
     for n in &r.notes {
         eprintln!("note: {n}");
@@ -1355,7 +1346,13 @@ fn cmd_k1(args: &[String]) -> ExitCode {
     let flags = parse_flags(args);
     let n = args
         .windows(2)
-        .find_map(|w| if w[0] == "--n" { w[1].parse().ok() } else { None })
+        .find_map(|w| {
+            if w[0] == "--n" {
+                w[1].parse().ok()
+            } else {
+                None
+            }
+        })
         .unwrap_or(24);
     let r = ax::evalloop::run_2x2(flags.seed, n, 12);
     if flags.json {
@@ -1368,7 +1365,10 @@ fn cmd_k1(args: &[String]) -> ExitCode {
 
 fn cmd_silent(args: &[String]) -> ExitCode {
     let json = args.iter().any(|a| a == "--json");
-    let filter = args.iter().find(|a| !a.starts_with("--")).map(|s| s.as_str());
+    let filter = args
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .map(|s| s.as_str());
     let r = ax::silent::run(filter);
     if json {
         println!("{}", serde_json::to_string_pretty(&r).unwrap());

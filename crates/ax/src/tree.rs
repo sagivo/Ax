@@ -506,7 +506,9 @@ impl<'a> TreeParser<'a> {
         let mut pending_meta: Vec<Meta> = Vec::new();
         for f in forms {
             match f {
-                Sexp::List { items, span: _ } if items.first().is_some_and(|h| h.is_atom("export")) => {
+                Sexp::List { items, span: _ }
+                    if items.first().is_some_and(|h| h.is_atom("export")) =>
+                {
                     for it in items.iter().skip(1) {
                         if let Some(n) = it.atom() {
                             exports.push(self.ident(n, it.span()));
@@ -524,7 +526,10 @@ impl<'a> TreeParser<'a> {
                         }
                     };
                     let alias = if items.get(2).is_some_and(|x| x.is_atom("as")) {
-                        items.get(3).and_then(Sexp::atom).map(|n| self.ident(n, items[3].span()))
+                        items
+                            .get(3)
+                            .and_then(Sexp::atom)
+                            .map(|n| self.ident(n, items[3].span()))
                     } else {
                         None
                     };
@@ -537,7 +542,9 @@ impl<'a> TreeParser<'a> {
                 Sexp::List { items, span } if items.first().is_some_and(|h| h.is_atom("@")) => {
                     if let Some(key) = items.get(1).and_then(Sexp::atom) {
                         let value = match items.get(2) {
-                            Some(Sexp::String { text, .. }) => Some(MetaValue::String(text.clone())),
+                            Some(Sexp::String { text, .. }) => {
+                                Some(MetaValue::String(text.clone()))
+                            }
                             Some(Sexp::Atom { text, span }) => {
                                 if let Ok(n) = text.parse::<i64>() {
                                     Some(MetaValue::Int(n))
@@ -638,7 +645,10 @@ impl<'a> TreeParser<'a> {
         // Params are exactly one list: () or ((x T) (y U) …). Grouping is
         // what makes `(Result i32 E)` a return type instead of a parameter.
         let params = match items.get(i) {
-            Some(Sexp::List { items: ps, span: psp }) => {
+            Some(Sexp::List {
+                items: ps,
+                span: psp,
+            }) => {
                 i += 1;
                 self.parse_param_list(ps, *psp)?
             }
@@ -652,7 +662,8 @@ impl<'a> TreeParser<'a> {
             }
         };
         let ret = if let Some(t) = items.get(i) {
-            if t.atom() == Some("!") || matches!(t, Sexp::List { items, .. } if items.first().is_some_and(|h| h.is_atom("!")))
+            if t.atom() == Some("!")
+                || matches!(t, Sexp::List { items, .. } if items.first().is_some_and(|h| h.is_atom("!")))
             {
                 TypeExpr {
                     kind: TypeExprKind::Prim(Prim::Unit),
@@ -682,7 +693,11 @@ impl<'a> TreeParser<'a> {
             }
         }
         let mut contracts = Vec::new();
-        while let Some(Sexp::List { items: c, span: csp }) = items.get(i) {
+        while let Some(Sexp::List {
+            items: c,
+            span: csp,
+        }) = items.get(i)
+        {
             let head = c.first().and_then(Sexp::atom).unwrap_or("");
             let kind = match head {
                 "pre" => ContractKind::Pre,
@@ -724,7 +739,11 @@ impl<'a> TreeParser<'a> {
         })
     }
 
-    fn parse_param_list(&mut self, items: &[Sexp], span: Span) -> Result<Vec<Param>, Vec<Diagnostic>> {
+    fn parse_param_list(
+        &mut self,
+        items: &[Sexp],
+        span: Span,
+    ) -> Result<Vec<Param>, Vec<Diagnostic>> {
         let _ = span;
         // () — no params
         if items.is_empty() {
@@ -734,7 +753,11 @@ impl<'a> TreeParser<'a> {
         if items.iter().all(|it| matches!(it, Sexp::List { .. })) {
             let mut params = Vec::new();
             for it in items {
-                let Sexp::List { items: p, span: psp } = it else {
+                let Sexp::List {
+                    items: p,
+                    span: psp,
+                } = it
+                else {
                     continue;
                 };
                 let pname = match p.first().and_then(Sexp::atom) {
@@ -787,8 +810,10 @@ impl<'a> TreeParser<'a> {
             if !g.is_empty() && g.iter().all(|x| x.atom().is_some()) {
                 // could be generics or the body `(rec …)` / `(or …)` — those have a keyword head
                 let head = g[0].atom().unwrap_or("");
-                if !matches!(head, "rec" | "or" | "fn" | "ref" | "own" | "untrusted" | "secret" | "tuple")
-                {
+                if !matches!(
+                    head,
+                    "rec" | "or" | "fn" | "ref" | "own" | "untrusted" | "secret" | "tuple"
+                ) {
                     for gitem in g {
                         generics.push(GParam {
                             name: self.ident(gitem.atom().unwrap(), gitem.span()),
@@ -818,7 +843,11 @@ impl<'a> TreeParser<'a> {
             }
         };
         let mut injections = Vec::new();
-        while let Some(Sexp::List { items: inj, span: isp }) = items.get(i) {
+        while let Some(Sexp::List {
+            items: inj,
+            span: isp,
+        }) = items.get(i)
+        {
             if !inj.first().is_some_and(|h| h.is_atom("from")) {
                 break;
             }
@@ -939,7 +968,9 @@ impl<'a> TreeParser<'a> {
 
     fn parse_effects(&mut self, e: &Sexp) -> Result<EffectRow, Vec<Diagnostic>> {
         let items = match e {
-            Sexp::List { items, .. } if items.first().is_some_and(|h| h.is_atom("!")) => &items[1..],
+            Sexp::List { items, .. } if items.first().is_some_and(|h| h.is_atom("!")) => {
+                &items[1..]
+            }
             Sexp::Atom { text, .. } if text == "!" => &[][..],
             other => {
                 self.err(other.span(), "effects are (! atom-or-list…)");
@@ -994,7 +1025,9 @@ impl<'a> TreeParser<'a> {
                     }
                     "alloc" => {
                         let n = items.get(1).and_then(Sexp::atom).unwrap_or("_");
-                        EffectKind::Alloc(self.ident(n, items.get(1).map(Sexp::span).unwrap_or(span)))
+                        EffectKind::Alloc(
+                            self.ident(n, items.get(1).map(Sexp::span).unwrap_or(span)),
+                        )
                     }
                     other => {
                         self.err(span, format!("unknown effect `{other}`"));
@@ -1349,7 +1382,11 @@ impl<'a> TreeParser<'a> {
                     if is_last && !is_stmt_form(it) {
                         tail = Some(Box::new(self.parse_expr(it)?));
                     } else if is_let_form(it) {
-                        if let Sexp::List { items: li, span: lsp } = it {
+                        if let Sexp::List {
+                            items: li,
+                            span: lsp,
+                        } = it
+                        {
                             let l = self.parse_let(&li[1..], *lsp)?;
                             stmts.push(Stmt {
                                 kind: StmtKind::Let(l),
@@ -1533,7 +1570,8 @@ impl<'a> TreeParser<'a> {
                     if let Sexp::List { items: kv, .. } = it {
                         if kv.len() >= 2 {
                             if let Some(n) = kv[0].atom() {
-                                fields.push((self.ident(n, kv[0].span()), self.parse_expr(&kv[1])?));
+                                fields
+                                    .push((self.ident(n, kv[0].span()), self.parse_expr(&kv[1])?));
                             }
                         }
                     }
@@ -1551,7 +1589,8 @@ impl<'a> TreeParser<'a> {
                     if let Sexp::List { items: kv, .. } = it {
                         if kv.len() >= 2 {
                             if let Some(n) = kv[0].atom() {
-                                fields.push((self.ident(n, kv[0].span()), self.parse_expr(&kv[1])?));
+                                fields
+                                    .push((self.ident(n, kv[0].span()), self.parse_expr(&kv[1])?));
                             }
                         } else if kv.len() == 1 {
                             // positional (var Some x) handled below
@@ -1582,7 +1621,10 @@ impl<'a> TreeParser<'a> {
                 // lambda: (fn () body) | (fn ((x T) …) [Ret] body)
                 let mut i = 1;
                 let params = match items.get(i) {
-                    Some(Sexp::List { items: ps, span: psp }) => {
+                    Some(Sexp::List {
+                        items: ps,
+                        span: psp,
+                    }) => {
                         i += 1;
                         self.parse_param_list(ps, *psp)?
                     }
@@ -1652,7 +1694,11 @@ impl<'a> TreeParser<'a> {
             "par" => {
                 let mut bindings = Vec::new();
                 for it in items.iter().skip(1) {
-                    if let Sexp::List { items: li, span: lsp } = it {
+                    if let Sexp::List {
+                        items: li,
+                        span: lsp,
+                    } = it
+                    {
                         if li.first().is_some_and(|h| h.is_atom("let")) {
                             bindings.push(self.parse_let(&li[1..], *lsp)?);
                         }
@@ -1754,10 +1800,7 @@ impl<'a> TreeParser<'a> {
         let rest = items.len().saturating_sub(i);
         let (ty, init) = if rest == 0 {
             self.err(span, "let needs an initializer");
-            (
-                None,
-                expr_lit(Lit::Unit, span),
-            )
+            (None, expr_lit(Lit::Unit, span))
         } else if rest == 1 {
             (None, self.parse_expr(&items[i])?)
         } else {
@@ -1923,7 +1966,8 @@ impl<'a> TreeParser<'a> {
                         Ok(Pattern {
                             id: NodeId::NONE,
                             kind: PatKind::Variant {
-                                name: self.ident(name, items.get(1).map(Sexp::span).unwrap_or(span)),
+                                name: self
+                                    .ident(name, items.get(1).map(Sexp::span).unwrap_or(span)),
                                 fields,
                             },
                             span,

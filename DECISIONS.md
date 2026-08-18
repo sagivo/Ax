@@ -126,6 +126,35 @@ Rust-wins row or the parity rows are ever removed.
 | P1 | Residual dynamic RC rate on `bench/perf/` > 8% after the perf loop | **no** (0.00 at verification sizes) | Unique/RC IR ops (`UniqueAlloc`/`RcRetain`…) lower to `ax_rt_*`; residual RC retain emitted for shared ptr params |
 | P2 | Median runtime > 1.4× C | **no** (median 0.62× C) | worst 1.50× C is the mandelbrot row; still ≤ 1.60× |
 
+## R-17 — K-style reduce and compound assign (2026-08-18)
+
+Surface-only density, borrowed from K (`+/`) and C (`+=`).
+
+- `s += e` (and `-=` `*=` `/=` `%=` `&=` `|=` `^=`) expands to
+  `s = s + e` before parse. The name is not re-evaluated. Same AST
+  as writing the long form; `ax fmt` prints the short form.
+- `+/n` / `+/a..b` expands to a range-sum loop; `*/` is the product.
+  `range` is `usz → usz`, so the accumulator is `0usz` / `1usz`.
+  Same IR as the loop an agent would have written. `ax fmt` packs a
+  *pure* range reduction (init 0/1, body is only `s = s ± i`, result
+  is `s`) back to `+/` / `*/`. A loop that does anything else stays
+  a loop.
+
+No IR, lowering, or runtime change. R-13.9 does not fire on M2 /
+silent-wrongness: the desugar is the existing loop. Proxy tokenizer
+treats `+=` and `+/` as one token (vocabularies already carry them).
+
+Rejected in this pass, and why:
+
+- Unicode APL glyphs (`+/` as `+/` is already ASCII). Rare glyphs
+  cost more BPE, against the card's ASCII-letter rule.
+- Rank / tacit / trains. Those change the type system and the IR.
+  Density without a new runtime means *spelling*, not a new array
+  model. `Map`/`Vec` reductions stay out until they can lower to
+  the same loop.
+- `+/xs` over a vector. That would need `xs.at(i)` and a length;
+  not the same IR as `range`, and `at` is a check. Not this change.
+
 ## Language-change rule (R-13.9)
 
 No language change merges if it regresses M2 by > 2% or silent-wrongness
@@ -182,7 +211,7 @@ short syntax as the language. The conventional grammar in
 
 The token-minimal pack (`#fn`, `:=`, `$if`, type glyphs) is no longer
 an opt-in dense mode. It is the default session surface and what
-`ax fmt` prints. Detection: `#name(`, `:=`, `$`, `@while`, `i~n`.
+`ax fmt` prints. Detection: `#name(`, `:=`, `$`, `@while`, `i~n`, `+=`, `+/` / `*/`.
 A file that opens with `(` is still the tree. `fn` / `module` / `let`
 corpus files still parse as conventional so existing tests keep
 proving the IR. `--surface ax` is the name; `dense` remains an alias.
