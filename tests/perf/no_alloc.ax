@@ -1,0 +1,10 @@
+//@ id:        T-PRF-0001
+//@ requires:  R-5.6.1, R-5.2.5
+//@ origin:    authored — #[no_alloc] / exact count ([T-5.2.2])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 4i64
+module tests.perf.no_alloc;
+fn checksum_no_alloc(x: i64) -> i64 = x * 2;
+fn main() -> i64 = checksum_no_alloc(2);

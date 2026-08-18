@@ -1,0 +1,11 @@
+//@ id:        T-DIA-0018
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0112
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0112
+module tests.diagnostics.non_exhaustive;
+type Color = | Red | Green | Blue;
+fn name(c: Color) -> i32 = match c { Red => 1; Green => 2; };
+fn main() -> i32 = name(Blue);

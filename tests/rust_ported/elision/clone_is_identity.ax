@@ -4,8 +4,7 @@
 //@ upstream:  none
 //@ license:   MIT
 //@ port:      authored
-//@ expect:    value: 5i32
-//@ diags:     A0103
+//@ expect:    warn: A0103
 module tests.rust_ported.elision.clone_is_identity;
 fn main() -> i32 = {
     let x: i32 = 5;

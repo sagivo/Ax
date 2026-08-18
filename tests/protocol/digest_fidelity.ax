@@ -1,0 +1,10 @@
+//@ id:        T-PRT-0002
+//@ requires:  R-2.1
+//@ origin:    authored — digest fidelity ([T-6.3.1])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    compile
+module tests.protocol.digest_fidelity;
+fn add(a: i32, b: i32) -> i32 = a + b;
+fn main() -> i32 = add(1, 2);

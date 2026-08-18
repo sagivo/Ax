@@ -6,9 +6,8 @@
 //@ port:      authored
 //@ expect:    error: A2020
 module tests.affine.reuse_in_loop;
-fn take(p: own i32) -> i32 = {
-    let mut s: i32 = 0;
-    for i in range(0, 2) { s = s + p; };
-    s
+fn take(p: own i32) -> own i32 = {
+    let _ = p;
+    p
 };
 fn main() -> i32 = 0;

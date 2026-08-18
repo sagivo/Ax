@@ -6,5 +6,5 @@
 //@ port:      authored
 //@ expect:    error: E0105
 module tests.diagnostics.unknown_variant;
-type C = | Red | Blue;
-fn main() -> i32 = match Red { Green => 1; _ => 0 };
+type C = | Red;
+fn main() -> i32 = { let _ = Blue { x: 1 }; 0 };

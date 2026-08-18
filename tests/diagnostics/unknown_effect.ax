@@ -1,0 +1,9 @@
+//@ id:        T-DIA-0013
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0003
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0003
+module tests.diagnostics.unknown_effect;
+fn main() -> i32 !{bogus} = 0;

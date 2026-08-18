@@ -1,0 +1,9 @@
+//@ id:        T-DIA-0022
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0302
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0302
+module tests.diagnostics.region_escape;
+fn main() -> &r i32 = region r { let x = 1; &x };

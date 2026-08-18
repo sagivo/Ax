@@ -37,6 +37,9 @@ jobs:
       - name: oracle agrees with both native tiers and cranelift on every case
         run: cargo run -p ax -- conform
 
+      - name: T-spec testharness (headers, coverage, oracles, fault injection)
+        run: cargo test -p ax --test testharness
+
       # The dev tier compiles in-process. Running the two worked examples through
       # it is the same bar the C backend has to clear.
       - name: the cranelift tier runs the examples

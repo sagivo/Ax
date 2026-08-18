@@ -236,11 +236,12 @@ rather than the syntax.
 ## Tests
 
 ```sh
-cargo test --workspace   # unit, kernel, protocol, differential, conformance
+cargo test --workspace   # unit, kernel, protocol, differential, conformance, testharness
 ax conform               # the conformance corpus alone
+ax testharness           # Test Spec v1.0 tree under tests/
 ```
 
-The conformance corpus (`conformance/`) is 119 cases ported by scenario from Go's
+The conformance corpus (`conformance/`) is 120 cases ported by scenario from Go's
 `test/` and Rust's suites: integer wrapping and shift semantics, truncating
 division, IEEE comparison and NaN canonicalisation, bitwise ops, casts, control
 flow, records and variants, error propagation and injection, regions, the
@@ -300,6 +301,7 @@ crates/ax/            checker, typed IR, C backend, oracle, CLI
 runtime/axrt.c        IO / HTTP core (mmap, keep-alive pool)
 runtime/axlang.c      language ABI: aborts, arenas, exact semantics, stdlib
 conformance/          the corpus, one case per file
+tests/                Test Spec v1.0 tree (headers, oracles, inverted, authored)
 examples/             snippets CI compiles and runs
 ```
 

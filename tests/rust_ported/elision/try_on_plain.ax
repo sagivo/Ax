@@ -6,4 +6,4 @@
 //@ port:      authored
 //@ expect:    warn: A0109
 module tests.rust_ported.elision.try_on_plain;
-fn main() -> i32 = 3?;
+fn main() -> i32 !{err[ParseError]} = 3?;

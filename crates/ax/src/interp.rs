@@ -1013,6 +1013,10 @@ impl<'a> Interpreter<'a> {
                 argv.push(self.eval(a)?);
             }
             let name = self.intern.get(field.name);
+            // Accept-and-elide: `.clone()` is identity ([T-3.3.1] A0103).
+            if name == "clone" && args.is_empty() {
+                return Ok(recv);
+            }
             if let Some(v) = self.method(&recv, name, &argv[1..])? {
                 return Ok(v);
             }

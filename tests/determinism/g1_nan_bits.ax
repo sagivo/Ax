@@ -1,0 +1,9 @@
+//@ id:        T-DET-0001
+//@ requires:  R-9.3
+//@ origin:    authored — G1 canonical NaN ([T-5.6.1])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: NaNf64
+module tests.determinism.g1_nan_bits;
+fn main() -> f64 = 0.0 / 0.0;

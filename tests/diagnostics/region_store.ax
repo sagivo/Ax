@@ -1,0 +1,13 @@
+//@ id:        T-DIA-0030
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0300
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0300
+module tests.diagnostics.region_store;
+fn main() -> i32 !{alloc[a]} = {
+    let xs: Vec[i32] = vec.new(test.alloc);
+    xs.push(1);
+    0
+};

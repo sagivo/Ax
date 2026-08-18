@@ -1,0 +1,9 @@
+//@ id:        T-DIA-0017
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0110
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0110
+module tests.diagnostics.break_outside;
+fn main() -> i32 = { break; 1 };

@@ -1,13 +1,12 @@
-# Read-soundness adversarial tests (spec §5.2.3)
+# Read-soundness adversarial tests ([R-5.2.3] / [T-5.1])
 
-Each clause of the `Read` soundness argument has a dedicated case:
+One file per premise. Each asserts the *specific* mechanism that stops the attack.
 
-1. The caller is suspended for the duration of the call.
-2. There is no mutable global state.
-3. A `Read` parameter cannot be dropped by the callee.
-4. An unresolvable indirect-call target set forces `Escape`.
-5. No other thread observes the value unless it was `Escape`.
-
-These are exercised by `crates/ax/tests/v03.rs` (ownership census) and by
-the differential oracle-vs-native suite. Residual RC on a `Read` parameter
-is a defect in the analysis, reported by `ax perf` as `P1001`.
+| File | Premise | Mechanism |
+|---|---|---|
+| `read_caller_suspended.ax` | Caller is suspended | Direct static call; no re-entrant dispatch |
+| `read_no_mutable_globals.ax` | No mutable globals | `static mut` rejected at parse (E0002) |
+| `read_callee_cannot_drop.ax` | Callee cannot drop a Read | Primitive Read is a register copy |
+| `read_escape_closure.ax` | Unknown targets force Escape | Returned record → residual RC |
+| `read_not_thread_visible.ax` | Non-Escape is thread-invisible | Overlapping `par` `&mut` is E0600 |
+| `rc_vs_unique.ax` | RC-everywhere == unique-heap | Same value on both strategies |

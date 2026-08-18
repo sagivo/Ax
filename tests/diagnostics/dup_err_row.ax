@@ -1,0 +1,12 @@
+//@ id:        T-DIA-0019
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0201
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0201
+module tests.diagnostics.dup_err_row;
+type E = | A;
+type F = | B;
+fn f() -> i32 !{err[E], err[F]} = 0;
+fn main() -> i32 = 0;

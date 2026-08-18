@@ -1,5 +1,10 @@
-//! expect: 5i32
-// §5.2.3 clause 3: a Read parameter cannot be dropped by the callee.
+//@ id:        T-SND-0007
+//@ requires:  R-5.2.3
+//@ origin:    authored — [R-5.2.3] premise 3 (duplicate witness)
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 5i32
 module sound.read_no_drop;
 fn twice(x: i32) -> i32 = x + x;
 fn main() -> i32 = {

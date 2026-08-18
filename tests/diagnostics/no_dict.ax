@@ -1,0 +1,10 @@
+//@ id:        T-DIA-0027
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0401
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0401
+module tests.diagnostics.no_dict;
+fn pick(a: i32, b: i32, o: Ord[i32] = default) -> i32 = a;
+fn main() -> i32 = pick(1, 2);

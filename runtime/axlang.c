@@ -155,6 +155,7 @@ void *ax_alloc_grow(const AxAlloc *a, void *old, uint64_t old_size,
 
 typedef struct AxMapEntry {
     char *key;
+    size_t klen;
     int64_t val;
     struct AxMapEntry *next;
 } AxMapEntry;
@@ -198,31 +199,40 @@ void ax_rt_rc_release(void *p) {
     if (--(*hdr) == 0) free(hdr);
 }
 
-void ax_rt_map_new(uint64_t _unused, AxMap **out) {
-    (void)_unused;
+AxMap *ax_rt_map_new(void) {
     AxMap *m = (AxMap *)calloc(1, sizeof(AxMap));
     if (!m) ax_abort("out of memory");
-    *out = m;
+    return m;
 }
 
-void ax_rt_map_insert(AxMap *m, const char *key, int64_t val) {
+static int ax_str_eq(const char *k, size_t kn, const AxStr *s) {
+    if (!s || !s->ptr) return kn == 0;
+    if (kn != s->len) return 0;
+    return kn == 0 || memcmp(k, s->ptr, kn) == 0;
+}
+
+void ax_rt_map_insert(AxMap *m, const AxStr *key, int64_t val) {
     if (!m || !key) return;
     for (AxMapEntry *e = m->head; e; e = e->next) {
-        if (strcmp(e->key, key) == 0) { e->val = val; return; }
+        if (ax_str_eq(e->key, e->klen, key)) { e->val = val; return; }
     }
     AxMapEntry *e = (AxMapEntry *)calloc(1, sizeof(AxMapEntry));
     if (!e) ax_abort("out of memory");
-    e->key = strdup(key);
+    e->klen = key->len;
+    e->key = (char *)malloc(key->len + 1);
+    if (!e->key) ax_abort("out of memory");
+    if (key->ptr && key->len) memcpy(e->key, key->ptr, key->len);
+    e->key[key->len] = 0;
     e->val = val;
     e->next = m->head;
     m->head = e;
     m->len++;
 }
 
-int ax_rt_map_get(AxMap *m, const char *key, int64_t *out) {
+int ax_rt_map_get(AxMap *m, const AxStr *key, int64_t *out) {
     if (!m || !key) return 0;
     for (AxMapEntry *e = m->head; e; e = e->next) {
-        if (strcmp(e->key, key) == 0) { if (out) *out = e->val; return 1; }
+        if (ax_str_eq(e->key, e->klen, key)) { if (out) *out = e->val; return 1; }
     }
     return 0;
 }

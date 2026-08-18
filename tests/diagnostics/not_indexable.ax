@@ -1,0 +1,9 @@
+//@ id:        T-DIA-0016
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0107
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0107
+module tests.diagnostics.not_indexable;
+fn main() -> i32 = 1[0];

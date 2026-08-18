@@ -1,0 +1,11 @@
+//@ id:        T-DIA-0021
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0204
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0204
+module tests.diagnostics.catch_incomplete;
+type E = | First | Second;
+fn f() -> i32 !{err[E]} = raise First;
+fn main() -> i32 = catch f() { First => 1; };

@@ -275,6 +275,28 @@ fn main() -> i32 = { par { let a = 1; let b = 2; }; 3 };
 }
 
 #[test]
+fn map_insert_get_native() {
+    let src = r#"
+module t;
+fn main() -> i64 !{alloc[a]} = {
+    let mut m: Map[String, i64] = map.new(test.alloc);
+    m.insert("k", 7i64);
+    match m.get("k") {
+        Some(v) => v;
+        None => 0;
+    }
+};
+"#;
+    let mut s = Session::new();
+    let out = s.compile("t.ax", src).unwrap_or_else(|d| panic!("{d:?}"));
+    let dir = std::env::temp_dir().join("ax-mapget");
+    let br = ax::codegen::build_native(&s.intern, &out, "mapget", &dir).expect("build");
+    let run = std::process::Command::new(&br.bin_path).output().expect("run");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("7"), "{stdout}");
+}
+
+#[test]
 fn map_insert_get_eval() {
     let src = r#"
 module t;
@@ -354,6 +376,24 @@ fn fs_read_returns_untrusted() {
 }
 
 #[test]
+fn rc_vs_unique_same_value() {
+    let src = include_str!("../../../tests/soundness/rc_vs_unique.ax");
+    // Strip the expect header.
+    let src = src
+        .lines()
+        .filter(|l| !l.starts_with("//!"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (s, out) = compile(&src);
+    let interp = ax::driver::run_main(&s.intern, &out, 0).unwrap().as_i128();
+    let dir = std::env::temp_dir().join("ax-rcuniq");
+    let br = ax::codegen::build_native(&s.intern, &out, "rcuniq", &dir).expect("build");
+    let run = std::process::Command::new(&br.bin_path).output().expect("run");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains(&interp.to_string()), "interp={interp} native={stdout}");
+}
+
+#[test]
 fn unique_and_rc_ops_exist() {
     let u = ax::ir::Op::UniqueAlloc { size: 0, align: 8 };
     let r = ax::ir::Op::RcRetain(1);
@@ -367,6 +407,21 @@ fn ax_mock_accepts_restricted_rust() {
     let src = "module t;\nfn main() -> i32 = 1 + 2;\n";
     assert!(ax::axmock::validity(src));
     assert!(ax::axmock::score_corpus(&[src]) > 0.9);
+    assert!(ax::axmock::m12_sample_score() >= 0.8);
+}
+
+#[test]
+fn ax_mock_n200_validity() {
+    let corpus = ax::axmock::generated_corpus(200, 42);
+    assert_eq!(corpus.len(), 200);
+    let score = ax::axmock::score_corpus(&corpus);
+    assert!(score >= 0.95, "M12 sample score {score}");
+}
+
+#[test]
+fn fuzz_oracle_vs_native_small() {
+    let fails = ax::fuzz::differential(12, 7);
+    assert_eq!(fails, 0, "{fails} disagreements");
 }
 
 #[test]

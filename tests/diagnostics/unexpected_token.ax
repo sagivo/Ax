@@ -1,0 +1,9 @@
+//@ id:        T-DIA-0025
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0008
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0008
+module tests.diagnostics.unexpected_token;
+fn main() -> i32 = (1;

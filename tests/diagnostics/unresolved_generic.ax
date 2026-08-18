@@ -1,0 +1,10 @@
+//@ id:        T-DIA-0029
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0109
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0109
+module tests.diagnostics.unresolved_generic;
+fn empty[T]() -> T = empty();
+fn main() -> i32 = 0;

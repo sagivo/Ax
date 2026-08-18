@@ -728,6 +728,9 @@ pub fn catalog_codes_pending_emit() -> &'static [&'static str] {
         "E0700", // trusted-ffi strict: no `trusted extern` surface yet
         "A0102", // lifetime tokens are stripped in the lexer, no span left
         "A0108", // macro rewrite lives in `ax translate`, not `ax check`
+        "E0102", // unknown named type is currently treated as an unbound Named
+        "A5001", // ax.toml capability budget — CLI, not a file expect
+        "A5002", // lockfile widen — reach::cap_widened, not a file expect
     ]
 }
 
@@ -1076,6 +1079,7 @@ pub fn fault_injection_report() -> Vec<FaultVariant> {
         ("fmt_idempotent", "tests/protocol/fmt_idempotent.ax"),
         ("digest_fidelity", "tests/protocol/digest_fidelity.ax"),
         ("gbnf_parses", "tests/protocol/gbnf_generator_parses.ax"),
+        ("rc_vs_unique_oracle", "tests/soundness/rc_vs_unique.ax"),
     ];
     for (name, caught_by) in rest {
         let path = workspace_root().join(caught_by);

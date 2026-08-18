@@ -1,0 +1,14 @@
+//@ id:        T-SND-0008
+//@ requires:  R-5.2.3
+//@ origin:    authored — RC-everywhere vs unique-heap agree on primitives
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 9i32
+module sound.rc_vs_unique;
+fn add(a: i32, b: i32) -> i32 = a + b;
+fn main() -> i32 = {
+    let x: i32 = 4;
+    let y: i32 = 5;
+    add(x, y)
+};

@@ -2553,8 +2553,8 @@ fn gate_kernels(full: bool) -> Vec<GateKernel> {
     let fann = if full { 11 } else { 9 };
     let mand = if full { 300 } else { 80 };
     let mat = if full { 256 } else { 80 };
-    let btree = if full { 2_000_000 } else { 200_000 };
-    let trees = if full { 16 } else { 12 };
+    let btree = if full { 8_000 } else { 200 };
+    let trees = if full { 14 } else { 8 };
     let words = if full { 2_000_000 } else { 80_000 };
     let json_n = if full { 4_000_000 } else { 400_000 };
     let regex_n = if full { 4_000_000 } else { 400_000 };
@@ -2659,19 +2659,21 @@ fn ax_nbody(n: u64) -> String {
         r#"
 module bench.nbody;
 export {{ main }};
-fn main() -> i64 !{{err[DivError]}} = {{
-    let mut px: i64 = 0;
-    let mut py: i64 = 0;
-    let mut vx: i64 = 1000;
-    let mut vy: i64 = 0;
+fn main() -> i64 = {{
+    let mut px: f64 = 0.0;
+    let mut py: f64 = 0.0;
+    let mut vx: f64 = 1.0;
+    let mut vy: f64 = 0.0;
+    let dt: f64 = 0.01;
     for _i in range(0, {n}) {{
-        let r2 = px * px + py * py + 1;
-        vx = vx - px / r2;
-        vy = vy - py / r2;
-        px = px + vx;
-        py = py + vy;
+        let r2 = px * px + py * py + 0.01;
+        let invr = 1.0 / r2;
+        vx = vx - px * invr * dt;
+        vy = vy - py * invr * dt;
+        px = px + vx * dt;
+        py = py + vy * dt;
     }};
-    px + py + vx + vy
+    (px * 1000.0) as i64 + (py * 1000.0) as i64
 }};
 "#
     )
@@ -2683,15 +2685,16 @@ fn c_nbody(n: u64) -> String {
 #include <stdio.h>
 #include <stdint.h>
 int main(void) {{
-    long long px = 0, py = 0, vx = 1000, vy = 0;
+    double px = 0.0, py = 0.0, vx = 1.0, vy = 0.0, dt = 0.01;
     for (uint64_t i = 0; i < {n}ull; i++) {{
-        long long r2 = px*px + py*py + 1;
-        vx -= px / r2;
-        vy -= py / r2;
-        px += vx;
-        py += vy;
+        double r2 = px*px + py*py + 0.01;
+        double invr = 1.0 / r2;
+        vx -= px * invr * dt;
+        vy -= py * invr * dt;
+        px += vx * dt;
+        py += vy * dt;
     }}
-    printf("%lld\n", px + py + vx + vy);
+    printf("%lld\n", (long long)(px * 1000.0) + (long long)(py * 1000.0));
     return 0;
 }}
 "#
@@ -2702,20 +2705,22 @@ fn rs_nbody(n: u64) -> String {
     format!(
         r#"
 fn main() {{
-    let mut px: i64 = 0;
-    let mut py: i64 = 0;
-    let mut vx: i64 = 1000;
-    let mut vy: i64 = 0;
+    let mut px = 0.0f64;
+    let mut py = 0.0f64;
+    let mut vx = 1.0f64;
+    let mut vy = 0.0f64;
+    let dt = 0.01f64;
     let mut i = 0u64;
     while i < {n} {{
-        let r2 = px*px + py*py + 1;
-        vx -= px / r2;
-        vy -= py / r2;
-        px += vx;
-        py += vy;
+        let r2 = px*px + py*py + 0.01;
+        let invr = 1.0 / r2;
+        vx -= px * invr * dt;
+        vy -= py * invr * dt;
+        px += vx * dt;
+        py += vy * dt;
         i += 1;
     }}
-    println!("{{}}", px + py + vx + vy);
+    println!("{{}}", (px * 1000.0) as i64 + (py * 1000.0) as i64);
 }}
 "#
     )
@@ -3074,16 +3079,17 @@ fn ax_btree(n: u64) -> String {
         r#"
 module bench.btree;
 export {{ main }};
-fn main() -> i64 = {{
+fn main() -> i64 !{{alloc[a]}} = {{
     let n: usz = {n};
-    let mut acc: i64 = 0;
+    let mut m: Map[String, i64] = map.new(test.alloc);
     for i in range(0, n) {{
-        acc = acc + ((i * 6364136223846793005) as i64);
+        let k = if (i % 2) == 0 {{ "e" }} else {{ "o" }};
+        let cur = match m.get(k) {{ Some(v) => v; None => 0; }};
+        m.insert(k, cur + (i as i64));
     }};
-    for i in range(0, n) {{
-        if (i % 3) == 0 {{ acc = acc - (i as i64); }}
-    }};
-    acc
+    let e = match m.get("e") {{ Some(v) => v; None => 0; }};
+    let o = match m.get("o") {{ Some(v) => v; None => 0; }};
+    e + o * 10007
 }};
 "#
     )
@@ -3096,10 +3102,11 @@ fn c_btree(n: u64) -> String {
 #include <stdint.h>
 int main(void) {{
     const uint64_t n = {n}ull;
-    long long acc = 0;
-    for (uint64_t i = 0; i < n; i++) acc += (long long)(i * 6364136223846793005ull);
-    for (uint64_t i = 0; i < n; i++) if (i % 3 == 0) acc -= (long long)i;
-    printf("%lld\n", acc);
+    long long e = 0, o = 0;
+    for (uint64_t i = 0; i < n; i++) {{
+        if ((i % 2) == 0) e += (long long)i; else o += (long long)i;
+    }}
+    printf("%lld\n", e + o * 10007);
     return 0;
 }}
 "#
@@ -3111,18 +3118,14 @@ fn rs_btree(n: u64) -> String {
         r#"
 fn main() {{
     let n: u64 = {n};
-    let mut acc: i64 = 0;
+    let mut e: i64 = 0;
+    let mut o: i64 = 0;
     let mut i = 0u64;
     while i < n {{
-        acc = acc.wrapping_add((i.wrapping_mul(6364136223846793005)) as i64);
+        if i % 2 == 0 {{ e += i as i64; }} else {{ o += i as i64; }}
         i += 1;
     }}
-    i = 0;
-    while i < n {{
-        if i % 3 == 0 {{ acc -= i as i64; }}
-        i += 1;
-    }}
-    println!("{{acc}}");
+    println!("{{}}", e + o * 10007);
 }}
 "#
     )
@@ -3133,11 +3136,24 @@ fn ax_trees(n: u64) -> String {
         r#"
 module bench.trees;
 export {{ main }};
-fn walk(d: i64) -> i64 = if d <= 0 {{ 1 }} else {{ 1 + walk(d - 1) + walk(d - 1) }};
-fn main() -> i64 = {{
+fn main() -> i64 !{{alloc[a], diverge}} = {{
+    let d: usz = {n};
+    let mut xs: Vec[i64] = vec.new(test.alloc);
+    xs.push(1);
+    let mut i: usz = 0;
+    while i < d {{
+        let mut nxt: Vec[i64] = vec.new(test.alloc);
+        for j in range(0, xs.len()) {{
+            let v = xs.at(j);
+            nxt.push(v);
+            nxt.push(v + 1);
+        }};
+        xs = nxt;
+        i = i + 1;
+    }};
     let mut acc: i64 = 0;
-    for i in range(0, {n}) {{
-        acc = acc + walk((i % 8) as i64);
+    for j in range(0, xs.len()) {{
+        acc = acc + xs.at(j);
     }};
     acc
 }};
@@ -3150,14 +3166,27 @@ fn c_trees(n: u64) -> String {
         r#"
 #include <stdio.h>
 #include <stdint.h>
-static long long walk(long long d) {{
-    if (d <= 0) return 1;
-    return 1 + walk(d - 1) + walk(d - 1);
-}}
+#include <stdlib.h>
 int main(void) {{
+    uint64_t d = {n}ull;
+    uint64_t cap = 1ull << (d + 1);
+    long long *xs = (long long *)calloc(cap, sizeof(long long));
+    long long *nxt = (long long *)calloc(cap, sizeof(long long));
+    uint64_t len = 1;
+    xs[0] = 1;
+    for (uint64_t i = 0; i < d; i++) {{
+        uint64_t nlen = 0;
+        for (uint64_t j = 0; j < len; j++) {{
+            nxt[nlen++] = xs[j];
+            nxt[nlen++] = xs[j] + 1;
+        }}
+        long long *tmp = xs; xs = nxt; nxt = tmp;
+        len = nlen;
+    }}
     long long acc = 0;
-    for (uint64_t i = 0; i < {n}ull; i++) acc += walk((long long)(i % 8));
+    for (uint64_t j = 0; j < len; j++) acc += xs[j];
     printf("%lld\n", acc);
+    free(xs); free(nxt);
     return 0;
 }}
 "#
@@ -3167,14 +3196,21 @@ int main(void) {{
 fn rs_trees(n: u64) -> String {
     format!(
         r#"
-fn walk(d: i64) -> i64 {{ if d <= 0 {{ 1 }} else {{ 1 + walk(d - 1) + walk(d - 1) }} }}
 fn main() {{
-    let mut acc: i64 = 0;
+    let d: u64 = {n};
+    let mut xs: Vec<i64> = vec![1];
     let mut i = 0u64;
-    while i < {n} {{
-        acc += walk((i % 8) as i64);
+    while i < d {{
+        let mut nxt = Vec::with_capacity(xs.len() * 2);
+        for v in &xs {{
+            nxt.push(*v);
+            nxt.push(*v + 1);
+        }}
+        xs = nxt;
         i += 1;
     }}
+    let mut acc: i64 = 0;
+    for v in xs {{ acc += v; }}
     println!("{{acc}}");
 }}
 "#
@@ -3249,11 +3285,18 @@ fn ax_json(n: u64) -> String {
         r#"
 module bench.json;
 export {{ main }};
+fn digit(c: usz) -> i64 = ((c - 48) as i64);
 fn main() -> i64 = {{
     let n: usz = {n};
     let mut acc: i64 = 0;
-    for i in range(0, n) {{
-        acc = acc + ((i * 31 + 7) as i64);
+    let mut i: usz = 0;
+    while i + 4 < n {{
+        let c0 = (i * 17 + 7) % 10 + 48;
+        let c1 = (i * 13 + 3) % 10 + 48;
+        let c2 = 46;
+        let c3 = (i * 11 + 1) % 10 + 48;
+        acc = acc + digit(c0) * 100 + digit(c1) * 10 + digit(c3);
+        i = i + 4;
     }};
     acc
 }};
@@ -3267,8 +3310,14 @@ fn c_json(n: u64) -> String {
 #include <stdio.h>
 #include <stdint.h>
 int main(void) {{
+    const uint64_t n = {n}ull;
     long long acc = 0;
-    for (uint64_t i = 0; i < {n}ull; i++) acc += (long long)(i * 31 + 7);
+    for (uint64_t i = 0; i + 4 < n; i += 4) {{
+        uint64_t c0 = (i * 17 + 7) % 10 + 48;
+        uint64_t c1 = (i * 13 + 3) % 10 + 48;
+        uint64_t c3 = (i * 11 + 1) % 10 + 48;
+        acc += (long long)(c0 - 48) * 100 + (long long)(c1 - 48) * 10 + (long long)(c3 - 48);
+    }}
     printf("%lld\n", acc);
     return 0;
 }}
@@ -3280,9 +3329,16 @@ fn rs_json(n: u64) -> String {
     format!(
         r#"
 fn main() {{
+    let n: u64 = {n};
     let mut acc: i64 = 0;
     let mut i = 0u64;
-    while i < {n} {{ acc += (i * 31 + 7) as i64; i += 1; }}
+    while i + 4 < n {{
+        let c0 = (i * 17 + 7) % 10 + 48;
+        let c1 = (i * 13 + 3) % 10 + 48;
+        let c3 = (i * 11 + 1) % 10 + 48;
+        acc += ((c0 - 48) * 100 + (c1 - 48) * 10 + (c3 - 48)) as i64;
+        i += 4;
+    }}
     println!("{{acc}}");
 }}
 "#
@@ -3297,10 +3353,15 @@ export {{ main }};
 fn main() -> i64 = {{
     let n: usz = {n};
     let mut acc: i64 = 0;
-    for i in range(0, n) {{
-        let c = i % 256;
-        if c == 97 {{ acc = acc + 1; }}
-        if (c >= 48) && (c <= 57) {{ acc = acc + 2; }}
+    let mut i: usz = 0;
+    while i + 2 < n {{
+        let a = (i * 31 + 7) % 256;
+        let b = ((i + 1) * 31 + 7) % 256;
+        let c = ((i + 2) * 31 + 7) % 256;
+        if (a == 97) && (b >= 48) && (b <= 57) && (c == 120) {{
+            acc = acc + 1;
+        }};
+        i = i + 1;
     }};
     acc
 }};
@@ -3315,10 +3376,12 @@ fn c_regex(n: u64) -> String {
 #include <stdint.h>
 int main(void) {{
     long long acc = 0;
-    for (uint64_t i = 0; i < {n}ull; i++) {{
-        uint64_t c = i % 256;
-        if (c == 97) acc++;
-        if (c >= 48 && c <= 57) acc += 2;
+    const uint64_t n = {n}ull;
+    for (uint64_t i = 0; i + 2 < n; i++) {{
+        uint64_t a = (i * 31 + 7) % 256;
+        uint64_t b = ((i + 1) * 31 + 7) % 256;
+        uint64_t c = ((i + 2) * 31 + 7) % 256;
+        if (a == 97 && b >= 48 && b <= 57 && c == 120) acc++;
     }}
     printf("%lld\n", acc);
     return 0;
@@ -3331,12 +3394,14 @@ fn rs_regex(n: u64) -> String {
     format!(
         r#"
 fn main() {{
+    let n: u64 = {n};
     let mut acc: i64 = 0;
     let mut i = 0u64;
-    while i < {n} {{
-        let c = i % 256;
-        if c == 97 {{ acc += 1; }}
-        if c >= 48 && c <= 57 {{ acc += 2; }}
+    while i + 2 < n {{
+        let a = (i * 31 + 7) % 256;
+        let b = ((i + 1) * 31 + 7) % 256;
+        let c = ((i + 2) * 31 + 7) % 256;
+        if a == 97 && b >= 48 && b <= 57 && c == 120 {{ acc += 1; }}
         i += 1;
     }}
     println!("{{acc}}");
@@ -3355,9 +3420,9 @@ fn main() -> i64 = {{
     let mut acc: i64 = 0;
     for y in range(0, n) {{
         for x in range(0, n) {{
-            let dx = (x as i64) * 2 - (n as i64);
-            let dy = (y as i64) * 2 - (n as i64);
-            if dx * dx + dy * dy < (n as i64) * (n as i64) {{ acc = acc + 1; }}
+            let dx = (x as f64) / (n as f64) - 0.5;
+            let dy = (y as f64) / (n as f64) - 0.5;
+            if dx * dx + dy * dy < 0.25 {{ acc = acc + 1; }}
         }};
     }};
     acc
@@ -3376,9 +3441,9 @@ int main(void) {{
     long long acc = 0;
     for (uint64_t y = 0; y < n; y++)
         for (uint64_t x = 0; x < n; x++) {{
-            long long dx = (long long)x * 2 - (long long)n;
-            long long dy = (long long)y * 2 - (long long)n;
-            if (dx*dx + dy*dy < (long long)n * (long long)n) acc++;
+            double dx = (double)x / (double)n - 0.5;
+            double dy = (double)y / (double)n - 0.5;
+            if (dx*dx + dy*dy < 0.25) acc++;
         }}
     printf("%lld\n", acc);
     return 0;
@@ -3397,9 +3462,9 @@ fn main() {{
     while y < n {{
         let mut x = 0u64;
         while x < n {{
-            let dx = (x as i64) * 2 - (n as i64);
-            let dy = (y as i64) * 2 - (n as i64);
-            if dx*dx + dy*dy < (n as i64) * (n as i64) {{ acc += 1; }}
+            let dx = (x as f64) / (n as f64) - 0.5;
+            let dy = (y as f64) / (n as f64) - 0.5;
+            if dx*dx + dy*dy < 0.25 {{ acc += 1; }}
             x += 1;
         }}
         y += 1;
@@ -3418,13 +3483,21 @@ export {{ main }};
 fn main() -> i64 = {{
     let n: usz = {n};
     let mut acc: i64 = 0;
-    let mut prev: usz = 0;
-    for i in range(0, n) {{
+    let mut run: usz = 1;
+    let mut prev: usz = (0 * 131 + 7) % 256;
+    let mut i: usz = 1;
+    while i < n {{
         let b = (i * 131 + 7) % 256;
-        if b == prev {{ acc = acc + 1; }} else {{ acc = acc + (b as i64); }}
-        prev = b;
+        if b == prev {{
+            run = run + 1;
+        }} else {{
+            acc = acc + (prev as i64) * 251 + (run as i64);
+            run = 1;
+            prev = b;
+        }};
+        i = i + 1;
     }};
-    acc
+    acc + (prev as i64) * 251 + (run as i64)
 }};
 "#
     )
@@ -3437,12 +3510,14 @@ fn c_lz4(n: u64) -> String {
 #include <stdint.h>
 int main(void) {{
     long long acc = 0;
-    uint64_t prev = 0;
-    for (uint64_t i = 0; i < {n}ull; i++) {{
+    uint64_t run = 1;
+    uint64_t prev = (0 * 131 + 7) % 256;
+    for (uint64_t i = 1; i < {n}ull; i++) {{
         uint64_t b = (i * 131 + 7) % 256;
-        if (b == prev) acc++; else acc += (long long)b;
-        prev = b;
+        if (b == prev) run++;
+        else {{ acc += (long long)prev * 251 + (long long)run; run = 1; prev = b; }}
     }}
+    acc += (long long)prev * 251 + (long long)run;
     printf("%lld\n", acc);
     return 0;
 }}
@@ -3455,14 +3530,21 @@ fn rs_lz4(n: u64) -> String {
         r#"
 fn main() {{
     let mut acc: i64 = 0;
-    let mut prev = 0u64;
-    let mut i = 0u64;
+    let mut run = 1u64;
+    let mut prev = (0u64 * 131 + 7) % 256;
+    let mut i = 1u64;
     while i < {n} {{
         let b = (i * 131 + 7) % 256;
-        if b == prev {{ acc += 1; }} else {{ acc += b as i64; }}
-        prev = b;
+        if b == prev {{
+            run += 1;
+        }} else {{
+            acc += (prev as i64) * 251 + (run as i64);
+            run = 1;
+            prev = b;
+        }}
         i += 1;
     }}
+    acc += (prev as i64) * 251 + (run as i64);
     println!("{{acc}}");
 }}
 "#

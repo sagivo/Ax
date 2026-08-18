@@ -1,5 +1,10 @@
-//! expect: 3i32
-// §5.2.3 clause 1: the caller is suspended; a Read pointer is stable for the call.
+//@ id:        T-SND-0006
+//@ requires:  R-5.2.3
+//@ origin:    authored — [R-5.2.3] premise 1 (duplicate witness)
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    value: 3i32
 module sound.read_suspended;
 fn peek(x: i32) -> i32 = x;
 fn main() -> i32 = peek(3);

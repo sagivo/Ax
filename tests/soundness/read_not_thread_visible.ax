@@ -5,7 +5,12 @@
 //@ license:   MIT
 //@ port:      authored
 //@ expect:    error: E0600
-// Attack: send a Read value across a `par` boundary. `par` is rejected
-// until disjointness is proven — that is the specific mechanism.
+// Attack: two `&mut` captures of the same binding across `par`.
+// Disjointness (E0600) is the mechanism that stops a Read from being
+// observed on another branch.
 module tests.soundness.read_not_thread_visible;
-fn main() -> i32 = { par { let a = 1; }; 0 };
+fn main() -> i32 = {
+    let mut x: i32 = 0;
+    par { let a = &mut x; let b = &mut x; };
+    0
+};

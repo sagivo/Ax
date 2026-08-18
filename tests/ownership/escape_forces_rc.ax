@@ -5,6 +5,7 @@
 //@ license:   MIT
 //@ port:      authored
 //@ expect:    compile
+//@ diags:     P1001, P1002
 module tests.ownership.escape_forces_rc;
 type R = { x: i32 };
 fn wrap(v: R) -> R = v;

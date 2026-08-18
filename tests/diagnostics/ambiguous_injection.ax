@@ -1,0 +1,16 @@
+//@ id:        T-DIA-0020
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0203
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0203
+module tests.diagnostics.ambiguous_injection;
+type Inner = | Boom;
+type Outer =
+    | A { cause: Inner }
+    | B { cause: Inner }
+with
+    from Inner => A;
+    from Inner => B;
+fn main() -> i32 = 0;

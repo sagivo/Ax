@@ -1,0 +1,12 @@
+//@ id:        T-DIA-0031
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0400
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0400
+module tests.diagnostics.ambiguous_dict;
+dict Ord[i32] = { cmp: i32.cmp };
+dict Ord[i32] = { cmp: i32.cmp };
+fn pick(a: i32, o: Ord[i32] = default) -> i32 = a;
+fn main() -> i32 = pick(1);

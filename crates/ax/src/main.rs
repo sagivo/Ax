@@ -51,6 +51,7 @@ fn main() -> ExitCode {
         "testharness" => cmd_testharness(&args),
         "daemon" => cmd_daemon(&args),
         "kill-criteria" => cmd_kill_criteria(&args),
+        "silent-wrongness" => cmd_silent(&args),
         "pkg" => cmd_pkg(&args),
         "eval-loop" => cmd_eval_loop(&args),
         "help" | "-h" | "--help" => {
@@ -105,6 +106,7 @@ Usage:
   ax testharness [filter]
   ax daemon
   ax kill-criteria
+  ax silent-wrongness [--json] [filter]
   ax pkg list | ax pkg write
   ax eval-loop [--seed N] [--n K]
 "
@@ -1310,6 +1312,18 @@ fn cmd_daemon(_args: &[String]) -> ExitCode {
             continue;
         }
         println!("{}", ax::daemon::handle_line(&line));
+    }
+    ExitCode::SUCCESS
+}
+
+fn cmd_silent(args: &[String]) -> ExitCode {
+    let json = args.iter().any(|a| a == "--json");
+    let filter = args.iter().find(|a| !a.starts_with("--")).map(|s| s.as_str());
+    let r = ax::silent::run(filter);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&r).unwrap());
+    } else {
+        print!("{}", ax::silent::render(&r));
     }
     ExitCode::SUCCESS
 }

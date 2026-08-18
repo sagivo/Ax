@@ -1,0 +1,10 @@
+//! expect: 7i64
+module conf.stdlib.map_insert_get;
+fn main() -> i64 !{alloc[a]} = {
+    let mut m: Map[String, i64] = map.new(test.alloc);
+    m.insert("k", 7i64);
+    match m.get("k") {
+        Some(v) => v;
+        None => 0;
+    }
+};

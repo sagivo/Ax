@@ -1,0 +1,13 @@
+//@ id:        T-DIA-0026
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0202
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0202
+module tests.diagnostics.missing_injection;
+type Inner = | Boom;
+type Outer = | Wrap;
+fn inner() -> i32 !{err[Inner]} = raise Boom;
+fn outer() -> i32 !{err[Outer]} = inner();
+fn main() -> i32 = 0;

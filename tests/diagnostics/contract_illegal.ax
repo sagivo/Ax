@@ -1,0 +1,12 @@
+//@ id:        T-DIA-0028
+//@ requires:  R-2.1
+//@ origin:    authored — catalog emit E0501
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    error: E0501
+module tests.diagnostics.contract_illegal;
+fn f(x: i32) -> i32
+  pre loop { }
+= x;
+fn main() -> i32 = 0;

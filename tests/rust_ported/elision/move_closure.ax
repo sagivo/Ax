@@ -1,0 +1,10 @@
+//@ id:        T-ELI-0006
+//@ requires:  R-1.1.2
+//@ origin:    accept-and-elide corpus ([T-3.3.1] A0107)
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    warn: A0107
+module tests.rust_ported.elision.move_closure;
+fn apply(f: fn(i32) -> i32, x: i32) -> i32 = f(x);
+fn main() -> i32 = apply(fn(x: i32) -> i32 => x + 1, 2);

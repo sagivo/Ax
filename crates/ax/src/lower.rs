@@ -3413,9 +3413,17 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     IrTy::I32,
                 );
                 let loaded = self.fb.load(IrTy::I64, tmp);
-                let (_, opt) = self.ir_of(e)?;
-                let opt = opt.ok_or("map.get: Option layout")?;
-                let slot = self.fb.alloc_slot(SlotKind::Agg(opt), "");
+                let opt_ty = self.ty_of_node(e.id);
+                let opt = self
+                    .l
+                    .agg_of(&opt_ty)?
+                    .ok_or_else(|| {
+                        format!(
+                            "map.get: no Option layout for {}",
+                            opt_ty.display(self.l.intern)
+                        )
+                    })?;
+                let slot = self.fb.alloc_slot(SlotKind::Agg(opt), "mapopt");
                 let some = self
                     .l
                     .prog
@@ -3437,8 +3445,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 let pred = self.fb.bin(BinKind::Ne, found, zero);
                 self.fb.set_term(Term::Br {
                     cond: pred,
-                    then_e: Edge { to: yes, args: vec![] },
-                    else_e: Edge { to: no, args: vec![] },
+                    then_e: Edge {
+                        to: yes,
+                        args: vec![],
+                    },
+                    else_e: Edge {
+                        to: no,
+                        args: vec![],
+                    },
                 });
                 self.fb.switch_to(yes);
                 let tag = self.fb.const_int(some.tag as i128, IrTy::I32);
@@ -3446,11 +3460,17 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 if let Some(fi) = some.fields.first() {
                     self.store_field(slot, opt, *fi, LVal::scalar(loaded, IrTy::I64))?;
                 }
-                self.fb.set_term(Term::Jump(Edge { to: join, args: vec![] }));
+                self.fb.set_term(Term::Jump(Edge {
+                    to: join,
+                    args: vec![],
+                }));
                 self.fb.switch_to(no);
                 let tag = self.fb.const_int(none.tag as i128, IrTy::I32);
                 self.fb.store(IrTy::I32, slot, tag);
-                self.fb.set_term(Term::Jump(Edge { to: join, args: vec![] }));
+                self.fb.set_term(Term::Jump(Edge {
+                    to: join,
+                    args: vec![],
+                }));
                 self.fb.switch_to(join);
                 Ok(Some(LVal {
                     v: slot,
@@ -4381,19 +4401,17 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 Ok(Some(LVal::scalar(v, IrTy::I32)))
             }
             "map.new" => {
-                // Maps are an opaque heap handle in the native ABI; the
-                // runtime stores key/value pairs. Returning a pointer slot
-                // is enough for insert/get/len to be CallExt later.
-                let slot = self.fb.alloc_slot(SlotKind::Scalar(IrTy::Ptr), "map");
-                let zero = self.fb.const_int(0, IrTy::U64);
-                self.fb.push_void(Op::CallExt {
-                    name: "ax_rt_map_new".into(),
-                    args: vec![zero, slot],
-                    ret: IrTy::Unit,
-                    fallible: false,
-                });
+                let v = self.fb.push(
+                    Op::CallExt {
+                        name: "ax_rt_map_new".into(),
+                        args: vec![],
+                        ret: IrTy::Ptr,
+                        fallible: false,
+                    },
+                    IrTy::Ptr,
+                );
                 Ok(Some(LVal {
-                    v: slot,
+                    v,
                     ty: IrTy::Ptr,
                     agg: None,
                 }))

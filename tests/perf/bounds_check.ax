@@ -1,0 +1,13 @@
+//@ id:        T-PRF-0002
+//@ requires:  R-5.6.1
+//@ origin:    authored — surviving bounds check is P1003 ([T-5.2.2])
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      authored
+//@ expect:    compile, run, perf-finding P1003
+module tests.perf.bounds_check;
+fn main() -> i32 !{alloc[a]} = {
+    let mut xs: Vec[i32] = vec.new(test.alloc);
+    xs.push(1);
+    xs[0]
+};

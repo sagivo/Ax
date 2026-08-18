@@ -6,4 +6,4 @@
 //@ port:      authored
 //@ expect:    error: E0001
 module tests.diagnostics.lex_error;
-fn main() -> i32 = @@@;
+fn main() -> i32 = "unterminated
