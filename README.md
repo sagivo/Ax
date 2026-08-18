@@ -1,14 +1,13 @@
 # Ax
 
 A compiled systems language whose primary consumer is a program, not a person.
-The language is the short syntax (`#fn`, `:=`, `$if`, type glyphs) so an
-agent pays fewer tokens. A file that opens with `(` is still the prefix
-tree. The bet under that is a compiler which answers questions in
-microseconds, classifies its own fixes by safety, and ships a normative
-interpreter to check itself against.
+You write `#add(a I, b I) I = a + b`. A file that opens with `(` is the
+same language as a prefix tree. The bet under that is a compiler which
+answers questions in microseconds, classifies its own fixes by safety,
+and ships a normative interpreter to check itself against.
 
 ```
-.ax → short syntax (default)  |  tree if the file opens with `(`  |  Rust-shaped corpus (legacy)
+.ax → Ax (`#fn`, `:=`, `$if`, `+/`)  |  tree if the file opens with `(`  |  Rust-shaped corpus (legacy, not Ax)
     → check (types, effects, regions, Untrusted/Secret/own)
     → ownership ladder + ax perf --json
     → typed SSA IR
@@ -41,31 +40,33 @@ optional (one benchmark column).
 
 ```ax
 #add(a I, b I) I = a + b
-#parse(s S) I !err[ParseError] = parse_i32(s)
+#sum(n Z) Z = +/n
+#parse(s S) I !err[ParseError] = parse_i32(s)|0
 ```
 
-- Short syntax is the language (`#fn`, `:=`, `$if`, type glyphs). A file that opens with `(` is still the prefix tree.
-- Effects in the signature: `(err E)`, `(io c)`, `(alloc a)`, `diverge`, `abort`.
+That is Ax. Language reference: `spec/dense.md`. Card: `ax card` /
+`spec/card.md`. A file that opens with `(` is the prefix tree
+(`spec/tree.md`).
+
+- Effects in the signature: `!err[E]`, `!io[c]`, `!alloc[a]`, `diverge`, `abort`.
 - Errors: `raise` / `catch` / `attempt` plus declared single-step `from`
-  injections. No unwinding: a raise is a branch on a returned tag.
-- Regions: `(region r …)` is a bump arena, and `r` is an allocator you can
-  hand to `(vec.new r)`. `store` of `(ref r T)` into `l` is legal iff `r` outlives `l`.
-- Dictionaries: `(dict Ord T (cmp fn))` with `default` unique resolution,
-  resolved statically and called directly — no vtable.
-- `(as e T)` is the only numeric conversion; there are no implicit ones.
+  injections. No unwinding: a raise is a branch on a returned tag. `e|d`
+  is ok-or.
+- Regions: a named bump arena is an `Alloc` you can hand to `[]`.
+  Store of a region ref is legal iff the region outlives the location.
+- Dictionaries: `dict` with `default` unique resolution, resolved
+  statically and called directly — no vtable.
+- `as` is the only numeric conversion; there are no implicit ones.
 - The Rust-shaped dialect still parses so the corpus keeps proving the IR.
-  An agent does not write it. See `DECISIONS.md` R-14.
+  An agent does not write it. See `DECISIONS.md` R-14 / R-16.
 
-Full card: `ax card` or `spec/card.md`. Normative grammar: `spec/grammar.ebnf`.
-Side-by-side Rust / C / Go / Ax syntax and token counts: `docs/usecases.md`
-(`ax bench usecases`).
+Side-by-side Rust / C / Go / Ax: `docs/usecases.md` (`ax bench usecases`).
+The corpus grammar (`spec/grammar.ebnf`) is not what you write.
 
-**v0.3 additions:** Rust-shaped `fn f() { … }` / `struct` / `enum` parse;
-postfix `?` is `Result` propagation; `f"…"` interpolates; `own T` is affine
-(use exactly once); `Untrusted[T]` / `Secret[T]` are lattice annotations;
-`ax perf --json` reports the ownership ladder and surviving checks.
-`par` is still rejected until disjointness is proven. `Map`/`SortedMap` and
-capturing closures remain out of v1.
+**v0.3:** `e?` is result propagation; `f"…"` interpolates; `own T` is
+affine; `Untrusted[T]` / `Secret[T]` are lattice annotations;
+`ax perf --json` reports the ownership ladder. `par` is rejected until
+disjointness is proven. Capturing closures remain out of v1.
 
 ## Protocol
 
@@ -326,7 +327,7 @@ safe ambient-io(argv io.bytesum_file)
 ## Layout
 
 ```
-spec/dense.md         short syntax (the language; default parse + fmt)
+spec/dense.md         Ax (the language; default parse + fmt)
 spec/tree.md          prefix tree (file opens with `(`)
 spec/grammar.ebnf     corpus dialect (Rust-shaped; not what agents write)
 spec/card.md          ≤ 3,000-token agent card

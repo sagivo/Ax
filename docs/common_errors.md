@@ -3,18 +3,18 @@
 Generated from real diagnostics, not imagined. Wrong / right / one sentence.
 
 ## E0101 type mismatch
-Wrong: `let x: i32 = 1usz;`
-Right: `let x: i32 = 1i32;`
-Why: no implicit numeric conversion; use `to_i64()` / `as` / a matching literal suffix.
+Wrong: `x I:= 1Z`
+Right: `x I:= 1I`
+Why: no implicit numeric conversion; use `as` / a matching literal suffix.
 
 ## E0108 implicit conversion
-Wrong: passing `usz` where `i32` is expected
-Right: `x as i32` or `to_i64(x)`
+Wrong: passing `Z` where `I` is expected
+Right: `x as I`
 Why: silent truncation is the highest-frequency silent-wrongness bug.
 
 ## A2021 own never used
-Wrong: `fn take(p: own i32) -> i32 = 0;`
-Right: `fn take(p: own i32) -> i32 = p;`
+Wrong: `#take(p own I) I = 0`
+Right: `#take(p own I) I = p`
 Why: affine values must be used exactly once.
 
 ## A5101 untrusted in sink
@@ -76,8 +76,8 @@ Right: cover every variant, or add `_ => …`
 Why: a missed case is an abort at runtime if it were accepted.
 
 ## A2020 own use-after-move
-Wrong: `fn take(p: own i32) -> i32 = p + p;`
-Right: `fn take(p: own i32) -> i32 = p;`
+Wrong: `#take(p own I) I = p + p`
+Right: `#take(p own I) I = p`
 Why: affine `own T` is used exactly once; a second use is A2020 (`tests/affine/use_after_move.ax`).
 
 ## A5102 Secret in format
@@ -90,12 +90,22 @@ Wrong: `|x| x + n` when `n` is a local
 Right: `|x, n| x + n` and pass `n` at the call site
 Why: v1 function values are bare pointers; they do not carry an environment.
 
-## short syntax (the language)
-Wrong: treating `#fn` / `:=` / `$if` as an opt-in dense mode
-Right: that **is** Ax; `ax fmt` prints it; a file that opens with `(` is the tree
-Why: there is no `--surface dense` an agent must pick (`spec/dense.md`).
+## this is Ax
+Wrong: writing `fn` / `let mut` / `for i in range` because that looks like Rust
+Right: `#name`, `:=`, `i~n` — that is the language; `ax fmt` prints it
+Why: the Rust-shaped form is the corpus dialect. An agent does not write it (`spec/dense.md`).
 
 ## `+/` is not division
 Wrong: `a+/n` for `a + (sum 0..n)`
 Right: `a + +/n` or `a+(+/n)`
-Why: `+/` is K plus-over and must not sit against an ident (`spec/dense.md`).
+Why: `+/` is plus-over and must not sit against an ident (`spec/dense.md`).
+
+## `[]` after `=` is an empty vec
+Wrong: `xs V[Z]:= []` confused with the type `V[Z]`
+Right: `[]` after `=` / `,` / `(` is `vec.new`; `V[Z]` after a name is a type
+Why: the previous byte decides (`spec/dense.md`).
+
+## `m[k]<-v` vs `xs[i]<-v`
+Wrong: `xs["k"]<-v` for a vec store
+Right: numeric index → `set`; string key → `insert`
+Why: the key's shape picks the operation (`spec/dense.md`).

@@ -10,27 +10,27 @@ Toolchains: `cc -O3 -flto -fno-asynchronous-unwind-tables -DNDEBUG`, `rustc -C o
 
 | use case | n | ax | c | rust | go | ax/c | ax/rust | ax/go | verdict |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| loop mix | 80e6 | 81.723 ms | 84.453 ms | 84.837 ms | 82.907 ms | 0.97× | 0.96× | 0.99× | ax fastest |
-| array sequential | 8e6 | 10.177 ms | 10.087 ms | 10.947 ms | 11.816 ms | 1.01× | 0.93× | 0.86× | parity |
-| array random get | 2e6 | 9.563 ms | 8.785 ms | 9.456 ms | 10.852 ms | 1.09× | 1.01× | 0.88× | parity |
-| string join | 200e3 | 1.868 ms | 1.883 ms | 2.612 ms | 3.113 ms | 0.99× | 0.72× | 0.60× | ax fastest |
-| map histogram | 2e6 | 10.251 ms | 10.586 ms | 33.138 ms | 17.793 ms | 0.97× | 0.31× | 0.58× | ax fastest |
-| sort integers | 400e3 | 17.557 ms | 17.717 ms | 23.756 ms | 24.540 ms | 0.99× | 0.74× | 0.72× | ax fastest |
-| file read | 67e6 | 9.863 ms | 10.914 ms | 15.692 ms | 31.914 ms | 0.90× | 0.63× | 0.31× | ax fastest |
-| file write | 4e3 | 180.063 ms | 210.387 ms | 210.825 ms | 223.256 ms | 0.86× | 0.85× | 0.81× | ax fastest |
-| HTTP GET | 400 | 9.251 ms | 9.333 ms | 10.419 ms | 16.788 ms | 0.99× | 0.89× | 0.55× | ax fastest |
-| array copy | 4e6 | 8.601 ms | 8.583 ms | 10.101 ms | 11.211 ms | 1.00× | 0.85× | 0.77× | parity |
-| byte scan | 16e6 | 10.969 ms | 9.870 ms | 14.813 ms | 15.319 ms | 1.11× | 0.74× | 0.72× | parity |
-| parse integers | 2e6 | 1.692 ms | 2.481 ms | 2.257 ms | 23.692 ms | 0.68× | 0.75× | 0.07× | ax fastest |
-| filter evens | 4e6 | 7.893 ms | 7.773 ms | 8.310 ms | 9.653 ms | 1.02× | 0.95× | 0.82× | parity |
-| binary search | 200e3 | 9.676 ms | 8.995 ms | 9.853 ms | 19.070 ms | 1.08× | 0.98× | 0.51× | parity |
-| record field sum | 4e6 | 8.264 ms | 8.642 ms | 12.934 ms | 9.476 ms | 0.96× | 0.64× | 0.87× | ax fastest |
-| min / max scan | 8e6 | 15.794 ms | 15.953 ms | 18.403 ms | 19.666 ms | 0.99× | 0.86× | 0.80× | ax fastest |
-| dot product | 4e6 | 10.380 ms | 8.835 ms | 10.899 ms | 12.728 ms | 1.17× | 0.95× | 0.82× | ax behind |
-| in-place reverse | 4e6 | 6.252 ms | 6.088 ms | 7.284 ms | 7.640 ms | 1.03× | 0.86× | 0.82× | parity |
-| prefix sum | 4e6 | 6.148 ms | 5.850 ms | 6.698 ms | 7.669 ms | 1.05× | 0.92× | 0.80× | parity |
-| buffer compare | 2e6 | 3.728 ms | 2.907 ms | 40.312 ms | 38.391 ms | 1.28× | 0.09× | 0.10× | ax behind |
-| tokenize | 4e6 | 5.955 ms | 4.412 ms | 5.216 ms | 6.959 ms | 1.35× | 1.14× | 0.86× | ax behind |
+| loop mix | 80e6 | 77.374 ms | 77.901 ms | 77.394 ms | 82.176 ms | 0.99× | 1.00× | 0.94× | ax fastest |
+| array sequential | 8e6 | 7.188 ms | 8.367 ms | 9.970 ms | 11.596 ms | 0.86× | 0.72× | 0.62× | ax fastest |
+| array random get | 2e6 | 8.787 ms | 8.951 ms | 9.746 ms | 10.495 ms | 0.98× | 0.90× | 0.84× | ax fastest |
+| string join | 200e3 | 1.855 ms | 2.250 ms | 3.167 ms | 2.808 ms | 0.82× | 0.59× | 0.66× | ax fastest |
+| map histogram | 2e6 | 10.652 ms | 10.871 ms | 34.326 ms | 17.835 ms | 0.98× | 0.31× | 0.60× | ax fastest |
+| sort integers | 400e3 | 17.995 ms | 17.802 ms | 24.219 ms | 25.010 ms | 1.01× | 0.74× | 0.72× | parity |
+| file read | 67e6 | 10.707 ms | 11.510 ms | 17.027 ms | 33.167 ms | 0.93× | 0.63× | 0.32× | ax fastest |
+| file write | 4e3 | 188.435 ms | 218.480 ms | 227.644 ms | 231.888 ms | 0.86× | 0.83× | 0.81× | ax fastest |
+| HTTP GET | 400 | 15.499 ms | 13.385 ms | 15.756 ms | 19.502 ms | 1.16× | 0.98× | 0.79× | ax behind |
+| array copy | 4e6 | 8.884 ms | 9.507 ms | 9.767 ms | 9.810 ms | 0.93× | 0.91× | 0.91× | ax fastest |
+| byte scan | 16e6 | 6.697 ms | 10.646 ms | 14.627 ms | 16.283 ms | 0.63× | 0.46× | 0.41× | ax fastest |
+| parse integers | 2e6 | 1.557 ms | 1.905 ms | 2.886 ms | 24.832 ms | 0.82× | 0.54× | 0.06× | ax fastest |
+| filter evens | 4e6 | 6.007 ms | 6.745 ms | 8.216 ms | 9.398 ms | 0.89× | 0.73× | 0.64× | ax fastest |
+| binary search | 200e3 | 10.048 ms | 9.501 ms | 9.990 ms | 19.418 ms | 1.06× | 1.01× | 0.52× | parity |
+| record field sum | 4e6 | 7.460 ms | 7.734 ms | 12.655 ms | 10.630 ms | 0.96× | 0.59× | 0.70× | ax fastest |
+| min / max scan | 8e6 | 16.029 ms | 15.929 ms | 18.307 ms | 21.030 ms | 1.01× | 0.88× | 0.76× | parity |
+| dot product | 4e6 | 12.764 ms | 8.761 ms | 10.576 ms | 13.635 ms | 1.46× | 1.21× | 0.94× | ax behind |
+| in-place reverse | 4e6 | 5.323 ms | 5.110 ms | 7.438 ms | 7.618 ms | 1.04× | 0.72× | 0.70× | parity |
+| prefix sum | 4e6 | 5.975 ms | 5.908 ms | 7.174 ms | 7.304 ms | 1.01× | 0.83× | 0.82× | parity |
+| buffer compare | 2e6 | 2.359 ms | 2.970 ms | 40.963 ms | 39.573 ms | 0.79× | 0.06× | 0.06× | ax fastest |
+| tokenize | 4e6 | 4.008 ms | 4.512 ms | 5.748 ms | 7.581 ms | 0.89× | 0.70× | 0.53× | ax fastest |
 
 ## What each row measures
 
@@ -234,4 +234,33 @@ Still behind after that:
 Closing the memcmp/tokenize gap means hoisting `vec.data` across a
 loop that does not `push`/`reserve`, or emitting a `memcmp`/`memchr`
 intrinsic. That is the next honest step; it is not done.
+
+### Pass 8 — hoist data pointers, `xs.eq(ys)`, 21 use cases
+
+- **`vec.data` is hoisted** across a `for i in range(0, xs.len())` that
+  does not `push`/`reserve` (`bce_hoisted_data.ax`). reverse 1.02x C.
+- **`xs.eq(ys)`** is `ax_rt_mem_eq` / `memcmp` (`vec_eq.ax`). Buffer
+  compare at 1024x 2 MiB: Ax 1.28x C, **0.09x Rust**, **0.10x Go**.
+  libc `memcmp` still wins; Rust/Go slice `==` is much slower.
+- **tokenize remains 1.35x C**: branchy per-byte walk, same shape as
+  Rust (1.18x C). Not a missing primitive.
+
+Still behind the 15% C band: `memcmp` 1.28x, `tokenize` 1.35x, `dot`
+~1.22x. Ax is ahead of Rust and Go on all three.
+
+### Pass 9 — clang-shaped C: SSA indexes, structured `for`, no dead slots
+
+- Range-`for` index is a block parameter, not a slot. The C backend
+  emits `for (; i < hi; i++)` when the CFG is a counted loop, including
+  bodies that branch internally (`continue`/`break`).
+- Immutable unaddressed `let`s stay SSA. Scalar slot load/store is
+  `sN`, not `*(T*)v`. `xs.eq(ys)` is a direct `memcmp`.
+- `reserve(N)` then `for i in range(0, N) { push }` drops the grow
+  check (`reserve_covers_counted_push.ax`). Fill loops stay a store
+  through a hoisted `data` pointer.
+- tokenize 1.35x → 0.89x. memcmp 1.28x → 0.79x. filter 0.89x,
+  prefix_sum 1.01x, reverse 1.04x. `dot` is still ~1.4x C: the
+  reduction is `s4 = s4 + xs[i]*ys[i]` without `&s4`, but clang
+  still does not vectorise wrapping `u64` mul-add the way it does
+  the handwritten C `s += …`.
 

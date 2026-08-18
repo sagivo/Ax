@@ -1,8 +1,8 @@
 # Ax tree surface
 
 A file that opens with `(` is this surface. The language an agent
-writes by default is the short syntax in `spec/dense.md`. The
-Rust-shaped parser in `spec/grammar.ebnf` is the corpus dialect.
+writes is Ax (`spec/dense.md`). The Rust-shaped parser in
+`spec/grammar.ebnf` is the corpus dialect, not Ax.
 See `DECISIONS.md` R-14 / R-16.
 
 ## Why a tree

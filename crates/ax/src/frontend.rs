@@ -1,7 +1,7 @@
 //! Surfaces lower to one AST.
 //!
-//! Ax **is** the short syntax (`#fn`, `:=`, `$if`, type glyphs). There is no
-//! opt-in dense mode. A file that opens with `(` is still the prefix tree.
+//! Ax is `#name`, `:=`, `$if`, `+/`, type glyphs. There is no opt-in
+//! mode. A file that opens with `(` is the prefix tree.
 //! Rust-shaped conventional / terse / verbose remain as a corpus dialect so
 //! existing tests keep proving the IR; they rewrite into the same parser.
 
@@ -582,6 +582,9 @@ pub fn looks_like_dense(src: &str) -> bool {
         || dense_range_sugar(src)
         || dense_assign_sugar(src)
         || dense_reduce_sugar(src)
+        || dense_inc_sugar(src)
+        || dense_len_sugar(src)
+        || dense_put_sugar(src)
         || has_hash_fn(src)
 }
 
@@ -757,7 +760,7 @@ fn dense_reduce_sugar(src: &str) -> bool {
             i += 1;
             continue;
         }
-        if matches!(b[i], b'+' | b'*')
+        if matches!(b[i], b'+' | b'*' | b'|' | b'&')
             && b[i + 1] == b'/'
             && i + 2 < b.len()
             && (is_ident_char(b[i + 2]) || b[i + 2].is_ascii_digit())
@@ -768,6 +771,71 @@ fn dense_reduce_sugar(src: &str) -> bool {
         i += 1;
     }
     false
+}
+
+/// `s++` / `s--` after an ident.
+fn dense_inc_sugar(src: &str) -> bool {
+    let b = src.as_bytes();
+    let mut i = 0;
+    while i + 1 < b.len() {
+        if b[i] == b'/' && b[i + 1] == b'/' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if b[i] == b'"' {
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                if b[i] == b'\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if matches!(&src[i..i + 2], "++" | "--") && i > 0 && is_ident_char(b[i - 1]) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// `xs#` is `xs.len()`. `#name(` is a function, not this.
+fn dense_len_sugar(src: &str) -> bool {
+    let b = src.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if i + 1 < b.len() && b[i] == b'/' && b[i + 1] == b'/' {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if b[i] == b'"' {
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                if b[i] == b'\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if b[i] == b'#' && i > 0 && is_ident_char(b[i - 1]) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// `m[k]<-v` or `xs<-e`.
+fn dense_put_sugar(src: &str) -> bool {
+    contains_outside_comments(src, "<-")
 }
 
 /// Expand short syntax into S-terse. Same program; more tokens; one parser.
@@ -785,18 +853,29 @@ fn dense_reduce_sugar(src: &str) -> bool {
 ///   `%`                            → `map.new(test.alloc)`
 ///   `7L`                           → `7i64`
 ///   `s += i`                       → `s = s + i`
+///   `s++` / `s--`                  → `s = s + 1` / `s = s - 1`
+///   `xs#`                          → `xs.len()`
 ///   `+/n` / `+/a..b`               → sum of the range (K plus-over)
 ///   `*/n` / `*/a..b`               → product of the range (K times-over)
+///   `+/xs#` / `*/xs#`              → sum / product of a usz vec (same walk)
+///   `|/xs#` / `&/xs#`              → max / min of a usz vec (seed at(0); empty aborts)
+///   `m[k]<-v`                      → `m.insert(k, v)`
+///   `xs<-e`                        → `xs.push(e)`
+///   `m[k]?d`                       → `m.get(k)?d`
 pub fn rewrite_dense_to_terse(src: &str) -> String {
     let mut s = expand_dense_mapnew(src);
     s = expand_dense_lits(&s);
+    s = expand_dense_len(&s);
     s = expand_dense_reduce(&s);
     s = expand_dense_binds(&s);
     s = expand_dense_ranges(&s);
+    s = expand_dense_put(&s);
+    s = expand_dense_inc(&s);
     s = expand_dense_assign(&s);
     s = expand_dense_returns(&s);
     s = expand_dense_while(&s);
     s = expand_dense_if(&s);
+    s = expand_dense_index_get(&s);
     s = expand_dense_result_or(&s);
     s = expand_dense_option_or_real(&s);
     s = expand_dense_fns(&s);
@@ -1034,10 +1113,7 @@ fn expand_dense_ranges(src: &str) -> String {
                     j += 1;
                 }
                 let lo_s = j;
-                while j < b.len() && (is_ident_char(b[j]) || b[j].is_ascii_digit()) {
-                    j += 1;
-                }
-                if j > lo_s {
+                if take_dense_bound(src, b, &mut j) {
                     let first = &src[lo_s..j];
                     let mut k = j;
                     while k < b.len() && b[k].is_ascii_whitespace() {
@@ -1049,10 +1125,7 @@ fn expand_dense_ranges(src: &str) -> String {
                             k += 1;
                         }
                         let hi_s = k;
-                        while k < b.len() && (is_ident_char(b[k]) || b[k].is_ascii_digit()) {
-                            k += 1;
-                        }
-                        if k > hi_s {
+                        if take_dense_bound(src, b, &mut k) {
                             out.push_str("for ");
                             out.push_str(name);
                             out.push_str(" in range(");
@@ -1075,6 +1148,101 @@ fn expand_dense_ranges(src: &str) -> String {
                 }
             }
             out.push_str(name);
+            continue;
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Ident, integer, `xs.len()`, or `xs#` (the last is already expanded if
+/// [`expand_dense_len`] ran first).
+fn take_dense_bound(src: &str, b: &[u8], j: &mut usize) -> bool {
+    let start = *j;
+    if *j >= b.len() || !(is_ident_char(b[*j]) || b[*j].is_ascii_digit()) {
+        return false;
+    }
+    while *j < b.len() && (is_ident_char(b[*j]) || b[*j].is_ascii_digit()) {
+        *j += 1;
+    }
+    if *j + 6 <= b.len() && &src[*j..*j + 6] == ".len()" {
+        *j += 6;
+    }
+    start < *j
+}
+
+/// `s++` / `s--` → `s = s + 1` / `s = s - 1`.
+fn expand_dense_inc(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 16);
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' {
+            out.push('"');
+            i += 1;
+            while i < b.len() {
+                out.push(b[i] as char);
+                if b[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if i + 1 < b.len()
+            && matches!(&src[i..i + 2], "++" | "--")
+            && !out.is_empty()
+            && (out.as_bytes().last().unwrap().is_ascii_alphabetic()
+                || *out.as_bytes().last().unwrap() == b'_')
+        {
+            let op = if b[i] == b'+' { '+' } else { '-' };
+            let mut k = out.len();
+            while k > 0 && (is_ident_char(out.as_bytes()[k - 1]) || out.as_bytes()[k - 1] == b'.') {
+                k -= 1;
+            }
+            let lhs = out[k..].to_string();
+            if !lhs.is_empty() {
+                out.truncate(k);
+                out.push_str(&lhs);
+                out.push_str(" = ");
+                out.push_str(&lhs);
+                out.push(' ');
+                out.push(op);
+                out.push_str(" 1");
+                i += 2;
+                continue;
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// `xs#` → `xs.len()`. Not `#name` (a function) and not `7#`.
+fn expand_dense_len(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 8);
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' {
+            out.push('"');
+            i += 1;
+            while i < b.len() {
+                out.push(b[i] as char);
+                if b[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if b[i] == b'#' && i > 0 && (b[i - 1].is_ascii_alphabetic() || b[i - 1] == b'_') {
+            out.push_str(".len()");
+            i += 1;
             continue;
         }
         out.push(b[i] as char);
@@ -1135,6 +1303,245 @@ fn expand_dense_assign(src: &str) -> String {
     out
 }
 
+/// `m[k]<-v` → `m.insert(k, v)`; `xs<-e` → `xs.push(e)`.
+/// `m[k]?d` is already `Index` + option-or after parse; here we only
+/// rewrite the write form. Key/value atoms: ident, number, or `"…"`.
+fn expand_dense_put(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 16);
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' {
+            out.push('"');
+            i += 1;
+            while i < b.len() {
+                out.push(b[i] as char);
+                if b[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if i + 1 < b.len() && &src[i..i + 2] == "<-" {
+            let mut k = out.len();
+            while k > 0 && out.as_bytes()[k - 1].is_ascii_whitespace() {
+                k -= 1;
+            }
+            // `recv[key]` just written?
+            if k > 0 && out.as_bytes()[k - 1] == b']' {
+                let mut d = 0i32;
+                let end = k;
+                while k > 0 {
+                    k -= 1;
+                    match out.as_bytes()[k] {
+                        b']' => d += 1,
+                        b'[' => {
+                            d -= 1;
+                            if d == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                let key = out[k + 1..end - 1].trim().to_string();
+                while k > 0
+                    && (is_ident_char(out.as_bytes()[k - 1]) || out.as_bytes()[k - 1] == b'.')
+                {
+                    k -= 1;
+                }
+                let recv = out[k..]
+                    .trim_end_matches(|c: char| c == '[' || c.is_ascii_whitespace())
+                    .to_string();
+                // `recv` still includes `[key]`; strip it.
+                let recv = if let Some(p) = recv.rfind('[') {
+                    recv[..p].to_string()
+                } else {
+                    recv
+                };
+                if !recv.is_empty() && !key.is_empty() {
+                    out.truncate(k);
+                    out.push_str(&recv);
+                    // Numeric / ident index on a vec is `set`; a string key is `insert`.
+                    let meth = if key_looks_like_map(&key) {
+                        ".insert("
+                    } else {
+                        ".set("
+                    };
+                    out.push_str(meth);
+                    out.push_str(&key);
+                    out.push_str(", ");
+                    i += 2;
+                    while i < b.len() && b[i].is_ascii_whitespace() {
+                        i += 1;
+                    }
+                    continue;
+                }
+            } else {
+                // `recv<-e`
+                while k > 0
+                    && (is_ident_char(out.as_bytes()[k - 1]) || out.as_bytes()[k - 1] == b'.')
+                {
+                    k -= 1;
+                }
+                let recv = out[k..].to_string();
+                if !recv.is_empty() {
+                    out.truncate(k);
+                    out.push_str(&recv);
+                    out.push_str(".push(");
+                    i += 2;
+                    while i < b.len() && b[i].is_ascii_whitespace() {
+                        i += 1;
+                    }
+                    // take one atom / string / call, then close
+                    let vs = i;
+                    if i < b.len() && b[i] == b'"' {
+                        i += 1;
+                        while i < b.len() && b[i] != b'"' {
+                            i += 1;
+                        }
+                        if i < b.len() {
+                            i += 1;
+                        }
+                    } else if i < b.len() && (is_ident_char(b[i]) || b[i].is_ascii_digit()) {
+                        while i < b.len()
+                            && (is_ident_char(b[i]) || b[i].is_ascii_digit() || b[i] == b'.')
+                        {
+                            i += 1;
+                        }
+                        if i < b.len() && b[i] == b'(' {
+                            let mut d = 0i32;
+                            while i < b.len() {
+                                if b[i] == b'(' {
+                                    d += 1;
+                                } else if b[i] == b')' {
+                                    d -= 1;
+                                    i += 1;
+                                    if d == 0 {
+                                        break;
+                                    }
+                                    continue;
+                                }
+                                i += 1;
+                            }
+                        }
+                    }
+                    out.push_str(&src[vs..i]);
+                    out.push(')');
+                    continue;
+                }
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    // Close any insert( that is still open: we left the value for the rest
+    // of the scan. A following `;` / `}` / newline closes it.
+    close_open_inserts(&out)
+}
+
+fn close_open_inserts(src: &str) -> String {
+    // `recv.insert(k, VALUE` without `)` — close before `;` `}` newline.
+    let mut out = String::with_capacity(src.len() + 4);
+    let b = src.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if i + 5 <= b.len()
+            && (&src[i..i + 5] == ".set(" || (i + 8 <= b.len() && &src[i..i + 8] == ".insert("))
+        {
+            let n = if &src[i..i + 5] == ".set(" { 5 } else { 8 };
+            out.push_str(&src[i..i + n]);
+            i += n;
+            let mut d = 1i32;
+            while i < b.len() {
+                if b[i] == b'(' {
+                    d += 1;
+                } else if b[i] == b')' {
+                    d -= 1;
+                    if d == 0 {
+                        out.push(')');
+                        i += 1;
+                        break;
+                    }
+                } else if d == 1 && matches!(b[i], b';' | b'}' | b'\n') {
+                    out.push(')');
+                    break;
+                }
+                out.push(b[i] as char);
+                i += 1;
+            }
+            continue;
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// `recv[k]?` → `recv.get(k)?` so the existing option-or rewrite applies.
+fn expand_dense_index_get(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 8);
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' {
+            out.push('"');
+            i += 1;
+            while i < b.len() {
+                out.push(b[i] as char);
+                if b[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if b[i] == b'?' && !out.is_empty() && out.as_bytes().last() == Some(&b']') {
+            let mut k = out.len() - 1;
+            let mut d = 0i32;
+            while k > 0 {
+                match out.as_bytes()[k] {
+                    b']' => d += 1,
+                    b'[' => {
+                        d -= 1;
+                        if d == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                k -= 1;
+            }
+            if d == 0 && out.as_bytes()[k] == b'[' {
+                let key = out[k + 1..out.len() - 1].trim().to_string();
+                let mut r = k;
+                while r > 0
+                    && (is_ident_char(out.as_bytes()[r - 1]) || out.as_bytes()[r - 1] == b'.')
+                {
+                    r -= 1;
+                }
+                let recv = out[r..k].to_string();
+                if !recv.is_empty() && !key.is_empty() {
+                    out.truncate(r);
+                    out.push_str(&recv);
+                    out.push_str(".get(");
+                    out.push_str(&key);
+                    out.push(')');
+                    out.push('?');
+                    i += 1;
+                    continue;
+                }
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
 /// `+/n` → `{ let mut _r = 0; for _i in range(0, n) { _r = _r + _i; }; _r }`
 /// `+/a..b` same with `range(a, b)`. `*/` is the product (init 1, `*`).
 /// Hygienic temps: `_r` / `_i` cannot appear in a user program as a type glyph
@@ -1161,7 +1568,7 @@ fn expand_dense_reduce(src: &str) -> String {
             continue;
         }
         if i + 2 < b.len()
-            && matches!(b[i], b'+' | b'*')
+            && matches!(b[i], b'+' | b'*' | b'|' | b'&')
             && b[i + 1] == b'/'
             && (is_ident_char(b[i + 2]) || b[i + 2].is_ascii_digit())
             && (i == 0 || !is_ident_char(b[i - 1]))
@@ -1174,6 +1581,75 @@ fn expand_dense_reduce(src: &str) -> String {
             }
             if i > lo_s {
                 let first = &src[lo_s..i];
+                // `+/xs#` / `+/xs.len()` is a vec walk, not `range(0, xs)`.
+                // `#` may already have become `.len()` if expand_dense_len ran first.
+                let mut is_vec = false;
+                if i < b.len() && b[i] == b'#' {
+                    i += 1;
+                    is_vec = true;
+                } else if i + 6 <= b.len() && &src[i..i + 6] == ".len()" {
+                    i += 6;
+                    is_vec = true;
+                }
+                if is_vec && first.chars().all(|c| c.is_ascii_alphabetic() || c == '_') {
+                    let acc = format!("_r{gen}");
+                    let ix = format!("_i{gen}");
+                    gen += 1;
+                    if matches!(op, '|' | '&') {
+                        // Seed with xs.at(0); walk 1..len. Empty vec aborts
+                        // on at(0) — there is no identity for max/min.
+                        let cmp = if op == '|' { '>' } else { '<' };
+                        out.push_str("{ let mut ");
+                        out.push_str(&acc);
+                        out.push_str(" = ");
+                        out.push_str(first);
+                        out.push_str(".at(0); for ");
+                        out.push_str(&ix);
+                        out.push_str(" in range(1, ");
+                        out.push_str(first);
+                        out.push_str(".len()) { if ");
+                        out.push_str(first);
+                        out.push_str(".at(");
+                        out.push_str(&ix);
+                        out.push_str(") ");
+                        out.push(cmp);
+                        out.push(' ');
+                        out.push_str(&acc);
+                        out.push_str(" { ");
+                        out.push_str(&acc);
+                        out.push_str(" = ");
+                        out.push_str(first);
+                        out.push_str(".at(");
+                        out.push_str(&ix);
+                        out.push_str("); }; }; ");
+                        out.push_str(&acc);
+                        out.push_str(" }");
+                    } else {
+                        let init = if op == '*' { "1usz" } else { "0usz" };
+                        out.push_str("{ let mut ");
+                        out.push_str(&acc);
+                        out.push_str(" = ");
+                        out.push_str(init);
+                        out.push_str("; for ");
+                        out.push_str(&ix);
+                        out.push_str(" in range(0, ");
+                        out.push_str(first);
+                        out.push_str(".len()) { ");
+                        out.push_str(&acc);
+                        out.push_str(" = ");
+                        out.push_str(&acc);
+                        out.push(' ');
+                        out.push(op);
+                        out.push(' ');
+                        out.push_str(first);
+                        out.push_str(".at(");
+                        out.push_str(&ix);
+                        out.push_str("); }; ");
+                        out.push_str(&acc);
+                        out.push_str(" }");
+                    }
+                    continue;
+                }
                 let mut lo = "0";
                 let mut hi = first;
                 let mut k = i;
@@ -1268,6 +1744,22 @@ fn expand_dense_mapnew(src: &str) -> String {
                 i += 1;
             }
             continue;
+        }
+        if b[i] == b'[' {
+            let prev = out
+                .bytes()
+                .rev()
+                .find(|c| !c.is_ascii_whitespace())
+                .unwrap_or(b'=');
+            let mut j = i + 1;
+            while j < b.len() && b[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < b.len() && b[j] == b']' && matches!(prev, b'=' | b',' | b'(' | b'{' | b';') {
+                out.push_str("vec.new(test.alloc)");
+                i = j + 1;
+                continue;
+            }
         }
         if b[i] == b'%' {
             let prev = out
@@ -1610,6 +2102,11 @@ pub fn to_dense(src: &str) -> String {
     s = pack_dense_types(&s);
     s = pack_dense_lits(&s);
     s = pack_dense_assign(&s);
+    s = pack_dense_inc(&s);
+    s = pack_dense_index(&s);
+    s = pack_dense_len(&s);
+    s = pack_dense_vec_reduce(&s);
+    s = pack_dense_put(&s);
     s = pack_dense_semis(&s);
     minify_dense(&s)
 }
@@ -1804,11 +2301,16 @@ fn pack_dense_loops(src: &str) -> String {
             if let Some(close) = close {
                 let args = &x[..close];
                 let parts: Vec<&str> = args.split(',').map(str::trim).collect();
-                // Only pack atom bounds (`n`, `0`) — `xs.len()` stays as range().
-                let atom = |s: &str| {
-                    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                // Atoms and `xs.len()` (packed later to `xs#`).
+                let bound = |s: &str| {
+                    !s.is_empty()
+                        && (s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                            || (s.ends_with(".len()")
+                                && s[..s.len() - 6]
+                                    .chars()
+                                    .all(|c| c.is_ascii_alphanumeric() || c == '_')))
                 };
-                if parts.len() == 2 && atom(parts[0]) && atom(parts[1]) {
+                if parts.len() == 2 && bound(parts[0]) && bound(parts[1]) {
                     out.push_str(name);
                     out.push('~');
                     if parts[0] == "0" {
@@ -2164,6 +2666,7 @@ fn pack_dense_result_or(src: &str) -> String {
 
 fn pack_dense_mapnew(src: &str) -> String {
     src.replace("map.new(test.alloc)", "%")
+        .replace("vec.new(test.alloc)", "[]")
 }
 
 fn pack_dense_lits(src: &str) -> String {
@@ -2346,25 +2849,42 @@ fn try_pack_reduce_at(src: &str, start: usize) -> Option<(usize, String)> {
     let args = &r[..close];
     let parts: Vec<&str> = args.split(',').map(str::trim).collect();
     let atom = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    if parts.len() != 2 || !atom(parts[0]) || !atom(parts[1]) {
+    let vec_len = |s: &str| {
+        s.ends_with(".len()")
+            && s.len() > 6
+            && s[..s.len() - 6]
+                .chars()
+                .all(|c| c.is_ascii_alphabetic() || c == '_')
+    };
+    if parts.len() != 2 || parts[0] != "0" || !(atom(parts[1]) || vec_len(parts[1])) {
         return None;
     }
+    let vec_name = parts[1].strip_suffix(".len()");
     r = r[close + 1..].trim_start().strip_prefix('{')?.trim_start();
     let want_add = format!("{acc} = {acc} + {ix}");
     let want_mul = format!("{acc} = {acc} * {ix}");
-    let op = if r.starts_with(&want_add) && init == "0" {
-        '+'
-    } else if r.starts_with(&want_mul) && init == "1" {
-        '*'
+    let want_vat = vec_name.map(|v| format!("{acc} = {acc} + {v}.at({ix})"));
+    let want_vmu = vec_name.map(|v| format!("{acc} = {acc} * {v}.at({ix})"));
+    let (op, consumed_body) = if r.starts_with(&want_add) && init == "0" && vec_name.is_none() {
+        ('+', want_add.len())
+    } else if r.starts_with(&want_mul) && init == "1" && vec_name.is_none() {
+        ('*', want_mul.len())
+    } else if let (Some(a), Some(_)) = (&want_vat, vec_name) {
+        if r.starts_with(a) && init == "0" {
+            ('+', a.len())
+        } else if let Some(m) = &want_vmu {
+            if r.starts_with(m) && init == "1" {
+                ('*', m.len())
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
     } else {
         return None;
     };
-    r = r[if op == '+' {
-        want_add.len()
-    } else {
-        want_mul.len()
-    }..]
-        .trim_start();
+    r = r[consumed_body..].trim_start();
     r = r.strip_prefix(';')?.trim_start();
     r = r.strip_prefix('}')?.trim_start();
     r = r.strip_prefix(';')?.trim_start();
@@ -2377,7 +2897,10 @@ fn try_pack_reduce_at(src: &str, start: usize) -> Option<(usize, String)> {
     let mut packed = String::new();
     packed.push(op);
     packed.push('/');
-    if parts[0] == "0" {
+    if let Some(v) = vec_name {
+        packed.push_str(v);
+        packed.push('#');
+    } else if parts[0] == "0" {
         packed.push_str(parts[1]);
     } else {
         packed.push_str(parts[0]);
@@ -2392,4 +2915,298 @@ fn try_pack_reduce_at(src: &str, start: usize) -> Option<(usize, String)> {
         }
     }
     Some((consumed, packed))
+}
+
+/// `name = name + 1` / `name += 1` → `name++` (same for `-` / `--`).
+fn pack_dense_inc(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' {
+            out.push('"');
+            i += 1;
+            while i < b.len() {
+                out.push(b[i] as char);
+                if b[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if is_ident_char(b[i]) && (i == 0 || !is_ident_char(b[i - 1])) {
+            let start = i;
+            while i < b.len() && (is_ident_char(b[i]) || b[i] == b'.') {
+                i += 1;
+            }
+            let lhs = &src[start..i];
+            let mut j = i;
+            while j < b.len() && b[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j + 1 < b.len() && matches!(&src[j..j + 2], "+=" | "-=") {
+                let op = src.as_bytes()[j];
+                j += 2;
+                while j < b.len() && b[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j < b.len() && b[j] == b'1' && (j + 1 == b.len() || !is_ident_char(b[j + 1])) {
+                    out.push_str(lhs);
+                    out.push(op as char);
+                    out.push(op as char);
+                    i = j + 1;
+                    continue;
+                }
+            }
+            out.push_str(lhs);
+            continue;
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// `recv.at(idx)` → `recv[idx]` when `idx` is an atom.
+fn pack_dense_index(src: &str) -> String {
+    let mut out = String::new();
+    let mut rest = src;
+    while let Some(p) = rest.find(".at(") {
+        out.push_str(&rest[..p]);
+        let after = &rest[p + 4..];
+        if let Some(close) = after.find(')') {
+            let idx = after[..close].trim();
+            if !idx.is_empty()
+                && idx
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')
+                && !idx.contains("..")
+            {
+                out.push('[');
+                out.push_str(idx);
+                out.push(']');
+                rest = &after[close + 1..];
+                continue;
+            }
+        }
+        out.push_str(".at(");
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `xs.len()` → `xs#`.
+fn pack_dense_len(src: &str) -> String {
+    src.replace(".len()", "#")
+}
+
+/// `{ s T:= 0; i~xs# { s += xs[i] }; s }` → `+/xs#` (same for `*=` / `*/`).
+fn pack_dense_vec_reduce(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let b = src.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if let Some((n, packed)) = try_pack_vec_reduce_at(src, i) {
+            out.push_str(&packed);
+            i += n;
+            continue;
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+fn try_pack_vec_reduce_at(src: &str, start: usize) -> Option<(usize, String)> {
+    let rest = &src[start..];
+    // Sequential form after the other packers:
+    //   `s Z:= 0; i~xs# { s += xs[i] }; s`
+    // Optional wrapping `{ … }` from a standalone expression.
+    let mut r = rest;
+    let wrapped = r.starts_with('{');
+    if wrapped {
+        r = r[1..].trim_start();
+    }
+    if start > 0 && is_ident_char(src.as_bytes()[start - 1]) {
+        return None;
+    }
+    let acc_end = r.find(|c: char| !c.is_ascii_alphanumeric() && c != '_')?;
+    if acc_end == 0 {
+        return None;
+    }
+    let acc = &r[..acc_end];
+    r = r[acc_end..].trim_start();
+    // `s Z:= 0` or `s: usz := 0` or `s:= 0`.
+    if let Some(x) = r.strip_prefix(":=") {
+        r = x.trim_start();
+    } else if r.starts_with(':') {
+        r = r[1..].trim_start();
+        let ty_end = r.find(":=").unwrap_or(r.len());
+        r = r[ty_end..].trim_start().strip_prefix(":=")?.trim_start();
+    } else if let Some(ty_end) = r.find(":=") {
+        let ty = r[..ty_end].trim();
+        if ty.is_empty() || !ty.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return None;
+        }
+        r = r[ty_end..].trim_start().strip_prefix(":=")?.trim_start();
+    } else {
+        return None;
+    }
+    let init_end = r.find(|c: char| !c.is_ascii_digit()).unwrap_or(r.len());
+    if init_end == 0 {
+        return None;
+    }
+    let init = &r[..init_end];
+    r = r[init_end..].trim_start();
+    // Optional type suffix left on the literal (`0usz`) or a leftover glyph.
+    if r.starts_with("usz") {
+        r = r[3..].trim_start();
+    } else if r.starts_with('Z') && (r.len() == 1 || !is_ident_char(r.as_bytes()[1])) {
+        r = r[1..].trim_start();
+    }
+    r = r.strip_prefix(';')?.trim_start();
+    let ix_end = r.find('~')?;
+    let ix = r[..ix_end].trim();
+    if ix.is_empty() || !ix.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    r = r[ix_end + 1..].trim_start();
+    let hash = r.find('#')?;
+    let vec = r[..hash].trim();
+    if vec.is_empty() || !vec.chars().all(|c| c.is_ascii_alphabetic() || c == '_') {
+        return None;
+    }
+    r = r[hash + 1..].trim_start().strip_prefix('{')?.trim_start();
+    let add = format!("{acc} += {vec}[{ix}]");
+    let mul = format!("{acc} *= {vec}[{ix}]");
+    let op = if r.starts_with(&add) && init == "0" {
+        r = r[add.len()..].trim_start();
+        '+'
+    } else if r.starts_with(&mul) && init == "1" {
+        r = r[mul.len()..].trim_start();
+        '*'
+    } else {
+        return None;
+    };
+    r = r.strip_prefix(';')?.trim_start();
+    r = r.strip_prefix('}')?.trim_start();
+    r = r.strip_prefix(';')?.trim_start();
+    if !r.starts_with(acc) {
+        return None;
+    }
+    let after = &r[acc.len()..];
+    // Bare result, not `s++` / `s +=` / `s[i]`.
+    if let Some(&c) = after.as_bytes().first() {
+        if is_ident_char(c) || matches!(c, b'+' | b'-' | b'=' | b'[' | b'.' | b'(') {
+            return None;
+        }
+    }
+    r = after.trim_start();
+    if wrapped {
+        r = r.strip_prefix('}')?;
+    }
+    let consumed = src.len() - start - r.len();
+    Some((consumed, format!("{op}/{vec}#")))
+}
+
+/// `recv.insert(k, v)` → `recv[k]<-v`; `recv.push(e)` → `recv<-e`;
+/// `recv.get(k)` → `recv[k]` (get-or via `?` stays attached).
+fn pack_dense_put(src: &str) -> String {
+    let mut s = pack_method_to_put(src, ".insert(", true);
+    s = pack_method_to_put(&s, ".set(", true);
+    s = pack_method_to_put(&s, ".push(", false);
+    pack_method_to_put(&s, ".get(", false)
+}
+
+fn key_looks_like_map(key: &str) -> bool {
+    let t = key.trim();
+    t.starts_with('"') || t.starts_with('\'')
+}
+
+fn pack_method_to_put(src: &str, meth: &str, two_args: bool) -> String {
+    let mut out = String::new();
+    let mut rest = src;
+    while let Some(p) = rest.find(meth) {
+        let before = &rest[..p];
+        let mut k = before.len();
+        while k > 0 && (is_ident_char(before.as_bytes()[k - 1]) || before.as_bytes()[k - 1] == b'.')
+        {
+            k -= 1;
+        }
+        let recv = before[k..].trim();
+        out.push_str(&before[..k]);
+        let after = &rest[p + meth.len()..];
+        let mut d = 1i32;
+        let mut close = None;
+        for (i, c) in after.char_indices() {
+            match c {
+                '(' => d += 1,
+                ')' => {
+                    d -= 1;
+                    if d == 0 {
+                        close = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(close) = close {
+            let args = after[..close].trim();
+            if two_args {
+                if let Some(comma) = split_top_comma(args) {
+                    let key = args[..comma].trim();
+                    let val = args[comma + 1..].trim();
+                    if atomish(key) && !val.is_empty() {
+                        out.push_str(recv);
+                        out.push('[');
+                        out.push_str(key);
+                        out.push_str("]<-");
+                        out.push_str(val);
+                        rest = &after[close + 1..];
+                        continue;
+                    }
+                }
+            } else if atomish(args) && !args.is_empty() {
+                out.push_str(recv);
+                if meth == ".get(" {
+                    out.push('[');
+                    out.push_str(args);
+                    out.push(']');
+                } else {
+                    out.push_str("<-");
+                    out.push_str(args);
+                }
+                rest = &after[close + 1..];
+                continue;
+            }
+        }
+        out.push_str(recv);
+        out.push_str(meth);
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+fn split_top_comma(s: &str) -> Option<usize> {
+    let mut d = 0i32;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' | '[' => d += 1,
+            ')' | ']' => d -= 1,
+            ',' if d == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn atomish(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '"' | '\'' | '-'))
 }

@@ -125,8 +125,8 @@ pub fn render_doc() -> String {
          punctuation mark is one token except two-char operators (`->`, `:=`, `==` …); \
          a newline is one token; spaces are free. Absolute numbers are not any \
          particular model’s vocabulary; the comparison is identical across languages.\n\n\
-         **Ax** is the language (short syntax). Conventional is the corpus \
-         dialect, shown only so the same idea can be compared with Rust / C / Go. \
+         **Ax** is the language. The Rust-shaped column is the corpus \
+         dialect the tests still parse — not what you write. \
          `ax fmt` prints Ax.\n\n",
     );
 
@@ -172,8 +172,8 @@ pub fn render_doc() -> String {
 
     md.push_str(
         "Read the totals as *how much text an agent pays to write the same idea*. \
-         **Ax** is the short syntax (the language). Conventional is the corpus \
-         dialect, kept so the same idea can be compared with Rust / C / Go.\n\n",
+         **Ax** is the language. The Rust-shaped column is the corpus dialect \
+         the tests still parse — not what you write.\n\n",
     );
 
     for c in CASES {
@@ -194,7 +194,7 @@ pub fn render_doc() -> String {
         md.push_str(&fence("c", c.src.c));
         md.push_str("\n\n**Go**\n\n");
         md.push_str(&fence("go", c.src.go));
-        md.push_str("\n\n**Ax (corpus / conventional)**\n\n");
+        md.push_str("\n\n**Corpus dialect (not Ax)**\n\n");
         md.push_str(&fence("ax", c.src.ax));
         md.push_str("\n\n**Ax**\n\n");
         md.push_str(&fence("ax", &format!("{dense}\n")));

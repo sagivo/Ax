@@ -119,6 +119,9 @@ fn looks_like_dense_detects_hash_fn() {
     assert!(ax::frontend::looks_like_dense("#main() I = 1"));
     assert!(ax::frontend::looks_like_dense("s += 1"));
     assert!(ax::frontend::looks_like_dense("+/n"));
+    assert!(ax::frontend::looks_like_dense("s++"));
+    assert!(ax::frontend::looks_like_dense("xs#"));
+    assert!(ax::frontend::looks_like_dense("xs<-1"));
     assert!(!ax::frontend::looks_like_dense("fn main() -> i32 = 1"));
 }
 
@@ -189,6 +192,164 @@ fn dense_k_reduce_product_and_range() {
     let out = s.compile("p.ax", prod).unwrap_or_else(|d| panic!("{d:?}"));
     let v = ax::driver::run_main(&s.intern, &out, 0).unwrap();
     assert_eq!(v.display(), "24usz"); // 1*2*3*4
+}
+
+#[test]
+fn dense_inc_and_len_same_value() {
+    let conv = "module t;\nfn main() -> usz !{alloc[a]} = {\n    let mut xs: Vec[usz] = vec.new(test.alloc);\n    xs.push(1usz);\n    xs.push(2usz);\n    let mut s: usz = 0;\n    for i in range(0, xs.len()) { s = s + xs.at(i); };\n    s = s + 1;\n    s\n};\n";
+    let dense = to_dense(conv);
+    assert!(dense.contains("++") || dense.contains("+="), "{dense}");
+    assert!(dense.contains('#'), "expected xs#, got {dense}");
+    assert!(dense.contains('[') || dense.contains(".at"), "{dense}");
+    let mut a = Session::new();
+    let mut b = Session::new();
+    b.surface = Surface::Dense;
+    let oa = a.compile("a.ax", conv).unwrap();
+    let ob = b
+        .compile("b.ax", &dense)
+        .unwrap_or_else(|d| panic!("dense={dense}\n{d:?}"));
+    let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
+    let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
+    assert_eq!(va.display(), vb.display());
+    let written = "#main() Z !alloc[a] = { xs V[Z]:= vec.new(test.alloc); xs.push(1Z); xs.push(2Z); s Z:= 0; i~xs# { s += xs[i] }; s++ ; s }\n";
+    let mut c = Session::new();
+    c.surface = Surface::Dense;
+    let oc = c
+        .compile("c.ax", written)
+        .unwrap_or_else(|d| panic!("written={written}\n{d:?}"));
+    let vc = ax::driver::run_main(&c.intern, &oc, 0).unwrap();
+    assert_eq!(vc.display(), va.display());
+    assert!(
+        ax::tokens::count("xs#").tokens < ax::tokens::count("xs.len()").tokens,
+        "xs# must be cheaper than xs.len()"
+    );
+    assert!(
+        ax::tokens::count("s++").tokens < ax::tokens::count("s += 1").tokens,
+        "s++ must be cheaper than s += 1"
+    );
+}
+
+#[test]
+fn dense_vec_reduce_and_empty() {
+    let conv = "module t;\nfn main() -> usz !{alloc[a]} = {\n    let mut xs: Vec[usz] = vec.new(test.alloc);\n    xs.push(2usz);\n    xs.push(3usz);\n    xs.push(4usz);\n    let mut s: usz = 0;\n    for i in range(0, xs.len()) { s = s + xs.at(i); };\n    s\n};\n";
+    let dense = to_dense(conv);
+    assert!(
+        dense.contains("+/") && dense.contains('#'),
+        "expected +/xs#, got {dense}"
+    );
+    assert!(
+        dense.contains("[]") || dense.contains('%') || dense.contains("vec.new"),
+        "{dense}"
+    );
+    let mut a = Session::new();
+    let mut b = Session::new();
+    b.surface = Surface::Dense;
+    let oa = a.compile("a.ax", conv).unwrap();
+    let ob = b
+        .compile("b.ax", &dense)
+        .unwrap_or_else(|d| panic!("dense={dense}\n{d:?}"));
+    let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
+    let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
+    assert_eq!(va.display(), vb.display());
+    assert_eq!(va.display(), "9usz");
+    let written =
+        "#main() Z !alloc[a] = { xs V[Z]:= []; xs.push(2Z); xs.push(3Z); xs.push(4Z); +/xs# }\n";
+    let mut c = Session::new();
+    c.surface = Surface::Dense;
+    let oc = c
+        .compile("w.ax", written)
+        .unwrap_or_else(|d| panic!("written={written}\n{d:?}"));
+    let vc = ax::driver::run_main(&c.intern, &oc, 0).unwrap();
+    assert_eq!(vc.display(), "9usz");
+    let empty = "#main() Z !alloc[a] = { xs V[Z]:= []; +/xs# }\n";
+    let mut d = Session::new();
+    d.surface = Surface::Dense;
+    let od = d
+        .compile("e.ax", empty)
+        .unwrap_or_else(|err| panic!("empty={empty}\n{err:?}"));
+    let vd = ax::driver::run_main(&d.intern, &od, 0).unwrap();
+    assert_eq!(vd.display(), "0usz");
+    let prod = "#main() Z !alloc[a] = { xs V[Z]:= []; xs.push(2Z); xs.push(3Z); */xs# }\n";
+    let mut e = Session::new();
+    e.surface = Surface::Dense;
+    let oe = e
+        .compile("p.ax", prod)
+        .unwrap_or_else(|err| panic!("prod={prod}\n{err:?}"));
+    let ve = ax::driver::run_main(&e.intern, &oe, 0).unwrap();
+    assert_eq!(ve.display(), "6usz");
+    assert_eq!(ax::tokens::count("+/xs#").tokens, 3);
+}
+
+#[test]
+fn dense_vec_minmax_and_set() {
+    let mx = "#main() Z !alloc[a] = { xs V[Z]:= []; xs<-3Z; xs<-1Z; xs<-4Z; |/xs# }\n";
+    let mut a = Session::new();
+    a.surface = Surface::Dense;
+    let oa = a.compile("mx.ax", mx).unwrap_or_else(|d| panic!("{d:?}"));
+    let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
+    assert_eq!(va.display(), "4usz");
+    let mn = "#main() Z !alloc[a] = { xs V[Z]:= []; xs<-3Z; xs<-1Z; xs<-4Z; &/xs# }\n";
+    let mut b = Session::new();
+    b.surface = Surface::Dense;
+    let ob = b.compile("mn.ax", mn).unwrap_or_else(|d| panic!("{d:?}"));
+    let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
+    assert_eq!(vb.display(), "1usz");
+    let set = "#main() Z !alloc[a] = { xs V[Z]:= []; xs<-1Z; xs<-2Z; xs[0]<-9Z; xs[0] }\n";
+    let mut c = Session::new();
+    c.surface = Surface::Dense;
+    let oc = c.compile("st.ax", set).unwrap_or_else(|d| panic!("{d:?}"));
+    let vc = ax::driver::run_main(&c.intern, &oc, 0).unwrap();
+    assert_eq!(vc.display(), "9usz");
+    let packed = to_dense(
+        "module t;\nfn main() -> usz !{alloc[a]} = {\n    let mut xs: Vec[usz] = vec.new(test.alloc);\n    xs.push(1usz);\n    xs.set(0, 9usz);\n    xs.at(0)\n};\n",
+    );
+    assert!(packed.contains("<-"), "expected set pack, got {packed}");
+}
+
+#[test]
+fn dense_put_and_get_index() {
+    let conv = r#"
+module t;
+fn main() -> i64 !{alloc[a]} = {
+    let mut m: Map[String, i64] = map.new(test.alloc);
+    m.insert("k", 7i64);
+    match m.get("k") { Some(v) => v; None => 0; }
+};
+"#;
+    let dense = to_dense(conv);
+    assert!(dense.contains("<-"), "expected insert pack, got {dense}");
+    assert!(
+        dense.contains('[') && dense.contains('?'),
+        "expected m[k]? , got {dense}"
+    );
+    let mut a = Session::new();
+    let mut b = Session::new();
+    b.surface = Surface::Dense;
+    let oa = a.compile("a.ax", conv).unwrap();
+    let ob = b
+        .compile("b.ax", &dense)
+        .unwrap_or_else(|d| panic!("dense={dense}\n{d:?}"));
+    let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
+    let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
+    assert_eq!(va.display(), vb.display());
+    let written = "#main() L !alloc[a] = { m M[S, L]:= %; m[\"k\"]<-7L; m[\"k\"]?0 }\n";
+    let mut c = Session::new();
+    c.surface = Surface::Dense;
+    let oc = c
+        .compile("w.ax", written)
+        .unwrap_or_else(|d| panic!("written={written}\n{d:?}"));
+    let vc = ax::driver::run_main(&c.intern, &oc, 0).unwrap();
+    assert_eq!(vc.display(), va.display());
+    let push = "#main() Z !alloc[a] = { xs V[Z]:= []; xs<-2Z; xs<-3Z; +/xs# }\n";
+    let mut d = Session::new();
+    d.surface = Surface::Dense;
+    let od = d
+        .compile("p.ax", push)
+        .unwrap_or_else(|err| panic!("push={push}\n{err:?}"));
+    let vd = ax::driver::run_main(&d.intern, &od, 0).unwrap();
+    assert_eq!(vd.display(), "5usz");
+    assert!(ax::tokens::count("xs<-e").tokens < ax::tokens::count("xs.push(e)").tokens);
+    assert!(ax::tokens::count("m[k]<-v").tokens < ax::tokens::count("m.insert(k, v)").tokens);
 }
 
 #[test]

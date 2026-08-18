@@ -1,71 +1,163 @@
-# Ax short syntax
+# Ax
 
-This **is** Ax. Default parse and `ax fmt`. Same AST as the Rust-shaped
-corpus dialect, fewer BPE pieces. A file that opens with `(` is the
-prefix tree (`spec/tree.md`). There is no opt-in dense flag.
+This is how you write Ax. Default parse. `ax fmt` prints this. One
+spelling per construct.
 
-## Why these glyphs
+A file that opens with `(` is the same language as a prefix tree
+(`spec/tree.md`). Rust-shaped `fn` / `module` / `let` still parses so
+the test corpus keeps proving the IR. That is not Ax. An agent does
+not write it.
 
-Proxy tokenizer (and typical BPE): letters split at `_` / case / digit
-boundaries; each punctuation mark is one token except `:=` `->` `==` …;
-newlines cost; spaces are free.
-
-| corpus dialect | tokens (proxy) | Ax | tokens |
-|---|---:|---|---:|
-| `fn` | 1 | `#` | 1 (and drops a space+ident split) |
-| `i32` / `usz` / `bool` | 2 / 1 / 1 | `I` / `Z` / `B` | 1 |
-| `let mut s: usz =` | 7 | `s Z:=` | 3 |
-| `for i in range(0, n)` | 10 | `i~n` | 3 |
-| `s = s + i` | 5 | `s += i` | 3 |
-| `{ s:= 0; i~n { s += i }; s }` | ~14 | `+/n` | 2 |
-| `{ s:= 1; i~n { s *= i }; s }` | ~14 | `*/n` | 2 |
-| `return` | 1 | `^` | 1 |
-| `if c { t } else { e }` | 6+ | `$c{t}{e}` | 3+braces |
-| `match e { Some(v) => v; None => d }` | ~12 | `e?d` | 2+ |
-| `match e { Ok(v) => v; Err(_) => d }` | ~12 | `e\|d` | 2+ |
-| `while c { body }` | 4+ | `@c{body}` | 2+ |
-| `map.new(test.alloc)` | 8 | `%` | 1 |
-| `7i64` | 2 | `7L` | 1 |
-| `;` before `}` | 1 | dropped | 0 |
-| newline | 1 | space (free) | 0 |
-
-`I`/`L`/`Z`/`B`/`S` are single ASCII letters that vocabularies already
-store as whole tokens. Spelled types (`i32`) usually become `i`+`32`.
-
-## Grammar
+## Program
 
 ```
-#name(a T, b U) R = body          function
-name T:= e                        let mut name: T = e
-name:= e                          let mut name = e
-i~n { … }                         for i in range(0, n)
-i~lo..hi { … }                    for i in range(lo, hi)
-s += e                            s = s + e   (also -= *= /= %= &= |= ^=)
-+/n                               sum of 0..n as usz   (K plus-over; same loop)
-+/lo..hi                          sum of lo..hi as usz
-*/n                               product of 0..n as usz
-^ e                               return e
-$c{t}{e}                          if c { t } else { e }
-e?d                               match e { Some(v) => v; None => d }
-e|d                               match e { Ok(v) => v; Err(_) => d }
-@c{body}                          while c { body }
-%                                 map.new(test.alloc)
-7L                                7i64
-```
-
-Type atoms: `I` i32 · `L` i64 · `Y` isz · `U` u32 · `W` u64 · `Z` usz ·
-`B` bool · `F` f64 · `f` f32 · `S` String · `O` Option · `R` Result ·
-`M` Map · `V` Vec.
-
-## Example
-
-```
-#main() Z = { s Z:= 1; i~n { s = s * 6364136223846793005 + i }; s }
+#add(a I, b I) I = a + b
 #sum(n Z) Z = +/n
+#sumv(xs V[Z]) Z = +/xs#
+#pick(b B) I = $b{1}{0}
+#get(m M[S, L], k S) L = m[k]?0
+#main() Z = { s Z:= 1; i~n { s = s * 6364136223846793005 + i }; s }
 ```
 
-is the int_sum kernel, then the range-sum that `+/` is for. `ax fmt`
-prints this form. Token counts: `ax bench tokens` and `docs/usecases.md`.
+A file is a sequence of declarations. The module name is the file
+stem. `export` / `use` are optional; omit them unless you need them.
 
-`+=` and `+/` are surface only: they expand to the same `s = s + i`
-loop the C backend already sees. No new IR, no new runtime.
+## Types
+
+| write | meaning |
+|---|---|
+| `I` | 32-bit signed |
+| `L` | 64-bit signed |
+| `Y` | pointer-width signed |
+| `U` | 32-bit unsigned |
+| `W` | 64-bit unsigned |
+| `Z` | pointer-width unsigned |
+| `B` | bool |
+| `F` | f64 |
+| `f` | f32 |
+| `S` | string |
+| `O[T]` | option of `T` |
+| `R[T, E]` | result of `T` or `E` |
+| `M[K, V]` | map |
+| `V[T]` | vec |
+| `own T` | affine: use exactly once |
+
+No implicit numeric conversion. `as` is the only one. `7L` is the
+literal 7 as `L`. `7I` / `7Z` / `7W` likewise.
+
+## Bindings
+
+```
+name T:= e          bind `name` as `T`, mutable
+name:= e            bind, type inferred
+name = e            assign
+name += e           assign `name = name + e`   (also -= *= /= %= &= |= ^=)
+name++              assign `name = name + 1`
+name--              assign `name = name - 1`
+```
+
+`:=` is the only binder. There is no separate immutable form.
+
+## Functions
+
+```
+#name(a T, b U) R = body
+#name(a T) R !err[E] = body
+#name() R !alloc[a] = body
+```
+
+`#name` starts a function. The body is an expression. A one-liner
+does not need a trailing `;`. A block `{ … }` is an expression; its
+value is the last expression.
+
+`^e` returns `e` from the enclosing function.
+
+## Control
+
+```
+$c{t}{e}            if `c` then `t` else `e`
+$c{t}               if `c` then `t`
+i~n { … }           `i` from 0 to `n` (exclusive)
+i~lo..hi { … }      `i` from `lo` to `hi`
+i~xs# { … }         `i` from 0 to `xs#`
+@c{body}            while `c`
+loop { … }          unbounded; adds `diverge`
+break               leave the loop
+continue            next iteration
+match s { p => e; … }
+```
+
+`i~n` is bounded. `@c` and `loop` add `diverge` to the effect row.
+
+## Reduce
+
+These are the language, not helpers. Each is the loop you would have
+written; the compiler sees that loop.
+
+```
++/n                 sum of 0..n as Z
++/lo..hi            sum of lo..hi as Z
+*/n                 product of 0..n as Z
++/xs#               sum of a Z-vec
+*/xs#               product of a Z-vec
+|/xs#               max of a Z-vec   (empty aborts)
+&/xs#               min of a Z-vec   (empty aborts)
+```
+
+`+/n` and `*/n` on an empty range are 0 and 1. `+/xs#` / `*/xs#` on
+an empty vec are 0 and 1. `|/` / `&/` seed from `xs[0]`; an empty
+vec aborts.
+
+A walk `i~xs# { … xs[i] … }` does not bounds-check: `i` is in range
+by construction.
+
+## Collections
+
+```
+[]                  empty vec
+%                   empty map
+xs#                 length of `xs`
+xs[i]               element `i` (aborts if out of range, unless proven)
+xs<-e               append `e`
+xs[i]<-v            store `v` at `i`
+m[k]<-v             insert `k → v`
+m[k]?d              get `k`, or `d` if missing
+```
+
+`[]` and `%` allocate from the test allocator. `xs[i]` and
+`xs[i]<-v` use a numeric index. `m[k]<-v` / `m[k]?d` use a key
+(usually a string).
+
+## Errors
+
+```
+e?d                 option: value, or `d` if none
+e|d                 result: ok value, or `d` if err
+raise e             fail with `e` (a branch, not unwind)
+```
+
+At most one `err[E]` in a signature. `!err[ParseError]` declares it.
+
+## Effects
+
+Inferred from the body, checked against the signature.
+
+```
+#f() I !err[E] = …
+#f() I !alloc[a] = …
+#f() I !io[c] = …
+```
+
+Omit the row and `diverge` is reconstructed from `@` / `loop`. An
+explicit empty row claims termination.
+
+## What this is not
+
+- Not a mode. There is no `--surface dense` to opt into.
+- Not a coat over Rust. `fn` / `let mut` / `for i in range` are the
+  corpus dialect the tests still parse. `ax fmt` will not print them.
+- Not Unicode APL. Glyphs are ASCII letters and punctuation a
+  tokenizer already stores as whole tokens.
+
+Token counts against Rust / C / Go: `docs/usecases.md`
+(`ax bench usecases`).

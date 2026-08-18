@@ -20,7 +20,7 @@ use crate::effects::{EffectAtom, EffectSet};
 use crate::intern::{Interner, Symbol};
 use crate::ir::*;
 use crate::types::{subst, Prim, Type, TypeDefKind};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Fixed field indices of the built-in string layout. Vec and slice fields are
 /// looked up by name (`data` / `len` / `cap`) so a layout change cannot silently
@@ -690,6 +690,11 @@ impl<'a> Lowerer<'a> {
             index_facts: Vec::new(),
             same_len,
             data_ptrs: HashMap::new(),
+            len_vals: HashMap::new(),
+            addressed: collect_addressed(&f.body),
+            reserved_cap: HashMap::new(),
+            known_len: HashMap::new(),
+            no_grow: HashSet::new(),
             test_fail: None,
         };
 
@@ -786,6 +791,11 @@ impl<'a> Lowerer<'a> {
             index_facts: Vec::new(),
             same_len: Vec::new(),
             data_ptrs: HashMap::new(),
+            len_vals: HashMap::new(),
+            addressed: collect_addressed(body),
+            reserved_cap: HashMap::new(),
+            known_len: HashMap::new(),
+            no_grow: HashSet::new(),
             test_fail: None,
         };
         // A test that raises without catching fails, exactly as in the oracle.
@@ -981,6 +991,10 @@ struct Local {
     /// `UniqueFree` after releasing internal entries. Not set on values
     /// that escape the current frame.
     unique_heap: bool,
+    /// `addr` is an SSA value, not a slot. Used for the range-`for` index so
+    /// the C backend can keep it in a register. Never assigned, never addressed.
+    #[allow(dead_code)]
+    ssa: bool,
 }
 
 struct FnLower<'l, 'a> {
@@ -1014,6 +1028,21 @@ struct FnLower<'l, 'a> {
     /// Hoisted `vec.data` pointers for the current loop. Valid only when the
     /// body cannot grow or reassign the vec, so the pointer cannot move.
     data_ptrs: HashMap<Symbol, ValId>,
+    /// Matching hoisted `vec.len` values. Same validity as `data_ptrs`.
+    len_vals: HashMap<Symbol, ValId>,
+    /// Locals whose address is taken somewhere in this function. Those still
+    /// need a slot; everything else can stay an SSA value.
+    addressed: HashSet<Symbol>,
+    /// `xs.reserve(N)` with a constant `N`: `cap >= N` until the binding
+    /// is reassigned. Paired with `known_len` so a `push` that cannot
+    /// overflow drops the grow check.
+    reserved_cap: HashMap<Symbol, i128>,
+    /// Exact length of a vec we have tracked from `vec.new` (len 0) plus
+    /// each `push`. Cleared on reassignment.
+    known_len: HashMap<Symbol, i128>,
+    /// Vecs whose remaining `push`es in the current counted `for` are
+    /// already covered by `reserve`. The grow check can stay off.
+    no_grow: HashSet<Symbol>,
     /// In a `test`, where an uncaught raise goes: the block that reports the
     /// test as failed. The oracle treats an uncaught raise the same way, so the
     /// two agree on which tests pass.
@@ -1108,6 +1137,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     by_ref: true,
                     const_div: false,
                     unique_heap: false,
+                    ssa: false,
                 },
             );
         } else if !needs_slot {
@@ -1122,6 +1152,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     by_ref: true,
                     const_div: false,
                     unique_heap: false,
+                    ssa: true,
                 },
             );
         } else {
@@ -1138,6 +1169,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     by_ref: false,
                     const_div: false,
                     unique_heap: false,
+                    ssa: false,
                 },
             );
         }
@@ -1501,6 +1533,11 @@ impl<'l, 'a> FnLower<'l, 'a> {
             index_facts: Vec::new(),
             same_len: Vec::new(),
             data_ptrs: HashMap::new(),
+            len_vals: HashMap::new(),
+            addressed: collect_addressed(body),
+            reserved_cap: HashMap::new(),
+            known_len: HashMap::new(),
+            no_grow: HashSet::new(),
             test_fail: None,
         };
         for (p, pty) in params.iter().zip(&ptys) {
@@ -2037,6 +2074,15 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 }
             }
         }
+        if let PatKind::Bind(id) = &l.pat.kind {
+            if expr_is_vec_new(&l.init, self.l.intern) {
+                self.known_len.insert(id.name, 0);
+                self.reserved_cap.remove(&id.name);
+            } else {
+                self.known_len.remove(&id.name);
+                self.reserved_cap.remove(&id.name);
+            }
+        }
         Ok(())
     }
 
@@ -2070,24 +2116,57 @@ impl<'l, 'a> FnLower<'l, 'a> {
                             by_ref: true,
                             const_div: false,
                             unique_heap: false,
+                            ssa: false,
                         },
                     );
                     let _ = mutable;
                 } else if val.ty == IrTy::Ptr {
-                    // A reference binding: keep the pointer itself.
-                    let slot = self
-                        .fb
-                        .alloc_slot(SlotKind::Scalar(IrTy::Ptr), &self.l.sym(id.name));
-                    self.fb.store(IrTy::Ptr, slot, val.v);
+                    // A reference binding: keep the pointer itself unless
+                    // something takes its address or reassigns it.
+                    if !mutable && !self.addressed.contains(&id.name) {
+                        self.bind(
+                            id.name,
+                            Local {
+                                addr: val.v,
+                                ir: IrTy::Ptr,
+                                agg: None,
+                                by_ref: true,
+                                const_div: false,
+                                unique_heap: false,
+                                ssa: true,
+                            },
+                        );
+                    } else {
+                        let slot = self
+                            .fb
+                            .alloc_slot(SlotKind::Scalar(IrTy::Ptr), &self.l.sym(id.name));
+                        self.fb.store(IrTy::Ptr, slot, val.v);
+                        self.bind(
+                            id.name,
+                            Local {
+                                addr: slot,
+                                ir: IrTy::Ptr,
+                                agg: None,
+                                by_ref: false,
+                                const_div: false,
+                                unique_heap: false,
+                                ssa: false,
+                            },
+                        );
+                    }
+                } else if !mutable && !self.addressed.contains(&id.name) {
+                    // Immutable unaddressed scalar: keep the SSA value so
+                    // `let b = xs.at(i)` is a register, not a slot store.
                     self.bind(
                         id.name,
                         Local {
-                            addr: slot,
-                            ir: IrTy::Ptr,
+                            addr: val.v,
+                            ir: val.ty,
                             agg: None,
-                            by_ref: false,
+                            by_ref: true,
                             const_div: false,
                             unique_heap: false,
+                            ssa: true,
                         },
                     );
                 } else {
@@ -2104,6 +2183,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                             by_ref: false,
                             const_div: false,
                             unique_heap: false,
+                            ssa: false,
                         },
                     );
                 }
@@ -2218,28 +2298,31 @@ impl<'l, 'a> FnLower<'l, 'a> {
         let data_idx = a
             .field_index("data")
             .ok_or("native backend: indexing a type with no `data`")?;
-        // `at` is bounds-checked always (§3.3), so the check is unconditional
-        // and the abort is explicit in the IR.
-        let len_ptr = self.fb.field_ptr(b_agg, len_idx, b.v);
-        let len = self.fb.load(a.field(len_idx).ty, len_ptr);
+        // Same contract as `at` (§3.3): check unless this loop already
+        // proved `index` is in `base`'s length (`for i in range(0, xs.len())`).
+        // Packing `xs.at(i)` to `xs[i]` must not reintroduce a dead compare.
         let idx64 = self.coerce_int(i, IrTy::U64);
-        let in_bounds = self.fb.bin(BinKind::Lt, idx64, len);
-        let ok = self.fb.new_block();
-        let bad = self.fb.new_block();
-        self.fb.set_term(Term::Br {
-            cond: in_bounds,
-            then_e: Edge {
-                to: ok,
-                args: vec![],
-            },
-            else_e: Edge {
-                to: bad,
-                args: vec![],
-            },
-        });
-        self.fb.switch_to(bad);
-        self.fb.set_term(Term::Abort(AbortCode::IndexOutOfBounds));
-        self.fb.switch_to(ok);
+        if !self.bounded_by(base, index) {
+            let len_ptr = self.fb.field_ptr(b_agg, len_idx, b.v);
+            let len = self.fb.load(a.field(len_idx).ty, len_ptr);
+            let in_bounds = self.fb.bin(BinKind::Lt, idx64, len);
+            let ok = self.fb.new_block();
+            let bad = self.fb.new_block();
+            self.fb.set_term(Term::Br {
+                cond: in_bounds,
+                then_e: Edge {
+                    to: ok,
+                    args: vec![],
+                },
+                else_e: Edge {
+                    to: bad,
+                    args: vec![],
+                },
+            });
+            self.fb.switch_to(bad);
+            self.fb.set_term(Term::Abort(AbortCode::IndexOutOfBounds));
+            self.fb.switch_to(ok);
+        }
         let data_ptr = self.fb.field_ptr(b_agg, data_idx, b.v);
         let data = self.fb.load(IrTy::Ptr, data_ptr);
         let ep = self.fb.push(
@@ -2354,12 +2437,28 @@ impl<'l, 'a> FnLower<'l, 'a> {
         let v = self.expr(rhs)?;
         let place = self.place(lhs)?;
         match place {
-            Place::Scalar { addr, ty } => self.fb.store(ty, addr, v.v),
-            Place::Agg { addr, agg } => self.fb.push_void(Op::CopyAgg {
-                ty: agg,
-                dst: addr,
-                src: v.v,
-            }),
+            Place::Scalar { addr, ty } => {
+                if let ExprKind::Path(p) = &lhs.kind {
+                    if p.segs.len() == 1 {
+                        self.known_len.remove(&p.segs[0].name);
+                        self.reserved_cap.remove(&p.segs[0].name);
+                    }
+                }
+                self.fb.store(ty, addr, v.v)
+            }
+            Place::Agg { addr, agg } => {
+                if let ExprKind::Path(p) = &lhs.kind {
+                    if p.segs.len() == 1 {
+                        self.known_len.remove(&p.segs[0].name);
+                        self.reserved_cap.remove(&p.segs[0].name);
+                    }
+                }
+                self.fb.push_void(Op::CopyAgg {
+                    ty: agg,
+                    dst: addr,
+                    src: v.v,
+                });
+            }
         }
         Ok(LVal::scalar(self.fb.unit(), IrTy::Unit))
     }
@@ -2430,26 +2529,28 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 let len_idx = a
                     .field_index("len")
                     .ok_or("native backend: indexed assign to a type with no `len`")?;
-                let lp = self.fb.field_ptr(b_agg, len_idx, b.v);
-                let len = self.fb.load(a.field(len_idx).ty, lp);
                 let idx64 = self.coerce_int(i, IrTy::U64);
-                let in_bounds = self.fb.bin(BinKind::Lt, idx64, len);
-                let ok = self.fb.new_block();
-                let bad = self.fb.new_block();
-                self.fb.set_term(Term::Br {
-                    cond: in_bounds,
-                    then_e: Edge {
-                        to: ok,
-                        args: vec![],
-                    },
-                    else_e: Edge {
-                        to: bad,
-                        args: vec![],
-                    },
-                });
-                self.fb.switch_to(bad);
-                self.fb.set_term(Term::Abort(AbortCode::IndexOutOfBounds));
-                self.fb.switch_to(ok);
+                if !self.bounded_by(base, index) {
+                    let lp = self.fb.field_ptr(b_agg, len_idx, b.v);
+                    let len = self.fb.load(a.field(len_idx).ty, lp);
+                    let in_bounds = self.fb.bin(BinKind::Lt, idx64, len);
+                    let ok = self.fb.new_block();
+                    let bad = self.fb.new_block();
+                    self.fb.set_term(Term::Br {
+                        cond: in_bounds,
+                        then_e: Edge {
+                            to: ok,
+                            args: vec![],
+                        },
+                        else_e: Edge {
+                            to: bad,
+                            args: vec![],
+                        },
+                    });
+                    self.fb.switch_to(bad);
+                    self.fb.set_term(Term::Abort(AbortCode::IndexOutOfBounds));
+                    self.fb.switch_to(ok);
+                }
                 let dp = self.fb.field_ptr(b_agg, data_idx, b.v);
                 let data = self.fb.load(IrTy::Ptr, dp);
                 let ep = self.fb.push(
@@ -2751,7 +2852,18 @@ impl<'l, 'a> FnLower<'l, 'a> {
         if let Some(f) = fact {
             self.index_facts.push(f);
         }
+        // `reserve(N); for i in range(0, N) { xs.push(...) }` cannot overflow
+        // if `len + N <= cap`. Pretend the loop already consumed those
+        // pushes so the body sees `len < cap` on every iteration.
+        let saved_no_grow = self.no_grow.clone();
+        if let Some(n) = const_range_iters(iter, self.l.intern) {
+            mark_covered_pushes(body, n, &self.reserved_cap, &self.known_len, &mut self.no_grow, self.l.intern);
+        }
         let out = self.for_expr_inner(pat, iter, body);
+        self.no_grow = saved_no_grow;
+        if let Some(n) = const_range_iters(iter, self.l.intern) {
+            apply_covered_pushes(body, n, &self.reserved_cap, &mut self.known_len, self.l.intern);
+        }
         if fact.is_some() {
             self.index_facts.pop();
         }
@@ -2776,9 +2888,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
         if callee_name(callee, self.l.intern).as_deref() != Some("range") || args.len() != 2 {
             return None;
         }
-        // Lower bound must be a literal zero; a non-zero start is still in range
-        // but keeping this narrow makes the rule easy to audit.
-        if !matches!(&args[0].kind, ExprKind::Lit(Lit::Int { value: 0, .. })) {
+        // Lower bound must be a non-negative literal. `range(1, xs.len())`
+        // is still in range; `|/` / `&/` start at 1 after seeding `at(0)`.
+        if !matches!(&args[0].kind, ExprKind::Lit(Lit::Int { value, .. }) if *value >= 0) {
             return None;
         }
         // Upper bound must be `container.len()`.
@@ -2813,7 +2925,16 @@ impl<'l, 'a> FnLower<'l, 'a> {
 
     /// Load `xs.data` once before a loop that cannot grow or reassign `xs`.
     fn hoist_data_ptrs(&mut self, body: &Expr) {
+        // Every live vec whose data pointer cannot move this iteration —
+        // not just those used as a proven `range(0, xs.len())` index.
         let mut names = Vec::new();
+        for scope in &self.scopes {
+            for (name, loc) in scope {
+                if loc.agg.is_some() {
+                    names.push(*name);
+                }
+            }
+        }
         for (_, cont) in &self.index_facts {
             names.push(*cont);
             for (a, b) in &self.same_len {
@@ -2828,7 +2949,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
         names.sort_by_key(|s| s.0);
         names.dedup();
         for name in names {
-            if assigns_to(body, name) || grows_vec(body, name, self.l.intern) {
+            if assigns_to(body, name)
+                || (grows_vec(body, name, self.l.intern) && !self.no_grow.contains(&name))
+            {
                 continue;
             }
             if self.data_ptrs.contains_key(&name) {
@@ -2846,6 +2969,11 @@ impl<'l, 'a> FnLower<'l, 'a> {
             let dp = self.fb.field_ptr(agg, data_i, loc.addr);
             let data = self.fb.load(IrTy::Ptr, dp);
             self.data_ptrs.insert(name, data);
+            if let Some(len_i) = self.l.prog.agg(agg).field_index("len") {
+                let lp = self.fb.field_ptr(agg, len_i, loc.addr);
+                let len = self.fb.load(IrTy::U64, lp);
+                self.len_vals.insert(name, len);
+            }
         }
     }
 
@@ -2857,6 +2985,32 @@ impl<'l, 'a> FnLower<'l, 'a> {
             return None;
         }
         self.data_ptrs.get(&p.segs[0].name).copied()
+    }
+
+    fn hoisted_len(&self, recv: &Expr) -> Option<ValId> {
+        let ExprKind::Path(p) = &recv.kind else {
+            return None;
+        };
+        if p.segs.len() != 1 {
+            return None;
+        }
+        self.len_vals.get(&p.segs[0].name).copied()
+    }
+
+    /// Two path receivers known to have equal length (lockstep `push`).
+    fn same_len_recv(&self, a: &Expr, b: &Expr) -> bool {
+        let (ExprKind::Path(pa), ExprKind::Path(pb)) = (&a.kind, &b.kind) else {
+            return false;
+        };
+        if pa.segs.len() != 1 || pb.segs.len() != 1 {
+            return false;
+        }
+        let (x, y) = (pa.segs[0].name, pb.segs[0].name);
+        x == y
+            || self
+                .same_len
+                .iter()
+                .any(|(l, r)| (*l == x && *r == y) || (*l == y && *r == x))
     }
 
     /// Is `idx` an index this function already knows is within `recv`'s length?
@@ -2881,24 +3035,27 @@ impl<'l, 'a> FnLower<'l, 'a> {
 
     fn for_expr_inner(&mut self, pat: &Pattern, iter: &Expr, body: &Expr) -> Result<LVal, String> {
         if let Some((lo, hi)) = self.range_bounds(iter)? {
-            let i_slot = self.fb.alloc_slot(SlotKind::Scalar(IrTy::U64), "i");
-            self.fb.store(IrTy::U64, i_slot, lo);
-            let head = self.fb.new_block();
+            // Counted range: `i` is a block parameter, not a slot, so the C
+            // backend can emit `for (i = lo; i < hi; i++)` and clang can
+            // keep `i` in a register.
+            let (head, head_ps) = self.fb.new_block_with(&[IrTy::U64]);
+            let i = head_ps[0];
             let body_bb = self.fb.new_block();
             let exit = self.fb.new_block();
+            let step = self.fb.new_block();
             let loop_var = match &pat.kind {
                 PatKind::Bind(v) => Some(v.name),
                 _ => None,
             };
             let hoisted = self.hoist_recips(&[body], loop_var);
             let saved_data = self.data_ptrs.clone();
+            let saved_lens = self.len_vals.clone();
             self.hoist_data_ptrs(body);
             self.fb.set_term(Term::Jump(Edge {
                 to: head,
-                args: vec![],
+                args: vec![lo],
             }));
             self.fb.switch_to(head);
-            let i = self.fb.load(IrTy::U64, i_slot);
             let go = self.fb.bin(BinKind::Lt, i, hi);
             self.fb.set_term(Term::Br {
                 cond: go,
@@ -2912,13 +3069,24 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 },
             });
             self.fb.switch_to(body_bb);
-            // `continue` must still advance the counter, so it targets the
-            // increment block rather than the loop head.
-            let step = self.fb.new_block();
             self.loops.push(LoopTargets { head: step, exit });
             self.push_scope();
-            let iv = self.fb.load(IrTy::U64, i_slot);
-            self.bind_pattern(pat, LVal::scalar(iv, IrTy::U64), false)?;
+            if let PatKind::Bind(v) = &pat.kind {
+                self.bind(
+                    v.name,
+                    Local {
+                        addr: i,
+                        ir: IrTy::U64,
+                        agg: None,
+                        by_ref: true,
+                        const_div: false,
+                        unique_heap: false,
+                        ssa: true,
+                    },
+                );
+            } else {
+                self.bind_pattern(pat, LVal::scalar(i, IrTy::U64), false)?;
+            }
             self.expr(body)?;
             self.pop_scope();
             self.loops.pop();
@@ -2929,16 +3097,15 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 }));
             }
             self.fb.switch_to(step);
-            let cur = self.fb.load(IrTy::U64, i_slot);
             let one = self.fb.const_int(1, IrTy::U64);
-            let next = self.fb.bin(BinKind::Add, cur, one);
-            self.fb.store(IrTy::U64, i_slot, next);
+            let next = self.fb.bin(BinKind::Add, i, one);
             self.fb.set_term(Term::Jump(Edge {
                 to: head,
-                args: vec![],
+                args: vec![next],
             }));
             self.fb.switch_to(exit);
             self.data_ptrs = saved_data;
+            self.len_vals = saved_lens;
             self.drop_recips(&hoisted);
             return Ok(LVal::scalar(self.fb.unit(), IrTy::Unit));
         }
@@ -2963,12 +3130,12 @@ impl<'l, 'a> FnLower<'l, 'a> {
         } else {
             None
         };
-        let i_slot = self.fb.alloc_slot(SlotKind::Scalar(IrTy::U64), "i");
         let z = self.fb.const_int(0, IrTy::U64);
-        self.fb.store(IrTy::U64, i_slot, z);
-        let head = self.fb.new_block();
+        let (head, head_ps) = self.fb.new_block_with(&[IrTy::U64]);
+        let i = head_ps[0];
         let body_bb = self.fb.new_block();
         let exit = self.fb.new_block();
+        let step = self.fb.new_block();
         let loop_var = match &pat.kind {
             PatKind::Bind(v) => Some(v.name),
             _ => None,
@@ -2976,10 +3143,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
         let hoisted = self.hoist_recips(&[body], loop_var);
         self.fb.set_term(Term::Jump(Edge {
             to: head,
-            args: vec![],
+            args: vec![z],
         }));
         self.fb.switch_to(head);
-        let i = self.fb.load(IrTy::U64, i_slot);
         let go = self.fb.bin(BinKind::Lt, i, len);
         self.fb.set_term(Term::Br {
             cond: go,
@@ -2993,10 +3159,8 @@ impl<'l, 'a> FnLower<'l, 'a> {
             },
         });
         self.fb.switch_to(body_bb);
-        let step = self.fb.new_block();
         self.loops.push(LoopTargets { head: step, exit });
         self.push_scope();
-        let i = self.fb.load(IrTy::U64, i_slot);
         let ep = self.fb.push(
             Op::ElemPtr {
                 elem: match elem_agg {
@@ -3031,13 +3195,11 @@ impl<'l, 'a> FnLower<'l, 'a> {
         }
         self.fb.switch_to(step);
         if !self.fb.terminated() {
-            let cur = self.fb.load(IrTy::U64, i_slot);
             let one = self.fb.const_int(1, IrTy::U64);
-            let next = self.fb.bin(BinKind::Add, cur, one);
-            self.fb.store(IrTy::U64, i_slot, next);
+            let next = self.fb.bin(BinKind::Add, i, one);
             self.fb.set_term(Term::Jump(Edge {
                 to: head,
-                args: vec![],
+                args: vec![next],
             }));
         }
         self.fb.switch_to(exit);
@@ -3112,6 +3274,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
         // The condition is evaluated every iteration, so only a divisor that is
         // also invariant of the condition (not assigned there either) hoists.
         let hoisted = self.hoist_recips(&[cond, body], None);
+        let saved_data = self.data_ptrs.clone();
+        let saved_lens = self.len_vals.clone();
+        self.hoist_data_ptrs(body);
         self.fb.set_term(Term::Jump(Edge {
             to: head,
             args: vec![],
@@ -3142,6 +3307,8 @@ impl<'l, 'a> FnLower<'l, 'a> {
             }));
         }
         self.fb.switch_to(exit);
+        self.data_ptrs = saved_data;
+        self.len_vals = saved_lens;
         self.drop_recips(&hoisted);
         Ok(LVal::scalar(self.fb.unit(), IrTy::Unit))
     }
@@ -3336,6 +3503,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 by_ref: true,
                 const_div: false,
                 unique_heap: false,
+                ssa: false,
             },
         );
         let v = self.expr(body)?;
@@ -3802,8 +3970,46 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 else {
                     return Err("native backend: `eq` argument has no data/len".into());
                 };
-                let lp = self.fb.field_ptr(agg, len_i, recv.v);
-                let len = self.fb.load(IrTy::U64, lp);
+                let len = match self.hoisted_len(base) {
+                    Some(v) => v,
+                    None => {
+                        let lp = self.fb.field_ptr(agg, len_i, recv.v);
+                        self.fb.load(IrTy::U64, lp)
+                    }
+                };
+                let known_same = self.same_len_recv(base, &args[0]);
+                let data = match self.hoisted_data(base) {
+                    Some(p) => p,
+                    None => {
+                        let dp = self.fb.field_ptr(agg, data_i, recv.v);
+                        self.fb.load(IrTy::Ptr, dp)
+                    }
+                };
+                let odata = match self.hoisted_data(&args[0]) {
+                    Some(p) => p,
+                    None => {
+                        let odp = self.fb.field_ptr(oagg, odata_i, other.v);
+                        self.fb.load(IrTy::Ptr, odp)
+                    }
+                };
+                if known_same {
+                    let nbytes = if matches!(elem_ir, IrTy::U8 | IrTy::I8 | IrTy::Bool) {
+                        len
+                    } else {
+                        let sz = self.fb.push(Op::SizeOf(elem_size), IrTy::U64);
+                        self.fb.bin(BinKind::Mul, len, sz)
+                    };
+                    let eq = self.fb.push(
+                        Op::CallExt {
+                            name: "ax_rt_mem_eq".into(),
+                            args: vec![data, odata, nbytes],
+                            ret: IrTy::Bool,
+                            fallible: false,
+                        },
+                        IrTy::Bool,
+                    );
+                    return Ok(Some(LVal::scalar(eq, IrTy::Bool)));
+                }
                 let olp = self.fb.field_ptr(oagg, olen_i, other.v);
                 let olen = self.fb.load(IrTy::U64, olp);
                 let same = self.fb.bin(BinKind::Eq, len, olen);
@@ -3828,12 +4034,14 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     args: vec![f],
                 }));
                 self.fb.switch_to(cmp_b);
-                let dp = self.fb.field_ptr(agg, data_i, recv.v);
-                let data = self.fb.load(IrTy::Ptr, dp);
-                let odp = self.fb.field_ptr(oagg, odata_i, other.v);
-                let odata = self.fb.load(IrTy::Ptr, odp);
-                let sz = self.fb.push(Op::SizeOf(elem_size), IrTy::U64);
-                let nbytes = self.fb.bin(BinKind::Mul, len, sz);
+                // Byte vectors are already a length in bytes; a `sizeof`
+                // multiply just hides `memcmp(a, b, n)` from clang.
+                let nbytes = if matches!(elem_ir, IrTy::U8 | IrTy::I8 | IrTy::Bool) {
+                    len
+                } else {
+                    let sz = self.fb.push(Op::SizeOf(elem_size), IrTy::U64);
+                    self.fb.bin(BinKind::Mul, len, sz)
+                };
                 let eq = self.fb.push(
                     Op::CallExt {
                         name: "ax_rt_mem_eq".into(),
@@ -3990,6 +4198,16 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     ret: IrTy::Unit,
                     fallible: false,
                 });
+                if let Some(name) = recv_path_name(base) {
+                    if let Some(k) = const_int_of(&args[0]) {
+                        let prev = self.reserved_cap.get(&name).copied().unwrap_or(0);
+                        if k > prev {
+                            self.reserved_cap.insert(name, k);
+                        }
+                    } else {
+                        self.reserved_cap.remove(&name);
+                    }
+                }
                 Ok(Some(LVal::scalar(self.fb.unit(), IrTy::Unit)))
             }
             "push" => {
@@ -3998,45 +4216,79 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 // that `memcpy`s the element made every push an out-of-line call
                 // for no reason — the layout is known here.
                 let val = self.expr(&args[0])?;
-                let cap_i = a
-                    .field_index("cap")
-                    .ok_or("native backend: `push` needs a Vec, which has `cap`")?;
-                let lp = self.fb.field_ptr(agg, len_i, recv.v);
-                let len = self.fb.load(IrTy::U64, lp);
-                let cp = self.fb.field_ptr(agg, cap_i, recv.v);
-                let cap = self.fb.load(IrTy::U64, cp);
-                let full = self.fb.bin(BinKind::Eq, len, cap);
-                let grow_b = self.fb.new_block();
-                let store_b = self.fb.new_block();
-                self.fb.set_term(Term::Br {
-                    cond: full,
-                    then_e: Edge {
-                        to: grow_b,
-                        args: vec![],
-                    },
-                    else_e: Edge {
+                let recv_name = recv_path_name(base);
+                let covered = recv_name.is_some_and(|n| {
+                    self.no_grow.contains(&n)
+                        || match (self.known_len.get(&n), self.reserved_cap.get(&n)) {
+                            (Some(len), Some(cap)) => *len < *cap,
+                            _ => false,
+                        }
+                });
+                let (data, len2) = if covered {
+                    // Data cannot move, but `len` changes each push — never
+                    // reuse a hoisted length as the store index.
+                    let data = match self.hoisted_data(base) {
+                        Some(p) => p,
+                        None => {
+                            let dp = self.fb.field_ptr(agg, data_i, recv.v);
+                            self.fb.load(IrTy::Ptr, dp)
+                        }
+                    };
+                    let lp = self.fb.field_ptr(agg, len_i, recv.v);
+                    let len = self.fb.load(IrTy::U64, lp);
+                    (data, len)
+                } else {
+                    let cap_i = a
+                        .field_index("cap")
+                        .ok_or("native backend: `push` needs a Vec, which has `cap`")?;
+                    let lp = self.fb.field_ptr(agg, len_i, recv.v);
+                    let len = self.fb.load(IrTy::U64, lp);
+                    let cp = self.fb.field_ptr(agg, cap_i, recv.v);
+                    let cap = self.fb.load(IrTy::U64, cp);
+                    let full = self.fb.bin(BinKind::Eq, len, cap);
+                    let grow_b = self.fb.new_block();
+                    let store_b = self.fb.new_block();
+                    self.fb.set_term(Term::Br {
+                        cond: full,
+                        then_e: Edge {
+                            to: grow_b,
+                            args: vec![],
+                        },
+                        else_e: Edge {
+                            to: store_b,
+                            args: vec![],
+                        },
+                    });
+                    self.fb.switch_to(grow_b);
+                    let sz = self.fb.push(Op::SizeOf(elem_size), IrTy::U64);
+                    self.fb.push_void(Op::CallExt {
+                        name: "ax_rt_vec_grow".into(),
+                        args: vec![recv.v, sz],
+                        ret: IrTy::Unit,
+                        fallible: false,
+                    });
+                    self.fb.set_term(Term::Jump(Edge {
                         to: store_b,
                         args: vec![],
-                    },
-                });
-                self.fb.switch_to(grow_b);
-                let sz = self.fb.push(Op::SizeOf(elem_size), IrTy::U64);
-                self.fb.push_void(Op::CallExt {
-                    name: "ax_rt_vec_grow".into(),
-                    args: vec![recv.v, sz],
-                    ret: IrTy::Unit,
-                    fallible: false,
-                });
-                self.fb.set_term(Term::Jump(Edge {
-                    to: store_b,
-                    args: vec![],
-                }));
-                self.fb.switch_to(store_b);
-                // Reload data and len: growth may have moved the buffer.
-                let dp = self.fb.field_ptr(agg, data_i, recv.v);
-                let data = self.fb.load(IrTy::Ptr, dp);
-                let lp2 = self.fb.field_ptr(agg, len_i, recv.v);
-                let len2 = self.fb.load(IrTy::U64, lp2);
+                    }));
+                    self.fb.switch_to(store_b);
+                    // Reload data and len: growth may have moved the buffer.
+                    let dp = self.fb.field_ptr(agg, data_i, recv.v);
+                    let data = self.fb.load(IrTy::Ptr, dp);
+                    let lp2 = self.fb.field_ptr(agg, len_i, recv.v);
+                    let len2 = self.fb.load(IrTy::U64, lp2);
+                    (data, len2)
+                };
+                if let Some(n) = recv_name {
+                    if !self.no_grow.contains(&n) {
+                        match self.known_len.get_mut(&n) {
+                            Some(len) => *len += 1,
+                            None => {
+                                self.known_len.remove(&n);
+                            }
+                        }
+                    }
+                }
                 let ep = self.fb.push(
                     Op::ElemPtr {
                         elem: elem_size,
@@ -5474,6 +5726,120 @@ fn expr_is_map_new(e: &Expr, intern: &Interner) -> bool {
     }
 }
 
+fn expr_is_vec_new(e: &Expr, intern: &Interner) -> bool {
+    match &e.kind {
+        ExprKind::Call { callee, .. } => {
+            callee_name(callee, intern).is_some_and(|n| n == "vec.new" || n.ends_with(".vec.new"))
+        }
+        _ => false,
+    }
+}
+
+fn recv_path_name(e: &Expr) -> Option<Symbol> {
+    match &e.kind {
+        ExprKind::Path(p) if p.segs.len() == 1 => Some(p.segs[0].name),
+        _ => None,
+    }
+}
+
+fn const_int_of(e: &Expr) -> Option<i128> {
+    match &e.kind {
+        ExprKind::Lit(Lit::Int { value, .. }) => Some(*value),
+        _ => None,
+    }
+}
+
+fn const_range_iters(iter: &Expr, intern: &Interner) -> Option<i128> {
+    let ExprKind::Call { callee, args } = &iter.kind else {
+        return None;
+    };
+    if callee_name(callee, intern).as_deref() != Some("range") || args.len() != 2 {
+        return None;
+    }
+    let lo = const_int_of(&args[0])?;
+    let hi = const_int_of(&args[1])?;
+    if hi >= lo {
+        Some(hi - lo)
+    } else {
+        Some(0)
+    }
+}
+
+/// Mark receivers whose `n` guaranteed `push`es still fit in reserved
+/// capacity, so the loop body can drop the grow check.
+fn mark_covered_pushes(
+    e: &Expr,
+    n: i128,
+    reserved: &HashMap<Symbol, i128>,
+    known: &HashMap<Symbol, i128>,
+    no_grow: &mut HashSet<Symbol>,
+    intern: &Interner,
+) {
+    let mut next = known.clone();
+    apply_covered_pushes(e, n, reserved, &mut next, intern);
+    for (name, after) in &next {
+        if let (Some(before), Some(cap)) = (known.get(name), reserved.get(name)) {
+            if *after > *before && *after <= *cap {
+                no_grow.insert(*name);
+            }
+        }
+    }
+}
+
+/// Charge `n` guaranteed `push`es in `e` against `known_len` when the
+/// reserved capacity still covers them. An `if` contributes the min of
+/// both sides (no `else` means zero).
+fn apply_covered_pushes(
+    e: &Expr,
+    n: i128,
+    reserved: &HashMap<Symbol, i128>,
+    known: &mut HashMap<Symbol, i128>,
+    intern: &Interner,
+) {
+    match &e.kind {
+        ExprKind::Call { callee, args } => {
+            if let Some(recv) = push_receiver(callee, intern) {
+                if let (Some(len), Some(cap)) = (known.get(&recv).copied(), reserved.get(&recv).copied()) {
+                    if len + n <= cap {
+                        known.insert(recv, len + n);
+                    }
+                }
+            }
+            for a in args {
+                apply_covered_pushes(a, n, reserved, known, intern);
+            }
+        }
+        ExprKind::Block { stmts, tail } => {
+            for s in stmts {
+                match &s.kind {
+                    StmtKind::Expr(x) => apply_covered_pushes(x, n, reserved, known, intern),
+                    StmtKind::Let(l) => apply_covered_pushes(&l.init, n, reserved, known, intern),
+                }
+            }
+            if let Some(t) = tail {
+                apply_covered_pushes(t, n, reserved, known, intern);
+            }
+        }
+        ExprKind::If { then_b, else_b, .. } => {
+            let Some(el) = else_b else {
+                return;
+            };
+            let mut then_k = known.clone();
+            let mut else_k = known.clone();
+            apply_covered_pushes(then_b, n, reserved, &mut then_k, intern);
+            apply_covered_pushes(el, n, reserved, &mut else_k, intern);
+            let names: Vec<Symbol> = known.keys().copied().collect();
+            for name in names {
+                let base = known[&name];
+                let t = then_k.get(&name).copied().unwrap_or(base);
+                let e = else_k.get(&name).copied().unwrap_or(base);
+                known.insert(name, t.min(e));
+            }
+        }
+        _ => {}
+    }
+}
+
 fn path_text(p: &Path, intern: &Interner) -> String {
     p.segs
         .iter()
@@ -5993,6 +6359,28 @@ fn walk_assigns(e: &Expr, name: Symbol, found: &mut bool) {
 /// reads can use the incoming value directly.
 fn param_needs_slot(body: &Expr, name: Symbol) -> bool {
     assigns_to(body, name) || takes_address_of(body, name)
+}
+
+/// Names whose address is taken anywhere in `e`. Those still need a slot.
+fn collect_addressed(e: &Expr) -> HashSet<Symbol> {
+    let mut out = HashSet::new();
+    walk_addressed(e, &mut out);
+    out
+}
+
+fn walk_addressed(e: &Expr, out: &mut HashSet<Symbol>) {
+    if let ExprKind::Unary {
+        op: UnOp::Ref | UnOp::RefMut,
+        expr,
+    } = &e.kind
+    {
+        if let ExprKind::Path(p) = &expr.kind {
+            if let Some(s) = p.segs.first() {
+                out.insert(s.name);
+            }
+        }
+    }
+    each_child(e, &mut |c| walk_addressed(c, out));
 }
 
 fn takes_address_of(e: &Expr, name: Symbol) -> bool {

@@ -26,6 +26,7 @@ pub fn emit(p: &Program) -> Result<String, String> {
     let mut e = Emit {
         p,
         out: String::with_capacity(16 * 1024),
+        slot_of: std::collections::HashMap::new(),
     };
     e.program()?;
     Ok(e.out)
@@ -34,6 +35,9 @@ pub fn emit(p: &Program) -> Result<String, String> {
 struct Emit<'a> {
     p: &'a Program,
     out: String,
+    /// Slot index of a `vN` that is `&sK` for a scalar slot. Load/store
+    /// through it becomes `sK` so clang can keep the local in a register.
+    slot_of: std::collections::HashMap<ValId, u32>,
 }
 
 /// C type name for a machine type.
@@ -86,7 +90,9 @@ impl<'a> Emit<'a> {
         // lives entirely in axrt.
         self.out.push_str("#include <stdio.h>\n");
         // For `offsetof` in layout descriptors.
-        self.out.push_str("#include <stddef.h>\n\n");
+        self.out.push_str("#include <stddef.h>\n");
+        // Direct `memcmp` for `xs.eq(ys)` (see CallExt ax_rt_mem_eq).
+        self.out.push_str("#include <string.h>\n\n");
         self.aggs();
         self.strings();
         self.descriptors();
@@ -382,6 +388,7 @@ impl<'a> Emit<'a> {
         if f.memoize {
             self.memo_wrapper(f);
         }
+        self.slot_of.clear();
         let sig = self.body_signature(f);
         let _ = writeln!(self.out, "{sig} {{");
 
@@ -416,15 +423,104 @@ impl<'a> Emit<'a> {
             self.out.push_str("    (void)0;\n");
         }
 
-        for b in &f.blocks {
+        let loops = find_counted_loops(f);
+        let skip = counted_skip_set(f, &loops);
+        let mut i = 0;
+        while i < f.blocks.len() {
+            let b = &f.blocks[i];
+            if skip.contains(&b.id) {
+                i += 1;
+                continue;
+            }
             let _ = writeln!(self.out, "bb{}: ;", b.id);
             for inst in &b.insts {
                 self.inst(f, inst)?;
             }
-            self.term(f, &b.term)?;
+            if let Some(lp) = jump_into_counted(&b.term, &loops) {
+                self.emit_counted_for(f, lp, &loops)?;
+            } else {
+                self.term(f, &b.term)?;
+            }
+            i += 1;
         }
         self.out.push_str("}\n\n");
         Ok(())
+    }
+
+    /// `v_i = lo; for (; v_i < hi; v_i++) { body }` then jump to the exit.
+    fn emit_counted_for(
+        &mut self,
+        f: &Func,
+        lp: &CountedLoop,
+        loops: &[CountedLoop],
+    ) -> Result<(), String> {
+        let i = lp.ind;
+        let _ = writeln!(self.out, "    v{i} = v{};", lp.lo);
+        let _ = writeln!(self.out, "    for (; v{i} < v{}; v{i}++) {{", lp.hi);
+        // Body entry first, then the other blocks that stay inside this
+        // `for`. Nested counted loops are emitted as nested `for`s from
+        // the jump that enters them, not as raw members.
+        let mut members = counted_body_blocks(f, lp, loops);
+        members.retain(|id| *id != lp.body);
+        members.insert(0, lp.body);
+        for bid in members {
+            if bid != lp.body {
+                let _ = writeln!(self.out, "bb{}: ;", bid);
+            }
+            let b = f.block(bid);
+            for inst in &b.insts {
+                self.inst(f, inst)?;
+            }
+            if let Some(inner) = jump_into_counted(&b.term, loops).filter(|n| n.head != lp.head) {
+                self.emit_counted_for(f, inner, loops)?;
+            } else if bid == lp.body && matches!(&b.term, Term::Jump(e) if e.to == lp.step) {
+                // Fall through to the `for` increment. A trailing `continue`
+                // is a no-op that still hides the reduction from clang.
+            } else {
+                self.term_in_loop(f, &b.term, lp)?;
+            }
+        }
+        self.out.push_str("    }\n");
+        let _ = writeln!(self.out, "    goto bb{};", lp.exit);
+        Ok(())
+    }
+
+    /// Like [`Self::term`], but a jump to this loop's step is `continue`
+    /// and a jump to its exit is `break`, so clang sees a real `for`.
+    fn term_in_loop(&mut self, f: &Func, t: &Term, lp: &CountedLoop) -> Result<(), String> {
+        match t {
+            Term::Jump(e) if e.to == lp.step => {
+                self.out.push_str("    continue;\n");
+                Ok(())
+            }
+            Term::Jump(e) if e.to == lp.exit => {
+                self.out.push_str("    break;\n");
+                Ok(())
+            }
+            Term::Br {
+                cond,
+                then_e,
+                else_e,
+            } => {
+                let _ = writeln!(self.out, "    if (v{cond}) {{");
+                self.edge_in_loop(f, then_e, lp, "        ");
+                self.out.push_str("    } else {\n");
+                self.edge_in_loop(f, else_e, lp, "        ");
+                self.out.push_str("    }\n");
+                Ok(())
+            }
+            other => self.term(f, other),
+        }
+    }
+
+    fn edge_in_loop(&mut self, f: &Func, e: &Edge, lp: &CountedLoop, indent: &str) {
+        if e.to == lp.step {
+            let _ = writeln!(self.out, "{indent}continue;");
+        } else if e.to == lp.exit {
+            let _ = writeln!(self.out, "{indent}break;");
+        } else {
+            self.edge(f, e, indent);
+        }
     }
 
     fn inst(&mut self, f: &Func, i: &Inst) -> Result<(), String> {
@@ -496,9 +592,19 @@ impl<'a> Emit<'a> {
                 set!(s);
             }
             Op::Select { c, a, b } => set!(format!("(v{c} ? v{a} : v{b})")),
-            Op::Load { ty, ptr } => set!(format!("*({} *)v{ptr}", cty(*ty))),
+            Op::Load { ty, ptr } => {
+                if let Some(s) = self.slot_of.get(ptr) {
+                    set!(format!("s{s}"));
+                } else {
+                    set!(format!("*({} *)v{ptr}", cty(*ty)));
+                }
+            }
             Op::Store { ty, ptr, val } => {
-                let _ = writeln!(self.out, "    *({} *)v{ptr} = v{val};", cty(*ty));
+                if let Some(s) = self.slot_of.get(ptr) {
+                    let _ = writeln!(self.out, "    s{s} = v{val};");
+                } else {
+                    let _ = writeln!(self.out, "    *({} *)v{ptr} = v{val};", cty(*ty));
+                }
             }
             Op::FieldPtr { agg, field, ptr } => {
                 let acc = self.access(*agg, *field);
@@ -515,7 +621,24 @@ impl<'a> Emit<'a> {
                 let n = agg_name(*ty);
                 let _ = writeln!(self.out, "    *({n} *)v{d} = *(const {n} *)v{src};");
             }
-            Op::SlotAddr(s) => set!(format!("(void *)&s{s}")),
+            Op::SlotAddr(s) => {
+                if let Some(v) = dst {
+                    if matches!(
+                        f.slots.get(*s as usize).map(|si| &si.kind),
+                        Some(Repr::Scalar(_))
+                    ) {
+                        self.slot_of.insert(v, *s);
+                    }
+                    // Only materialise `&sN` when something other than load/store
+                    // uses the pointer. Otherwise clang sees an address-taken
+                    // accumulator and will not vectorise the reduction.
+                    if slot_addr_escapes(f, v) {
+                        set!(format!("(void *)&s{s}"));
+                    }
+                } else {
+                    set!(format!("(void *)&s{s}"));
+                }
+            }
             Op::FuncAddr(fid) => set!(format!("(void *)&{}", self.p.func(*fid).name)),
             Op::RegionEnter(r) => {
                 let _ = writeln!(self.out, "    ax_arena_init(&r{r});");
@@ -590,6 +713,15 @@ impl<'a> Emit<'a> {
                 ret,
                 fallible: _,
             } => {
+                // `eq` is a libc memcmp. Calling through `ax_rt_mem_eq` hid
+                // the compare from clang and added a per-call sizeof/wrapper.
+                if name == "ax_rt_mem_eq" && args.len() == 3 {
+                    set!(format!(
+                        "(memcmp(v{}, v{}, (size_t)v{}) == 0)",
+                        args[0], args[1], args[2]
+                    ));
+                    return Ok(());
+                }
                 let argv: Vec<String> = args.iter().map(|a| format!("v{a}")).collect();
                 let call = format!("{name}({})", argv.join(", "));
                 if *ret == IrTy::Unit || dst.is_none() {
@@ -1044,4 +1176,289 @@ fn field_kind(f: &FieldDef) -> Option<&'static str> {
         IrTy::Bool => "AX_FLD_BOOL",
         IrTy::Unit | IrTy::Ptr => return None,
     })
+}
+
+/// A counted range-`for` in SSA: head has `i` as its only param, compares
+/// `i < hi`, body is one block that jumps to step, step does `i+1` and
+/// jumps back to head.
+struct CountedLoop {
+    head: BlockId,
+    body: BlockId,
+    step: BlockId,
+    exit: BlockId,
+    ind: ValId,
+    lo: ValId,
+    hi: ValId,
+}
+
+/// Does `addr` escape as a pointer, or is it only fed to load/store?
+fn slot_addr_escapes(f: &Func, addr: ValId) -> bool {
+    for b in &f.blocks {
+        for inst in &b.insts {
+            match &inst.op {
+                Op::Load { ptr, .. } if *ptr == addr => {}
+                Op::Store { ptr, .. } if *ptr == addr => {}
+                Op::SlotAddr(_) if inst.result() == Some(addr) => {}
+                other if op_uses(other, addr) => return true,
+                _ => {}
+            }
+        }
+        if term_uses(&b.term, addr) {
+            return true;
+        }
+    }
+    false
+}
+
+fn op_uses(op: &Op, v: ValId) -> bool {
+    match op {
+        Op::Bin { l, r, .. } => *l == v || *r == v,
+        Op::Un { v: x, .. } | Op::Cast { v: x, .. } => *x == v,
+        Op::Select { c, a, b } => *c == v || *a == v || *b == v,
+        Op::Load { ptr, .. } => *ptr == v,
+        Op::Store { ptr, val, .. } => *ptr == v || *val == v,
+        Op::FieldPtr { ptr, .. } => *ptr == v,
+        Op::ElemPtr { ptr, idx, .. } => *ptr == v || *idx == v,
+        Op::CopyAgg { dst, src, .. } => *dst == v || *src == v,
+        Op::Call { args, .. } | Op::CallExt { args, .. } => args.contains(&v),
+        Op::CallIndirect { ptr, args, .. } => *ptr == v || args.contains(&v),
+        Op::RegionAlloc { size, .. } | Op::UniqueAlloc { size, .. } => *size == v,
+        Op::UniqueFree(p) | Op::RcRetain(p) | Op::RcRelease(p) => *p == v,
+        Op::RcAlloc { size, .. } => *size == v,
+        _ => false,
+    }
+}
+
+fn term_uses(t: &Term, v: ValId) -> bool {
+    match t {
+        Term::Jump(e) => e.args.contains(&v),
+        Term::Br {
+            cond,
+            then_e,
+            else_e,
+        } => *cond == v || then_e.args.contains(&v) || else_e.args.contains(&v),
+        Term::Switch { on, cases, default } => {
+            *on == v || default.args.contains(&v) || cases.iter().any(|(_, e)| e.args.contains(&v))
+        }
+        Term::Ret(Some(x)) | Term::RetErr(x) => *x == v,
+        _ => false,
+    }
+}
+
+fn jump_into_counted<'a>(t: &Term, loops: &'a [CountedLoop]) -> Option<&'a CountedLoop> {
+    match t {
+        Term::Jump(e) => loops.iter().find(|l| l.head == e.to),
+        _ => None,
+    }
+}
+
+fn find_counted_loops(f: &Func) -> Vec<CountedLoop> {
+    let mut out = Vec::new();
+    for b in &f.blocks {
+        let Some(lp) = match_counted_loop(f, b) else {
+            continue;
+        };
+        out.push(lp);
+    }
+    out
+}
+
+fn match_counted_loop(f: &Func, head: &Block) -> Option<CountedLoop> {
+    if head.params.len() != 1 {
+        return None;
+    }
+    let ind = head.params[0];
+    if f.ty_of(ind) != IrTy::U64 {
+        return None;
+    }
+    // Head: optional compare, then `if i < hi { body } else { exit }`.
+    let Term::Br {
+        cond,
+        then_e,
+        else_e,
+    } = &head.term
+    else {
+        return None;
+    };
+    if !then_e.args.is_empty() || !else_e.args.is_empty() {
+        return None;
+    }
+    let hi = find_lt_rhs(head, *cond, ind)?;
+    let body_id = then_e.to;
+    let step = find_step_from_body(f, body_id, head.id)?;
+    let Term::Jump(back) = &step.term else {
+        return None;
+    };
+    if back.to != head.id || back.args.len() != 1 {
+        return None;
+    }
+    // Step must define `next = i + 1` (or wrap-add of a constant 1).
+    if !is_add1(step, back.args[0], ind) {
+        return None;
+    }
+    // The incoming `lo` is whatever the unique predecessor passes. We take
+    // it from the first jump we see into `head`; every such jump must pass
+    // either `lo` (entry) or `next` (latch). The C `for` uses the entry arg.
+    let lo = incoming_lo(f, head.id, back.args[0])?;
+    Some(CountedLoop {
+        head: head.id,
+        body: body_id,
+        step: step.id,
+        exit: else_e.to,
+        ind,
+        lo,
+        hi,
+    })
+}
+
+fn find_lt_rhs(head: &Block, cond: ValId, ind: ValId) -> Option<ValId> {
+    for inst in &head.insts {
+        if inst.result() != Some(cond) {
+            continue;
+        }
+        if let Op::Bin {
+            op: BinKind::Lt,
+            l,
+            r,
+        } = inst.op
+        {
+            if l == ind {
+                return Some(r);
+            }
+        }
+    }
+    None
+}
+
+fn is_add1(step: &Block, next: ValId, ind: ValId) -> bool {
+    let mut one = None;
+    for inst in &step.insts {
+        if let Op::ConstInt(1) = inst.op {
+            if let Some(v) = inst.result() {
+                one = Some(v);
+            }
+        }
+        if inst.result() == Some(next) {
+            if let Op::Bin {
+                op: BinKind::Add,
+                l,
+                r,
+            } = inst.op
+            {
+                return (l == ind && Some(r) == one) || (r == ind && Some(l) == one);
+            }
+        }
+    }
+    false
+}
+
+/// Walk from `body` until we find the unique block that jumps back to `head`
+/// with `i+1`. Every path from `body` must reach that step (or diverge).
+fn find_step_from_body<'a>(f: &'a Func, body: BlockId, head: BlockId) -> Option<&'a Block> {
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![body];
+    let mut step = None;
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let b = f.block(id);
+        match &b.term {
+            Term::Jump(e)
+                if e.to == head
+                    && e.args.len() == 1
+                    && is_add1(b, e.args[0], f.block(head).params[0]) =>
+            {
+                if step.is_some() && step.map(|s: &Block| s.id) != Some(id) {
+                    return None;
+                }
+                step = Some(b);
+            }
+            Term::Jump(e) => {
+                if e.to != head {
+                    stack.push(e.to);
+                }
+            }
+            Term::Br { then_e, else_e, .. } => {
+                stack.push(then_e.to);
+                stack.push(else_e.to);
+            }
+            Term::Abort(_) | Term::Ret(_) | Term::RetErr(_) | Term::Unreachable => {}
+            Term::Switch { cases, default, .. } => {
+                for (_, e) in cases {
+                    stack.push(e.to);
+                }
+                stack.push(default.to);
+            }
+        }
+    }
+    step
+}
+
+fn counted_skip_set(f: &Func, loops: &[CountedLoop]) -> std::collections::HashSet<BlockId> {
+    let mut skip = std::collections::HashSet::new();
+    for lp in loops {
+        skip.insert(lp.head);
+        skip.insert(lp.step);
+        for id in counted_body_blocks(f, lp, loops) {
+            skip.insert(id);
+        }
+    }
+    skip
+}
+
+fn counted_body_blocks(f: &Func, lp: &CountedLoop, loops: &[CountedLoop]) -> Vec<BlockId> {
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![lp.body];
+    let mut out = Vec::new();
+    while let Some(id) = stack.pop() {
+        if id == lp.head || id == lp.step || id == lp.exit {
+            continue;
+        }
+        if let Some(nested) = loops.iter().find(|n| n.head == id && n.head != lp.head) {
+            // Resume after the nested `for`; do not flatten its internals.
+            stack.push(nested.exit);
+            continue;
+        }
+        if !seen.insert(id) {
+            continue;
+        }
+        out.push(id);
+        let b = f.block(id);
+        match &b.term {
+            Term::Jump(e) => stack.push(e.to),
+            Term::Br { then_e, else_e, .. } => {
+                stack.push(then_e.to);
+                stack.push(else_e.to);
+            }
+            Term::Switch { cases, default, .. } => {
+                for (_, e) in cases {
+                    stack.push(e.to);
+                }
+                stack.push(default.to);
+            }
+            _ => {}
+        }
+    }
+    out.sort();
+    out
+}
+
+fn incoming_lo(f: &Func, head: BlockId, next: ValId) -> Option<ValId> {
+    for b in &f.blocks {
+        if b.id == head {
+            continue;
+        }
+        let edges: Vec<&Edge> = match &b.term {
+            Term::Jump(e) => vec![e],
+            Term::Br { then_e, else_e, .. } => vec![then_e, else_e],
+            _ => continue,
+        };
+        for e in edges {
+            if e.to == head && e.args.len() == 1 && e.args[0] != next {
+                return Some(e.args[0]);
+            }
+        }
+    }
+    None
 }

@@ -2802,4 +2802,20 @@ intrinsic. That is the next honest step; it is not done.
 Still behind the 15% C band: `memcmp` 1.28x, `tokenize` 1.35x, `dot`
 ~1.22x. Ax is ahead of Rust and Go on all three.
 
+### Pass 9 — clang-shaped C: SSA indexes, structured `for`, no dead slots
+
+- Range-`for` index is a block parameter, not a slot. The C backend
+  emits `for (; i < hi; i++)` when the CFG is a counted loop, including
+  bodies that branch internally (`continue`/`break`).
+- Immutable unaddressed `let`s stay SSA. Scalar slot load/store is
+  `sN`, not `*(T*)v`. `xs.eq(ys)` is a direct `memcmp`.
+- `reserve(N)` then `for i in range(0, N) { push }` drops the grow
+  check (`reserve_covers_counted_push.ax`). Fill loops stay a store
+  through a hoisted `data` pointer.
+- tokenize 1.35x → 0.89x. memcmp 1.28x → 0.79x. filter 0.89x,
+  prefix_sum 1.01x, reverse 1.04x. `dot` is still ~1.4x C: the
+  reduction is `s4 = s4 + xs[i]*ys[i]` without `&s4`, but clang
+  still does not vectorise wrapping `u64` mul-add the way it does
+  the handwritten C `s += …`.
+
 "#;

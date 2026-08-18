@@ -27,8 +27,8 @@ fn bench_tokens() -> Result<(), String> {
     println!("  token; two-char operators are one; a newline is one. Bytes are exact.\n");
 
     let mut md = String::from(
-        "# Token cost\n\nSame program in each language. `ax` is the language \
-         (short syntax). `ax-conv` is the corpus dialect. `ax-terse` is a \
+        "# Token cost\n\nSame program in each language. `ax` is Ax. \
+         `ax-conv` is the corpus dialect (not what you write). `ax-terse` is a \
          mechanical strip of conventional.\n\n         | program | ax-conv | terse | ax | rust | go | c | terse/conv | ax/conv | rust/conv |\n         |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n",
     );
 

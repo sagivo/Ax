@@ -1,0 +1,12 @@
+//! expect: 28usz
+// `reserve(N)` then `for i in range(0, N) { push }` must keep every element.
+// The grow check is dead; dropping it must not write every store at index 0.
+module conf.opt.reserve_covers_counted_push;
+fn main() -> usz !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.reserve(8usz);
+    for i in range(0, 8) { xs.push(i); };
+    let mut s = 0usz;
+    for i in range(0, xs.len()) { s = s + xs.at(i); };
+    s
+};

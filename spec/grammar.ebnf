@@ -1,11 +1,11 @@
 (*
   Ax language — corpus dialect grammar (v0.2 / research-v1).
 
-  The language is the short syntax in spec/dense.md (default parse
-  and ax fmt). A file that opens with `(` is the prefix tree in
-  spec/tree.md. This file is the Rust-shaped dialect the existing
-  corpus still uses so the four backends keep proving the same IR.
-  It is not the language an agent writes. See DECISIONS.md R-14 / R-16.
+  The language is spec/dense.md (default parse and ax fmt). A file
+  that opens with `(` is the prefix tree in spec/tree.md. This file
+  is the Rust-shaped dialect the existing corpus still uses so the
+  four backends keep proving the same IR. It is not Ax.
+  See DECISIONS.md R-14 / R-16.
 
   A grammar that disagrees with a corpus example is a build failure.
 *)

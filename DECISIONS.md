@@ -144,7 +144,55 @@ No IR, lowering, or runtime change. R-13.9 does not fire on M2 /
 silent-wrongness: the desugar is the existing loop. Proxy tokenizer
 treats `+=` and `+/` as one token (vocabularies already carry them).
 
-Rejected in this pass, and why:
+## R-18 — increment, len glyph, index pack (2026-08-18)
+
+Still surface-first. Three more K/C spellings, plus one lowering
+alignment so the pack cannot cost a check.
+
+- `s++` / `s--` expand to `s = s + 1` / `s = s - 1`. `ax fmt`
+  packs `+= 1` / `-= 1` (and the long form) back to `++` / `--`.
+- `xs#` expands to `xs.len()`. `i~xs#` is `for i in range(0, xs.len())`.
+- `xs.at(i)` packs to `xs[i]`. Index already existed; lowering of
+  `ExprKind::Index` now uses the same `bounded_by` proof as `at`,
+  so a `for i in range(0, xs.len())` walk does not grow a compare
+  when the agent writes `xs[i]`. Unproven index still aborts.
+
+## R-19 — `+/xs#` and `[]` (2026-08-18)
+
+R-17 deferred `+/xs` because it needed `at` + a length. Those
+spellings exist now (`xs#`, `xs[i]` / `.at`, check-elision).
+
+- `+/xs#` / `*/xs#` expand to `for i in range(0, xs.len()) { s = s ± xs.at(i) }`
+  with `s: usz` init 0/1. That is exactly the loop `index_fact`
+  already proves, so the C backend sees the same check-free walk
+  as writing it out. Empty vec is the identity.
+- `[]` after `=` / `,` / `(` / `{` / `;` is `vec.new(test.alloc)`,
+  matching `%` for maps. `M[S, L]` is still a type; the previous
+  byte is an ident there, not an opener.
+
+## R-20 — map/vec put and get index (2026-08-18)
+
+The map-build use case was still 75 tokens, mostly `.insert` / `.get`.
+K and Go write `m[k]:v` / `m[k]=v`. ASCII `<-` is already one
+proxy token (and a common BPE unit).
+
+- `m[k]<-v` → `m.insert(k, v)`. `xs<-e` → `xs.push(e)`.
+- `m[k]?d` → `m.get(k)?d` (index + `?` is get, not `at`).
+- `ax fmt` packs those three back. Same AST, same runtime.
+
+## R-21 — vec max/min and index-set (2026-08-18)
+
+- `|/xs#` / `&/xs#` expand to seed `xs.at(0)` then `for i in range(1, xs.len())`
+  pick the greater / lesser. `index_fact` now accepts a non-negative
+  literal lo, so `range(1, len)` still drops the check. Empty vec
+  aborts on `at(0)` — max/min have no identity.
+- `xs[i]<-v` with a non-string index is `xs.set(i, v)`. A string key
+  stays `m.insert`. Index-assign already check-elides; this is the
+  same store.
+
+Still not: tacit/rank, Unicode, reduce over a non-usz Vec.
+
+Rejected in R-17, and why:
 
 - Unicode APL glyphs (`+/` as `+/` is already ASCII). Rare glyphs
   cost more BPE, against the card's ASCII-letter rule.
@@ -152,8 +200,8 @@ Rejected in this pass, and why:
   Density without a new runtime means *spelling*, not a new array
   model. `Map`/`Vec` reductions stay out until they can lower to
   the same loop.
-- `+/xs` over a vector. That would need `xs.at(i)` and a length;
-  not the same IR as `range`, and `at` is a check. Not this change.
+- `+/xs` over a vector was deferred to R-19 once `xs#` / `xs[i]`
+  existed. It is now the same `range(0, xs.len())` walk.
 
 ## Language-change rule (R-13.9)
 
@@ -175,7 +223,7 @@ rate at all, without an entry here.
 
 The v0.3 surface rule ("look like Rust so models can write it") is
 reversed. A file that opens with `(` is the prefix tree (`S-tree`,
-`--surface tree`). The **default** language is the short syntax
+`--surface tree`). The **default** language is Ax
 (R-16). Reasons for keeping the tree,
 from first principles, for a program that writes programs:
 
@@ -203,15 +251,16 @@ holes, the four-implementation oracle, and the protocol were never
 Rust. The tree is the surface those already deserved.
 
 New agent-facing examples may be trees (`examples/*.ax` that open with
-`(`) or short syntax. The card and `spec/v0.3.md` §1 / §3 describe the
-short syntax as the language. The conventional grammar in
+`(`) or Ax. The card and `spec/v0.3.md` §1 / §3 describe Ax as the
+language. The conventional grammar in
 `spec/grammar.ebnf` remains the corpus grammar until the corpus moves.
 
-## R-16 — short syntax is the language (2026-08-18)
+## R-16 — this is Ax (2026-08-18)
 
-The token-minimal pack (`#fn`, `:=`, `$if`, type glyphs) is no longer
-an opt-in dense mode. It is the default session surface and what
-`ax fmt` prints. Detection: `#name(`, `:=`, `$`, `@while`, `i~n`, `+=`, `+/` / `*/`.
+`#name`, `:=`, `$if`, type glyphs is the language, not an opt-in
+mode. It is the default session surface and what `ax fmt` prints.
+Detection: `#name(`, `:=`, `$`, `@while`, `i~n`, `+=`, `++`, `xs#`,
+`+/` / `*/` / `+/xs#` / `|/xs#` / `&/xs#`, `[]`, `<-`.
 A file that opens with `(` is still the tree. `fn` / `module` / `let`
 corpus files still parse as conventional so existing tests keep
 proving the IR. `--surface ax` is the name; `dense` remains an alias.

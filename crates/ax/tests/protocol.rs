@@ -221,7 +221,7 @@ fn card_snippets_are_descriptive_not_runnable_blocks() {
     let card = ax::driver::card_text();
     assert!(card.contains("#add(") || card.contains("#fn") || card.contains("#name("));
     assert!(card.contains("raise") && card.contains("catch"));
-    assert!(card.contains("short syntax"));
+    assert!(card.contains("This is Ax") || card.contains("#name(a T)"));
 }
 
 #[test]

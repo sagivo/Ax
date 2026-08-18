@@ -116,7 +116,7 @@ pub fn translate_rust(src: &str) -> TranslateReport {
     // Reprint as the language (short syntax) when the stripped source parses.
     let mut intern = crate::intern::Interner::new();
     if let Ok(file) = crate::parser::Parser::parse_file(&out, crate::span::FileId(0), &mut intern) {
-        notes.push("reprinted as Ax short syntax".into());
+        notes.push("reprinted as Ax".into());
         let conv = crate::fmt::format_file(&file, &intern);
         out = crate::frontend::to_dense(&conv);
     }

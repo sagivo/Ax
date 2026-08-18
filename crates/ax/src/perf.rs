@@ -515,11 +515,11 @@ pub struct ContextPack {
 
 pub fn context_pack(intern: &Interner, checked: &CheckOutput, limit: usize) -> ContextPack {
     let cheatsheet = "\
-Ax is the short syntax (`#fn`, `:=`, `$if`, type glyphs I/Z/B).
+Ax (`#name`, `:=`, `$c{t}{e}`, `i~n`, `+/n`, type glyphs I/Z/B).
 - `#add(a I, b I) I = a + b` — a file that opens with `(` is the tree
 - `own T` is affine (use exactly once)
 - `Untrusted[T]` / `Secret[T]` are lattice annotations
-- `raise` / `catch` / `attempt` — no unwinding; `e|d` is Ok/Err
+- `raise` / `catch` / `attempt` — no unwinding; `e|d` is ok/err
 - `region r { … }` is a bump arena
 - no lifetimes, no borrow checker, no macros
 ";

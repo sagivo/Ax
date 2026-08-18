@@ -2,7 +2,7 @@
 
 Same task in Rust, C, Go, and Ax. Token counts use the **in-repo proxy** (`ax::tokens`): letters split at `_` / case / digit boundaries; each punctuation mark is one token except two-char operators (`->`, `:=`, `==` …); a newline is one token; spaces are free. Absolute numbers are not any particular model’s vocabulary; the comparison is identical across languages.
 
-**Ax** is the language (short syntax). Conventional is the corpus dialect, shown only so the same idea can be compared with Rust / C / Go. `ax fmt` prints Ax.
+**Ax** is the language. The Rust-shaped column is the corpus dialect the tests still parse — not what you write. `ax fmt` prints Ax.
 
 ## Summary
 
@@ -10,15 +10,15 @@ Same task in Rust, C, Go, and Ax. Token counts use the **in-repo proxy** (`ax::t
 |---|---:|---:|---:|---:|---:|---:|
 | Add two integers | 24 | 19 | 22 | 22 | 15 | 0.62× |
 | If / else | 24 | 22 | 24 | 22 | 17 | 0.71× |
-| Sum a range | 58 | 52 | 42 | 45 | 11 | 0.19× |
+| Sum a range | 58 | 51 | 41 | 45 | 11 | 0.19× |
 | Recursion | 34 | 31 | 34 | 32 | 26 | 0.76× |
-| Option unwrap-or | 52 | 57 | 41 | 44 | 25 | 0.48× |
-| Map insert + get | 112 | 156 | 56 | 126 | 75 | 0.67× |
+| Option unwrap-or | 52 | 57 | 41 | 44 | 23 | 0.44× |
+| Map insert + get | 112 | 156 | 56 | 126 | 67 | 0.60× |
 | Fallible parse | 35 | 52 | 42 | 48 | 26 | 0.74× |
 | String interpolation | 25 | 37 | 25 | 19 | 16 | 0.64× |
-| **total** | 364 | 426 | 286 | 358 | 211 | 0.58× |
+| **total** | 364 | 425 | 285 | 358 | 201 | 0.55× |
 
-Read the totals as *how much text an agent pays to write the same idea*. **Ax** is the short syntax (the language). Conventional is the corpus dialect, kept so the same idea can be compared with Rust / C / Go.
+Read the totals as *how much text an agent pays to write the same idea*. **Ax** is the language. The Rust-shaped column is the corpus dialect the tests still parse — not what you write.
 
 ## Add two integers
 
@@ -52,7 +52,7 @@ func add(a int32, b int32) int32 {
 }
 ```
 
-**Ax (corpus / conventional)**
+**Corpus dialect (not Ax)**
 
 ```ax
 fn add(a: i32, b: i32) -> i32 = a + b;
@@ -99,7 +99,7 @@ func pick(b bool) int32 {
 }
 ```
 
-**Ax (corpus / conventional)**
+**Corpus dialect (not Ax)**
 
 ```ax
 fn pick(b: bool) -> i32 = if b { 1 } else { 0 };
@@ -116,7 +116,7 @@ Accumulate `0 + 1 + … + (n-1)`.
 
 | rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
-| 58 | 52 | 42 | 45 | 11 |
+| 58 | 51 | 41 | 45 | 11 |
 
 **Rust**
 
@@ -156,7 +156,7 @@ func sum(n uint64) uint64 {
 }
 ```
 
-**Ax (corpus / conventional)**
+**Corpus dialect (not Ax)**
 
 ```ax
 fn sum(n: usz) -> usz = {
@@ -207,7 +207,7 @@ func fac(n int32) int32 {
 }
 ```
 
-**Ax (corpus / conventional)**
+**Corpus dialect (not Ax)**
 
 ```ax
 fn fac(n: i32) -> i32 = if n < 2 { 1 } else { n * fac(n - 1) };
@@ -224,7 +224,7 @@ Read a map entry, default to `0` when missing.
 
 | rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
-| 52 | 57 | 41 | 44 | 25 |
+| 52 | 57 | 41 | 44 | 23 |
 
 **Rust**
 
@@ -258,7 +258,7 @@ func get(m map[string]int64, k string) int64 {
 }
 ```
 
-**Ax (corpus / conventional)**
+**Corpus dialect (not Ax)**
 
 ```ax
 fn get(m: Map[String, i64], k: String) -> i64 =
@@ -268,7 +268,7 @@ fn get(m: Map[String, i64], k: String) -> i64 =
 **Ax**
 
 ```ax
-#get(m M[S, L], k S) L = m.get(k)?0;
+#get(m M[S, L], k S) L = m[k]?0;
 ```
 ## Map insert + get
 
@@ -276,7 +276,7 @@ Allocate a map, insert two keys, return their sum.
 
 | rust | c | go | ax-conv | ax |
 |---:|---:|---:|---:|---:|
-| 112 | 156 | 56 | 126 | 75 |
+| 112 | 156 | 56 | 126 | 67 |
 
 **Rust**
 
@@ -318,7 +318,7 @@ func main() {
 }
 ```
 
-**Ax (corpus / conventional)**
+**Corpus dialect (not Ax)**
 
 ```ax
 fn main() -> i64 !{alloc[a]} = {
@@ -334,7 +334,7 @@ fn main() -> i64 !{alloc[a]} = {
 **Ax**
 
 ```ax
-#main() L !alloc[a] = { m M[S, L]:= %; m.insert("e", 2L); m.insert("o", 3L); e:= m.get("e")?0; o:= m.get("o")?0; e + o };
+#main() L !alloc[a] = { m M[S, L]:= %; m["e"]<-2L; m["o"]<-3L; e:= m["e"]?0; o:= m["o"]?0; e + o };
 ```
 ## Fallible parse
 
@@ -375,7 +375,7 @@ func parseOr(s string) int32 {
 }
 ```
 
-**Ax (corpus / conventional)**
+**Corpus dialect (not Ax)**
 
 ```ax
 fn parse_or(s: String) -> i32 !{err[ParseError]} =
@@ -419,7 +419,7 @@ func greet(name string) string {
 }
 ```
 
-**Ax (corpus / conventional)**
+**Corpus dialect (not Ax)**
 
 ```ax
 fn greet(name: String) -> String = f"hello {name}";
