@@ -1,0 +1,10 @@
+module examples.v03_par;
+export { main };
+
+fn main() -> i32 = {
+    par {
+        let a = 1;
+        let b = 2;
+    };
+    3
+};

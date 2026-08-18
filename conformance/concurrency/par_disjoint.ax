@@ -1,0 +1,4 @@
+//! expect: 3i32
+// `par` with disjoint bindings is accepted and evaluated in lexical order.
+module conf.concurrency.par_disjoint;
+fn main() -> i32 = { par { let a = 1; let b = 2; }; 3 };

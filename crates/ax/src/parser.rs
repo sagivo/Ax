@@ -271,7 +271,43 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
         if which == "impl" || which == "trait" {
-            // Skip the body. Methods inside are not yet first-class.
+            // `impl From<A> for B { … }` becomes a declared injection so `?`
+            // can convert A → B. Other impl/trait bodies are still skipped.
+            let mut injections = Vec::new();
+            if which == "impl" {
+                let n = self.intern.get(name.name);
+                if n == "From" || n == "from" {
+                    let from_ty = if !generics.is_empty() {
+                        TypeExpr {
+                            kind: TypeExprKind::Named {
+                                path: Path {
+                                    segs: vec![generics[0].name.clone()],
+                                    span: generics[0].name.span,
+                                },
+                                args: Vec::new(),
+                            },
+                            span: generics[0].name.span,
+                        }
+                    } else {
+                        TypeExpr {
+                            kind: TypeExprKind::Hole,
+                            span: kw.span,
+                        }
+                    };
+                    // `for Target`
+                    if (self.at(TokenKind::Ident) && self.intern.get(self.cur().symbol) == "for")
+                        || self.at(TokenKind::For)
+                    {
+                        self.bump();
+                        let target = self.parse_ident()?;
+                        injections.push(Injection {
+                            from: from_ty,
+                            into_variant: target,
+                            span: kw.span,
+                        });
+                    }
+                }
+            }
             if self.at(TokenKind::LBrace) {
                 self.skip_balanced_brace()?;
             }
@@ -285,7 +321,7 @@ impl<'a> Parser<'a> {
                     kind: TypeExprKind::Hole,
                     span: kw.span,
                 }),
-                injections: Vec::new(),
+                injections,
             });
         }
         if which == "enum" {

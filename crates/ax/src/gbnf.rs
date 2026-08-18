@@ -128,3 +128,11 @@ pub fn check_parser_subset(n: usize, seed: u64) -> usize {
     }
     fails
 }
+
+/// Spec §1.4.3: both directions. Returns (gen_fail, roundtrip_fail).
+pub fn check_equivalence(n: usize) -> (usize, usize) {
+    (
+        check_generator_parses(n, 1),
+        check_parser_subset(n, 2),
+    )
+}

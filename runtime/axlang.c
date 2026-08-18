@@ -153,6 +153,48 @@ void *ax_alloc_grow(const AxAlloc *a, void *old, uint64_t old_size,
 
 /* ---- vectors ----------------------------------------------------------- */
 
+typedef struct AxMapEntry {
+    char *key;
+    int64_t val;
+    struct AxMapEntry *next;
+} AxMapEntry;
+
+struct AxMap {
+    AxMapEntry *head;
+    uint64_t len;
+};
+
+void ax_rt_map_new(uint64_t _unused, AxMap **out) {
+    (void)_unused;
+    AxMap *m = (AxMap *)calloc(1, sizeof(AxMap));
+    if (!m) ax_abort("out of memory");
+    *out = m;
+}
+
+void ax_rt_map_insert(AxMap *m, const char *key, int64_t val) {
+    if (!m || !key) return;
+    for (AxMapEntry *e = m->head; e; e = e->next) {
+        if (strcmp(e->key, key) == 0) { e->val = val; return; }
+    }
+    AxMapEntry *e = (AxMapEntry *)calloc(1, sizeof(AxMapEntry));
+    if (!e) ax_abort("out of memory");
+    e->key = strdup(key);
+    e->val = val;
+    e->next = m->head;
+    m->head = e;
+    m->len++;
+}
+
+int ax_rt_map_get(AxMap *m, const char *key, int64_t *out) {
+    if (!m || !key) return 0;
+    for (AxMapEntry *e = m->head; e; e = e->next) {
+        if (strcmp(e->key, key) == 0) { if (out) *out = e->val; return 1; }
+    }
+    return 0;
+}
+
+uint64_t ax_rt_map_len(AxMap *m) { return m ? m->len : 0; }
+
 void ax_rt_vec_new(const AxAlloc *a, uint64_t elem_size, AxVec *out) {
     (void)elem_size;
     out->data = NULL;

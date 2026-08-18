@@ -211,6 +211,15 @@ impl Type {
     pub fn i32() -> Self {
         Type::Prim(Prim::I32)
     }
+    pub fn i64() -> Self {
+        Type::Prim(Prim::I64)
+    }
+    pub fn u32() -> Self {
+        Type::Prim(Prim::U32)
+    }
+    pub fn u64() -> Self {
+        Type::Prim(Prim::U64)
+    }
     pub fn usz() -> Self {
         Type::Prim(Prim::Usz)
     }

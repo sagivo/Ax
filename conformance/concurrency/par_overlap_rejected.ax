@@ -1,0 +1,11 @@
+//! expect-error: E0600
+// Overlapping mutable captures are still rejected.
+module conf.concurrency.par_overlap;
+fn main() -> i32 = {
+    let mut x: i32 = 0;
+    par {
+        let a = { x = x + 1; x };
+        let b = { x = x + 2; x };
+    };
+    0
+};

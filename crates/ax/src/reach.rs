@@ -85,6 +85,53 @@ pub fn analyze(intern: &Interner, checked: &CheckOutput) -> CapsReport {
     }
 }
 
+/// Permitted capability set from `ax.toml`. Exceeding it is error `A5001`.
+#[derive(Clone, Debug, Default)]
+pub struct CapBudget {
+    pub allowed: Vec<String>,
+}
+
+impl CapBudget {
+    pub fn from_toml(text: &str) -> Self {
+        let mut allowed = Vec::new();
+        let mut in_caps = false;
+        for line in text.lines() {
+            let t = line.trim();
+            if t == "[caps]" || t == "[capabilities]" {
+                in_caps = true;
+                continue;
+            }
+            if t.starts_with('[') {
+                in_caps = false;
+                continue;
+            }
+            if in_caps {
+                if let Some(rest) = t.strip_prefix("allow") {
+                    for part in rest.split(['=', '[', ']', ',', '"', ' ']) {
+                        let p = part.trim();
+                        if !p.is_empty() && p.chars().all(|c| c.is_ascii_lowercase()) {
+                            allowed.push(p.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        Self { allowed }
+    }
+
+    pub fn check(&self, report: &CapsReport) -> Vec<(String, Vec<String>)> {
+        if self.allowed.is_empty() {
+            return Vec::new();
+        }
+        report
+            .capabilities
+            .iter()
+            .filter(|c| c.reachable && !self.allowed.iter().any(|a| a == &c.cap))
+            .map(|c| (c.cap.clone(), c.path.clone()))
+            .collect()
+    }
+}
+
 fn shortest_path(
     callees: &HashMap<String, Vec<String>>,
     start: &str,

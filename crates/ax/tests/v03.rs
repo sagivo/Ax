@@ -263,3 +263,79 @@ fn formatter_strips_ref_and_pub() {
     assert!(!out.contains("pub "), "{out}");
     assert!(!out.contains("&x"), "{out}");
 }
+
+#[test]
+fn par_disjoint_compiles() {
+    let src = r#"
+module t;
+fn main() -> i32 = { par { let a = 1; let b = 2; }; 3 };
+"#;
+    let (_s, out) = compile(src);
+    assert!(!out.diags.iter().any(|d| d.code == "E0600"));
+}
+
+#[test]
+fn map_insert_get_eval() {
+    let src = r#"
+module t;
+fn main() -> i64 !{alloc[a]} = {
+    let mut m: Map[String, i64] = map.new(test.alloc);
+    m.insert("k", 7i64);
+    match m.get("k") {
+        Some(v) => v;
+        None => 0;
+    }
+};
+"#;
+    let (s, out) = compile(src);
+    let v = ax::driver::run_main(&s.intern, &out, 0).unwrap();
+    assert_eq!(v.as_i128(), 7);
+}
+
+#[test]
+fn declassify_and_to_i64() {
+    let src = r#"
+module t;
+fn main() -> i64 = to_i64(3);
+"#;
+    let (s, out) = compile(src);
+    let v = ax::driver::run_main(&s.intern, &out, 0).unwrap();
+    assert_eq!(v.as_i128(), 3);
+}
+
+#[test]
+fn impl_from_parses() {
+    parse_ok(
+        r#"
+type E = | Wrap;
+impl From[ParseError] for E { }
+fn main() -> i32 { 0 }
+"#,
+    );
+}
+
+#[test]
+fn daemon_check_roundtrip() {
+    let line = r#"{"id":1,"method":"check","params":{"source":"module t;\nfn main() -> i32 = 1;\n"}}"#;
+    let resp = ax::daemon::handle_line(line);
+    assert!(resp.contains("\"ok\":true") || resp.contains("\"ok\": true"), "{resp}");
+}
+
+#[test]
+fn cap_budget_flags_extra() {
+    let src = r#"
+module t;
+fn main() -> u64 !{io[fs], abort} = io.bytesum_file("x");
+"#;
+    let (s, out) = compile(src);
+    let r = ax::reach::analyze(&s.intern, &out);
+    let b = ax::reach::CapBudget::from_toml("[caps]\nallow = [\"fs\"]\n");
+    let extra = b.check(&r);
+    assert!(extra.iter().any(|(c, _)| c == "io"), "{extra:?}");
+}
+
+#[test]
+fn gbnf_equivalence_1k() {
+    let (a, b) = ax::gbnf::check_equivalence(1000);
+    assert_eq!((a, b), (0, 0));
+}

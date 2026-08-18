@@ -260,6 +260,12 @@ typedef struct {
 } AxSlice;
 
 void ax_rt_vec_new(const AxAlloc *a, uint64_t elem_size, AxVec *out);
+/* Opaque hash map (string keys, i64 values) for v0.3 Map[K,V]. */
+typedef struct AxMap AxMap;
+void ax_rt_map_new(uint64_t _unused, AxMap **out);
+void ax_rt_map_insert(AxMap *m, const char *key, int64_t val);
+int ax_rt_map_get(AxMap *m, const char *key, int64_t *out);
+uint64_t ax_rt_map_len(AxMap *m);
 void ax_rt_vec_push(AxVec *v, const void *elem, uint64_t elem_size);
 /* Capacity growth only. `push` is lowered inline by the backend — a capacity
    test and a typed store — and calls this only when the buffer is full, so the

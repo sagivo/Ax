@@ -48,6 +48,8 @@ fn main() -> ExitCode {
         "caps" => cmd_caps(&args),
         "translate" => cmd_translate(&args),
         "gbnf" => cmd_gbnf(&args),
+        "daemon" => cmd_daemon(&args),
+        "kill-criteria" => cmd_kill_criteria(&args),
         "pkg" => cmd_pkg(&args),
         "eval-loop" => cmd_eval_loop(&args),
         "help" | "-h" | "--help" => {
@@ -99,6 +101,8 @@ Usage:
   ax caps [--json] <file>
   ax translate <rust-file>
   ax gbnf [--check N]
+  ax daemon
+  ax kill-criteria
   ax pkg list | ax pkg write
   ax eval-loop [--seed N] [--n K]
 "
@@ -233,7 +237,22 @@ fn cmd_check(args: &[String]) -> ExitCode {
     match s.parse(path.to_str().unwrap_or("input.ax"), &src) {
         Err(d) => fail_diags(&s, &d, flags.json),
         Ok(file) => {
-            let out = s.check(&file);
+            let mut out = s.check(&file);
+            if let Ok(toml) = fs::read_to_string("ax.toml") {
+                let budget = ax::reach::CapBudget::from_toml(&toml);
+                let caps = ax::reach::analyze(&s.intern, &out);
+                for (cap, path) in budget.check(&caps) {
+                    out.diags.push(ax::diag::Diagnostic::error(
+                        "A5001",
+                        ax::span::Span::DUMMY,
+                        format!(
+                            "capability `{cap}` is reachable from {} via {} but not permitted by ax.toml",
+                            caps.from,
+                            path.join(" → ")
+                        ),
+                    ));
+                }
+            }
             if flags.json {
                 println!(
                     "{}",
@@ -1113,7 +1132,17 @@ fn cmd_complete(args: &[String]) -> ExitCode {
     match compile_file(&flags) {
         Err(c) => c,
         Ok((s, out)) => {
-            let r = ax::perf::complete(&s.intern, &out);
+            let at = args
+                .windows(2)
+                .find(|w| w[0] == "--at")
+                .and_then(|w| w[1].parse().ok())
+                .unwrap_or(0usize);
+            let src = flags
+                .files
+                .first()
+                .and_then(|p| fs::read_to_string(p).ok())
+                .unwrap_or_default();
+            let r = ax::perf::complete_at(&s.intern, &out, &src, at);
             if flags.json {
                 println!("{}", serde_json::to_string_pretty(&r).unwrap());
             } else {
@@ -1232,6 +1261,25 @@ fn cmd_translate(args: &[String]) -> ExitCode {
     } else {
         ExitCode::from(1)
     }
+}
+
+fn cmd_daemon(_args: &[String]) -> ExitCode {
+    use std::io::{self, BufRead};
+    let stdin = io::stdin();
+    for line in stdin.lock().lines() {
+        let Ok(line) = line else { break };
+        if line.trim().is_empty() {
+            continue;
+        }
+        println!("{}", ax::daemon::handle_line(&line));
+    }
+    ExitCode::SUCCESS
+}
+
+fn cmd_kill_criteria(_args: &[String]) -> ExitCode {
+    let r = ax::evalloop::kill_criteria_report();
+    println!("{}", r);
+    ExitCode::SUCCESS
 }
 
 fn cmd_gbnf(args: &[String]) -> ExitCode {

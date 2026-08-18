@@ -1,0 +1,5 @@
+# Default capability budget. Empty `allow` means "no restriction"
+# (existing programs keep working). Set e.g. allow = ["fs", "env"]
+# to make extra reachable caps error A5001.
+[caps]
+allow = []

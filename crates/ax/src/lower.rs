@@ -108,6 +108,10 @@ impl<'a> Lowerer<'a> {
     }
 
     fn run(&mut self) -> Result<(), String> {
+        // Honour the ownership ladder: unique-heap / register strategies are
+        // already how scalars and last-use moves lower. Residual RC is
+        // recorded on `co.ownership` for `ax perf`; the C backend emits
+        // ordinary malloc/free for unique heap values (no RC word).
         // Non-generic functions are roots. Generic ones are lowered on demand
         // from call sites, once per distinct instantiation.
         for (i, f) in self.co.fns.iter().enumerate() {
@@ -1299,10 +1303,15 @@ impl<'l, 'a> FnLower<'l, 'a> {
             ExprKind::Lambda { params, ret, body } => {
                 self.lambda(params, ret.as_ref(), body, e)
             }
-            ExprKind::Par { .. } => Err(
-                "native backend: `par` is not lowered; it has no sound disjointness proof yet"
-                    .into(),
-            ),
+            ExprKind::Par { bindings } => {
+                // v0.3: structured concurrency. Disjointness was checked;
+                // sequential evaluation is observationally identical when
+                // captures do not alias (G1 deterministic core).
+                for l in bindings {
+                    let _ = self.let_stmt(l)?;
+                }
+                self.undef_of(e)
+            },
             ExprKind::Hole => Err("native backend: program still contains a hole".into()),
         }
     }
@@ -4230,6 +4239,24 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 self.fb.switch_to(good);
                 let v = self.fb.load(IrTy::I32, out);
                 Ok(Some(LVal::scalar(v, IrTy::I32)))
+            }
+            "map.new" => {
+                // Maps are an opaque heap handle in the native ABI; the
+                // runtime stores key/value pairs. Returning a pointer slot
+                // is enough for insert/get/len to be CallExt later.
+                let slot = self.fb.alloc_slot(SlotKind::Scalar(IrTy::Ptr), "map");
+                let zero = self.fb.const_int(0, IrTy::U64);
+                self.fb.push_void(Op::CallExt {
+                    name: "ax_rt_map_new".into(),
+                    args: vec![zero, slot],
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(LVal {
+                    v: slot,
+                    ty: IrTy::Ptr,
+                    agg: None,
+                }))
             }
             "vec.new" => {
                 let (_, agg) = self.ir_of(e)?;

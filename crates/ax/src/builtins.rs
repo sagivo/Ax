@@ -346,6 +346,50 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
     }
 
     // math
+    // v0.3: explicit conversions replace `as`. Widening is total; narrowing
+    // is `try_to_*` → Result.
+    for (from, to, qid) in [
+        (Type::i32(), Type::i64(), "to_i64"),
+        (Type::i32(), Type::f64(), "to_f64"),
+        (Type::i64(), Type::f64(), "to_f64"),
+        (Type::u32(), Type::u64(), "to_u64"),
+        (Type::usz(), Type::u64(), "to_u64"),
+    ] {
+        out.push((
+            qid.into(),
+            sig(
+                intern,
+                &format!("core::fn:{qid}"),
+                qid,
+                vec![(x, from.clone(), false)],
+                to.clone(),
+                EffectSet::empty(),
+            ),
+        ));
+    }
+    out.push((
+        "try_to_u8".into(),
+        sig(
+            intern,
+            "core::fn:try_to_u8",
+            "try_to_u8",
+            vec![(x, Type::i64(), false)],
+            result_type(b, Type::Prim(Prim::U8), Type::Named { def: b.parse_error, args: vec![] }),
+            EffectSet::empty(),
+        ),
+    ));
+    let sym_dt = intern.intern("T");
+    out.push((
+        "declassify".into(),
+        sig(
+            intern,
+            "core::fn:declassify",
+            "declassify",
+            vec![(x, Type::Param(sym_dt), false)],
+            Type::Param(sym_dt),
+            EffectSet::empty(),
+        ),
+    ));
     out.push((
         "math.hypot".into(),
         sig(
@@ -807,6 +851,24 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
             is_contract_fn: false,
             span: Span::DUMMY,
             def_id: "core::fn:vec.new".into(),
+        },
+    ));
+    let sym_k = intern.intern("K");
+    let sym_v = intern.intern("V");
+    out.push((
+        "map.new".into(),
+        FnSig {
+            name: intern.intern("new"),
+            generics: vec![sym_k, sym_v],
+            params: vec![(alloc, alloc_type(b), false)],
+            ret: Type::Named {
+                def: b.map,
+                args: vec![Type::Param(sym_k), Type::Param(sym_v)],
+            },
+            effects: alloc_eff.clone(),
+            is_contract_fn: false,
+            span: Span::DUMMY,
+            def_id: "core::fn:map.new".into(),
         },
     ));
     out.push((

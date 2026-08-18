@@ -443,6 +443,17 @@ pub struct Completion {
 }
 
 pub fn complete(intern: &Interner, checked: &CheckOutput) -> CompleteReport {
+    complete_at(intern, checked, "", 0)
+}
+
+/// Completions at a byte offset. Names that appear before `at` are preferred;
+/// the GBNF fragment lists only those identifiers.
+pub fn complete_at(
+    intern: &Interner,
+    checked: &CheckOutput,
+    src: &str,
+    at: usize,
+) -> CompleteReport {
     let mut completions = Vec::new();
     for f in &checked.fns {
         let name = intern.get(f.sig.name).to_string();
@@ -465,6 +476,20 @@ pub fn complete(intern: &Interner, checked: &CheckOutput) -> CompleteReport {
             signature: format!("fn {} -> {}", c.name, c.ret.display(intern)),
             kind: if c.from_prelude { "prelude" } else { "fn" }.into(),
         });
+    }
+    let prefix = if at > 0 && at <= src.len() {
+        let before = &src[..at];
+        before
+            .rsplit(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .next()
+            .unwrap_or("")
+            .to_string()
+    } else {
+        String::new()
+    };
+    if !prefix.is_empty() {
+        completions.retain(|c| c.name.starts_with(&prefix) || c.name.contains(&prefix));
+        completions.sort_by_key(|c| !c.name.starts_with(&prefix));
     }
     CompleteReport {
         gbnf_fragment: crate::gbnf::fragment_at(

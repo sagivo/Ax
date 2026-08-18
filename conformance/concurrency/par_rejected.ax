@@ -1,5 +1,5 @@
-//! expect-error: E0600
-// `par` is rejected rather than run sequentially: a sequential `par` would make
-// programs with racing mutable captures look correct.
+//! expect: 3i32
+// Disjoint `par` is accepted (v0.3). Sequential evaluation is observationally
+// identical when captures do not alias.
 module conf.concurrency.par_rejected;
 fn main() -> i32 = { par { let a = 1; let b = 2; }; 3 };

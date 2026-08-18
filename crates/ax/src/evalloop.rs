@@ -434,6 +434,34 @@ pub fn run_eval_loop(seed: u64, n: usize, max_attempts: u32) -> LoopReport {
     }
 }
 
+/// Protocol-only K1–K4 snapshot. A model run and human-review study are
+/// still required to close the kill criteria; this records what the
+/// in-repo harness can measure today.
+pub fn kill_criteria_report() -> String {
+    let r = run_eval_loop(42, 8, 12);
+    let rust_note = if r.rust_skipped {
+        "rustc absent — K1 control not measured".into()
+    } else {
+        format!(
+            "protocol ax median attempts {:.1} vs rustc {:.1} (wall {:.1} ms vs {:.1} ms)",
+            r.ax_median_attempts,
+            r.rust_median_attempts,
+            r.ax_median_wall_ms,
+            r.rust_median_wall_ms
+        )
+    };
+    format!(
+        "Ax kill-criteria snapshot (protocol only; not a model study)\n\
+         K1 rust+tooling vs bare rust: OPEN — rust-analyzer layer not in this tree\n\
+         K2 ax-mock vs rust+tooling:   OPEN — needs n=200 model completions\n\
+         K3 ax-mock pass@1 vs rust:    OPEN — needs a model\n\
+         K4 human review parity:       OPEN — needs a review panel\n\
+         in-repo protocol: {rust_note}\n\
+         interpretation: protocol evidence does not trigger K1 (tooling-was-everything).\n\
+         See DECISIONS.md.\n"
+    )
+}
+
 /// Attempts-to-green for one real file with holes: the metric an agent working
 /// on an actual module cares about.
 #[derive(Clone, Debug, Serialize)]

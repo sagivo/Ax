@@ -95,6 +95,9 @@ pub struct CheckOutput {
     /// this (it is the row's `err[E]` at that point, which `catch` discharges),
     /// so it is published rather than re-derived during lowering.
     pub caught: HashMap<NodeId, Type>,
+    /// Ownership-ladder report. Published so lowering can honour the chosen
+    /// strategy (register / unique-heap / residual RC) instead of re-deriving it.
+    pub ownership: crate::ownership::OwnershipReport,
 }
 
 impl CheckOutput {
@@ -324,6 +327,19 @@ impl<'a> Checker<'a> {
         // Kept alongside `self.dicts` so the two stay index-aligned.
         let mut dict_decls: Vec<DictDecl> = Vec::new();
         self.module = path_str(&file.module, self.intern);
+        // Accept-and-elide: `unsafe` is parsed as decl meta and is meaningless.
+        // Name Rust in the message per [R-8.1.3] / [T-3.4.2].
+        for d in &file.decls {
+            for m in &d.meta {
+                if self.intern.get(m.key.name) == "unsafe" {
+                    self.diags.push(Diagnostic::warn(
+                        "A0106",
+                        m.span,
+                        "`unsafe` is meaningless in Ax (no unsafe subset); this is a documented divergence from Rust",
+                    ));
+                }
+            }
+        }
         for u in &file.uses {
             let last = u.path.segs.last().map(|s| s.name);
             let key = u.alias.as_ref().map(|a| a.name).or(last);
@@ -588,8 +604,14 @@ impl<'a> Checker<'a> {
             nonzero_div: Default::default(),
             nonzero_div_needs_guard: Default::default(),
             callables: Vec::new(),
+            ownership: crate::ownership::OwnershipReport {
+                schema_version: "1.0",
+                functions: Vec::new(),
+                residual_rc_rate: 0.0,
+                unique_heap_share: 1.0,
+            },
         };
-        let (_own, affine) = crate::ownership::analyze(self.intern, &prelim);
+        let (own, affine) = crate::ownership::analyze(self.intern, &prelim);
         for e in affine {
             self.err(e.code, e.span, e.msg);
         }
@@ -613,6 +635,7 @@ impl<'a> Checker<'a> {
             nonzero_div: std::mem::take(&mut self.nonzero_div),
             nonzero_div_needs_guard: std::mem::take(&mut self.nonzero_div_needs_guard),
             callables,
+            ownership: own,
         }
     }
 
@@ -1254,23 +1277,6 @@ impl<'a> Checker<'a> {
                 }
                 t
             }
-            ExprKind::Par { bindings } if true => {
-                // `par` is not implemented. Rejecting it here rather than in the
-                // backend means `ax check` says so, and no program can be written
-                // against a concurrency construct whose disjointness is unproven.
-                self.err(
-                    "E0600",
-                    e.span,
-                    "`par` is not implemented in v1: disjointness of mutable \
-                     captures is not proven yet, and running the branches \
-                     sequentially would make unsound programs look correct",
-                );
-                for l in bindings {
-                    self.check_let(l, env);
-                }
-                Type::unit()
-            }
-            #[allow(unreachable_patterns)]
             ExprKind::Par { bindings } => {
                 // Mutable captures must be statically disjoint.
                 let mut written: Vec<Symbol> = Vec::new();
@@ -1869,6 +1875,15 @@ impl<'a> Checker<'a> {
             }
             other => (other.clone(), place_mut),
         };
+        // Accept-and-elide: `.clone()` is identity ([T-3.3.1] A0103).
+        if name == "clone" && args.is_empty() {
+            self.diags.push(Diagnostic::warn(
+                "A0103",
+                span,
+                "`.clone()` is elided; Ax copies on conflict and reports P1010 (Rust would require an explicit Clone impl)",
+            ));
+            return Some(recv.clone());
+        }
         let kind = match &bare {
             Type::Named { def, .. } => {
                 let n = self.intern.get(*def);
@@ -1876,6 +1891,7 @@ impl<'a> Checker<'a> {
                     "Vec" => Some(SeqKind::Vec),
                     "slice" => Some(SeqKind::Slice),
                     "String" | "str" => Some(SeqKind::Str),
+                    "Map" | "SortedMap" => Some(SeqKind::Map),
                     _ => None,
                 }
             }
@@ -1892,7 +1908,12 @@ impl<'a> Checker<'a> {
 
         let elem = match kind {
             SeqKind::Str => Type::Prim(Prim::U8),
+            SeqKind::Map => self.map_val_type(&bare),
             _ => self.elem_type(&bare, span),
+        };
+        let map_key = match kind {
+            SeqKind::Map => self.map_key_type(&bare),
+            _ => Type::usz(),
         };
         let arity = |n: usize, this: &mut Self| {
             if args.len() != n {
@@ -1921,10 +1942,52 @@ impl<'a> Checker<'a> {
             "get" => {
                 arity(1, self);
                 if let Some(a) = args.first() {
-                    let t = self.check_expr(a, Some(&Type::usz()), env);
-                    self.want_index(&t, a.span, env);
+                    let hint = if kind == SeqKind::Map {
+                        Some(&map_key)
+                    } else {
+                        Some(&Type::usz())
+                    };
+                    let t = self.check_expr(a, hint, env);
+                    if kind != SeqKind::Map {
+                        self.want_index(&t, a.span, env);
+                    }
                 }
                 Some(builtins::option_type(&self.b, elem))
+            }
+            "insert" | "put" => {
+                arity(2, self);
+                if kind != SeqKind::Map {
+                    self.err(
+                        "E0108",
+                        span,
+                        format!("`{name}` needs a Map, got {}", recv.display(self.intern)),
+                    );
+                }
+                if !recv_mut {
+                    self.err("E0300", span, format!("`{name}` needs `&mut`"));
+                }
+                if let Some(k) = args.first() {
+                    let t = self.check_expr(k, Some(&map_key), env);
+                    if !types_eq(&t, &map_key) {
+                        self.type_mismatch(k.span, &map_key, &t, &env.def_id);
+                    }
+                }
+                if let Some(v) = args.get(1) {
+                    let t = self.check_expr(v, Some(&elem), env);
+                    if !types_eq(&t, &elem) {
+                        self.type_mismatch(v.span, &elem, &t, &env.def_id);
+                    }
+                }
+                env.inferred
+                    .insert(EffectAtom::Alloc(self.intern.intern("a")));
+                Some(Type::unit())
+            }
+            "contains" => {
+                arity(1, self);
+                if let Some(a) = args.first() {
+                    let _ = self.check_expr(a, Some(&map_key), env);
+                }
+                Some(Type::bool())
             }
             "push" => {
                 arity(1, self);
@@ -2194,17 +2257,26 @@ impl<'a> Checker<'a> {
                 if op == UnOp::RefMut {
                     if let ExprKind::Path(p) = &expr.kind {
                         if let Some(first) = p.segs.first() {
+                            // Accept-and-elide ([R-1.1.2], [R-1.2.2]): a second
+                            // `&mut` or a `&mut` of an immutable binding is a
+                            // Rust borrow-check error (E0499/E0502). Ax must
+                            // compile, copy-on-conflict, and report the cost
+                            // (A0101), never reject.
                             if let Some(b) = env.lookup(first.name) {
                                 if !b.mutable {
-                                    self.err(
-                                        "E0301",
+                                    self.diags.push(Diagnostic::warn(
+                                        "A0101",
                                         span,
-                                        "exclusive mutable borrow of immutable binding",
-                                    );
+                                        "`&mut` of an immutable binding is elided; Ax treats `&`/`&mut` as hints (Rust would reject this as E0502)",
+                                    ));
                                 }
                             }
                             if env.mut_borrowed.contains(&first.name) {
-                                self.err("E0301", span, "exclusive mutable borrow already active");
+                                self.diags.push(Diagnostic::warn(
+                                    "A0101",
+                                    span,
+                                    "second `&mut` is elided; Ax copies on conflict (Rust would reject this as E0499)",
+                                ));
                             }
                             env.mut_borrowed.push(first.name);
                         }
@@ -2732,6 +2804,22 @@ impl<'a> Checker<'a> {
         Type::Error
     }
 
+    fn map_key_type(&self, base: &Type) -> Type {
+        match base {
+            Type::Named { args, .. } => args.first().cloned().unwrap_or(builtins::string_type(&self.b)),
+            Type::Ref { inner, .. } | Type::Own(inner) => self.map_key_type(inner),
+            _ => builtins::string_type(&self.b),
+        }
+    }
+
+    fn map_val_type(&self, base: &Type) -> Type {
+        match base {
+            Type::Named { args, .. } => args.get(1).cloned().unwrap_or(Type::i32()),
+            Type::Ref { inner, .. } | Type::Own(inner) => self.map_val_type(inner),
+            _ => Type::i32(),
+        }
+    }
+
     fn elem_type(&mut self, base: &Type, span: Span) -> Type {
         let base = match base {
             Type::Ref { inner, .. } => inner.as_ref(),
@@ -3124,6 +3212,15 @@ impl<'a> Checker<'a> {
                 self.collect_mut_captures(lhs, out);
                 self.collect_mut_captures(rhs, out);
             }
+            ExprKind::Assign { lhs, rhs } => {
+                if let ExprKind::Path(p) = &lhs.kind {
+                    if let Some(s) = p.segs.first() {
+                        out.push(s.name);
+                    }
+                }
+                self.collect_mut_captures(lhs, out);
+                self.collect_mut_captures(rhs, out);
+            }
             ExprKind::Block { stmts, tail } => {
                 for s in stmts {
                     match &s.kind {
@@ -3285,6 +3382,7 @@ enum SeqKind {
     Vec,
     Slice,
     Str,
+    Map,
 }
 
 /// Nominal type a pattern is being matched against, if it has one.

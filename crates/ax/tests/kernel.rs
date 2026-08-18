@@ -273,10 +273,7 @@ fn f(x: i32) -> i32
 }
 
 #[test]
-fn par_is_rejected_until_disjointness_is_proven() {
-    // `par` used to run its branches sequentially, which makes a program with
-    // racing mutable captures look correct. Until disjointness is actually
-    // proven, the construct is rejected at check time.
+fn par_disjoint_is_accepted() {
     let src = r#"
 module t;
 fn main() -> i32 = {
@@ -287,14 +284,30 @@ fn main() -> i32 = {
     3
 };
 "#;
-    let mut s = Session::new();
-    let file = s.parse("t.ax", src).unwrap();
-    let out = s.check(&file);
+    let (s, out) = compile(src);
     assert!(
-        out.diags.iter().any(|d| d.code == "E0600"),
-        "expected E0600, got {:?}",
-        out.diags.iter().map(|d| &d.code).collect::<Vec<_>>()
+        !out.diags.iter().any(|d| d.code == "E0600"),
+        "disjoint par should be accepted: {:?}",
+        out.diags
     );
+    assert_eq!(run_main(&s.intern, &out, 0).unwrap().as_i128(), 3);
+}
+
+#[test]
+fn par_overlapping_mut_is_rejected() {
+    let src = r#"
+module t;
+fn main() -> i32 = {
+    let mut x: i32 = 0;
+    par {
+        let a = { x = x + 1; x };
+        let b = { x = x + 2; x };
+    };
+    0
+};
+"#;
+    let diags = compile_err(src);
+    assert!(diags.iter().any(|d| d.code == "E0600"), "{diags:?}");
 }
 
 #[test]
@@ -581,7 +594,10 @@ fn only_semantics_preserving_in_catalog_policy() {
     codes.dedup();
     assert_eq!(before, codes.len(), "duplicate diagnostic codes in the catalog");
     for (code, desc) in &cat {
-        assert!(code.starts_with('E'), "bad code {code}");
+        assert!(
+            code.starts_with('E') || code.starts_with('A') || code.starts_with('P'),
+            "bad code {code}"
+        );
         assert!(!desc.is_empty(), "{code} has no description");
     }
 }

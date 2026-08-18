@@ -87,7 +87,7 @@ jobs:
         run: cargo run -p ax -- bench gate-check
 
       - name: GBNF generator/parser equivalence
-        run: cargo run -p ax -- gbnf --check 2000
+        run: cargo run -p ax -- gbnf --check 100000
 
       - name: rust-to-ax translate strips lifetimes
         run: |
@@ -96,3 +96,11 @@ jobs:
 
       - name: capability reachability
         run: cargo run -p ax -- caps examples/io_sum.ax
+
+      - name: daemon check roundtrip
+        run: |
+          printf '%s\n' '{"id":1,"method":"check","params":{"source":"module t;\nfn main() -> i32 = 1;\n"}}' \
+            | cargo run -p ax -- daemon | grep -q '"ok":true'
+
+      - name: kill-criteria snapshot is printable
+        run: cargo run -p ax -- kill-criteria

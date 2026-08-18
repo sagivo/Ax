@@ -13,6 +13,7 @@ pub mod caps;
 pub mod check;
 pub mod codegen;
 pub mod conform;
+pub mod daemon;
 pub mod evalloop;
 pub mod diag;
 pub mod driver;

@@ -85,7 +85,7 @@ ax bench io|http|metrics|tokens|all  |  ax eval-loop [--seed N] [--n K]
 ax merge --semantic | label | card | pkg list | pkg write
 ax perf [--json] [--diff baseline.json] | complete | context | repair
 ax bench gate | gate-check
-ax caps | translate | gbnf --check N
+ax caps | translate | gbnf --check N | daemon | kill-criteria
 ```
 
 `ax hole --fills` is the piece that matters. It synthesises candidate
@@ -240,7 +240,7 @@ cargo test --workspace   # unit, kernel, protocol, differential, conformance
 ax conform               # the conformance corpus alone
 ```
 
-The conformance corpus (`conformance/`) is 117 cases ported by scenario from Go's
+The conformance corpus (`conformance/`) is 119 cases ported by scenario from Go's
 `test/` and Rust's suites: integer wrapping and shift semantics, truncating
 division, IEEE comparison and NaN canonicalisation, bitwise ops, casts, control
 flow, records and variants, error propagation and injection, regions, the

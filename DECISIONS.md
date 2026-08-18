@@ -15,10 +15,10 @@ the whole value" case.
 
 | ID | Condition | Status | Notes |
 |---|---|---|---|
-| K1 | `rust + tooling` improves attempts-to-green ≥ 35% over bare Rust | open | Tooling layer on rust-analyzer / rustdoc / cargo fix not yet measured |
-| K2 | `ax-mock` improves < 10% over `rust + tooling` | open | ax-mock prompt not yet run at n=200 |
-| K3 | Model pass@1 on `ax-mock` prompts < 60% of its Rust pass@1 | open | Requires a model run; protocol-only eval-loop is not a substitute |
-| K4 | Human reviewers rate `ax-mock` diffs harder to review than Rust | open | Study not run |
+| K1 | `rust + tooling` improves attempts-to-green ≥ 35% over bare Rust | **open** (harness: `ax kill-criteria`) | rust-analyzer layer not in-tree; protocol eval-loop is the control |
+| K2 | `ax-mock` improves < 10% over `rust + tooling` | **open** | needs n=200 model completions |
+| K3 | Model pass@1 on `ax-mock` prompts < 60% of its Rust pass@1 | **open** | needs a model |
+| K4 | Human reviewers rate `ax-mock` diffs harder to review than Rust | **open** | needs a review panel |
 
 If any of K1–K4 hold, abandon the language and ship the tooling.
 

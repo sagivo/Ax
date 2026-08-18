@@ -155,7 +155,8 @@ pub fn analyze(intern: &Interner, checked: &CheckOutput) -> (OwnershipReport, Ve
             &mut fn_ops,
         );
 
-        // Affine: used exactly once.
+        // Affine: used exactly once. A second use is A2020 (the only hard
+        // rejection in the memory model); zero uses is A2021.
         for name in &affine {
             let n = uses.get(name).map(|v| v.len()).unwrap_or(0);
             let span = affine_span.get(name).copied().unwrap_or(f.sig.span);
@@ -164,6 +165,16 @@ pub fn analyze(intern: &Interner, checked: &CheckOutput) -> (OwnershipReport, Ve
                     code: "A2021",
                     span,
                     msg: format!("affine `own` value `{name}` is never used"),
+                });
+            } else if n > 1 {
+                let use_span = uses
+                    .get(name)
+                    .and_then(|v| v.get(1).copied())
+                    .unwrap_or(span);
+                errors.push(AffineError {
+                    code: "A2020",
+                    span: use_span,
+                    msg: format!("use after move of affine `own` value `{name}`"),
                 });
             }
         }

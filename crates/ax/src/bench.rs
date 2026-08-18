@@ -2913,16 +2913,16 @@ fn main() -> i64 = {{
     let mut acc: i64 = 0;
     for y in range(0, n) {{
         for x in range(0, n) {{
-            let cr = (x as i64) * 2 - (n as i64) * 3 / 2;
-            let ci = (y as i64) * 2 - (n as i64);
-            let mut zr: i64 = 0;
-            let mut zi: i64 = 0;
+            let cr = (x as f64) * 2.0 / (n as f64) - 1.5;
+            let ci = (y as f64) * 2.0 / (n as f64) - 1.0;
+            let mut zr: f64 = 0.0;
+            let mut zi: f64 = 0.0;
             let mut i: usz = 0;
             while i < 20 {{
                 let zr2 = zr * zr - zi * zi + cr;
-                zi = 2 * zr * zi + ci;
+                zi = 2.0 * zr * zi + ci;
                 zr = zr2;
-                if zr * zr + zi * zi > 4 * (n as i64) * (n as i64) {{ break; }}
+                if zr * zr + zi * zi > 4.0 {{ break; }}
                 i = i + 1;
             }};
             acc = acc + (i as i64);
@@ -2944,15 +2944,15 @@ int main(void) {{
     long long acc = 0;
     for (uint64_t y = 0; y < n; y++) {{
         for (uint64_t x = 0; x < n; x++) {{
-            long long cr = (long long)x * 2 - (long long)n * 3 / 2;
-            long long ci = (long long)y * 2 - (long long)n;
-            long long zr = 0, zi = 0;
+            double cr = (double)x * 2.0 / (double)n - 1.5;
+            double ci = (double)y * 2.0 / (double)n - 1.0;
+            double zr = 0.0, zi = 0.0;
             uint64_t i = 0;
             for (; i < 20; i++) {{
-                long long zr2 = zr*zr - zi*zi + cr;
-                zi = 2*zr*zi + ci;
+                double zr2 = zr*zr - zi*zi + cr;
+                zi = 2.0*zr*zi + ci;
                 zr = zr2;
-                if (zr*zr + zi*zi > 4 * (long long)n * (long long)n) break;
+                if (zr*zr + zi*zi > 4.0) break;
             }}
             acc += (long long)i;
         }}
@@ -2974,16 +2974,16 @@ fn main() {{
     while y < n {{
         let mut x = 0u64;
         while x < n {{
-            let cr = (x as i64) * 2 - (n as i64) * 3 / 2;
-            let ci = (y as i64) * 2 - (n as i64);
-            let mut zr: i64 = 0;
-            let mut zi: i64 = 0;
+            let cr = (x as f64) * 2.0 / (n as f64) - 1.5;
+            let ci = (y as f64) * 2.0 / (n as f64) - 1.0;
+            let mut zr = 0.0f64;
+            let mut zi = 0.0f64;
             let mut i = 0u64;
             while i < 20 {{
                 let zr2 = zr*zr - zi*zi + cr;
-                zi = 2*zr*zi + ci;
+                zi = 2.0*zr*zi + ci;
                 zr = zr2;
-                if zr*zr + zi*zi > 4 * (n as i64) * (n as i64) {{ break; }}
+                if zr*zr + zi*zi > 4.0 {{ break; }}
                 i += 1;
             }}
             acc += i as i64;

@@ -1174,6 +1174,24 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Some(Value::Unit))
             }
+            ("len", Value::Map(m)) => Ok(Some(Value::usz(m.borrow().len() as u64))),
+            ("get", Value::Map(m)) => {
+                let k = args.first().map(|v| v.display()).unwrap_or_default();
+                Ok(Some(match m.borrow().get(&k) {
+                    Some(v) => some_val(v.clone()),
+                    None => none_val(),
+                }))
+            }
+            ("insert" | "put", Value::Map(m)) => {
+                if let (Some(k), Some(v)) = (args.first(), args.get(1)) {
+                    m.borrow_mut().insert(k.display(), v.clone());
+                }
+                Ok(Some(Value::Unit))
+            }
+            ("contains", Value::Map(m)) => {
+                let k = args.first().map(|v| v.display()).unwrap_or_default();
+                Ok(Some(Value::Bool(m.borrow().contains_key(&k))))
+            }
             _ => Ok(None),
         }
     }
@@ -1436,7 +1454,24 @@ impl<'a> Interpreter<'a> {
             // A Vec's storage belongs to the allocator handle it was created
             // with. The oracle does not model memory, but it does model the
             // handle being required.
+            "to_i64" | "to_u64" | "to_f64" => {
+                let v = args.first().cloned().unwrap_or(Value::Unit);
+                Ok(v)
+            }
+            "try_to_u8" => {
+                let n = args.first().map(|v| v.as_i128()).unwrap_or(0);
+                if (0..=255).contains(&n) {
+                    Ok(ok_val(Value::Int { bits: n, prim: Prim::U8 }))
+                } else {
+                    Ok(err_val(Value::Variant {
+                        name: "Invalid".into(),
+                        fields: IndexMap::new(),
+                    }))
+                }
+            }
+            "declassify" => Ok(args.first().cloned().unwrap_or(Value::Unit)),
             "vec.new" => Ok(Value::Vec(Rc::new(RefCell::new(Vec::new())))),
+            "map.new" => Ok(Value::Map(Rc::new(RefCell::new(IndexMap::new())))),
             "str.concat" => {
                 let x = args.get(1).map(|v| v.display()).unwrap_or_default();
                 let y = args.get(2).map(|v| v.display()).unwrap_or_default();
