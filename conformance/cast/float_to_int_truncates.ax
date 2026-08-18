@@ -1,0 +1,4 @@
+//! expect: -3i32
+// Float to int truncates toward zero, it does not round.
+module conf.cast.float_to_int_truncates;
+fn main() -> i32 = (-3.7) as i32;

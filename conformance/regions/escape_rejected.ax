@@ -1,0 +1,4 @@
+//! expect-error: E0302
+// A reference into the region cannot outlive it: the arena is gone at the brace.
+module conf.regions.escape_rejected;
+fn main() -> &r i32 = region r { let x = 1; &x };

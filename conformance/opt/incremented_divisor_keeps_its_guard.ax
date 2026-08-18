@@ -1,0 +1,15 @@
+//! expect: 11usz
+// `d = d + 1` keeps `d` non-zero only until the increment wraps past the maximum,
+// so the row stays free of `err[DivError]` but the backend keeps a guard. This
+// case exists so that removing the guard — which looks like a free optimisation —
+// fails a test instead of quietly changing what an overflowing program does.
+module conf.opt.incremented_divisor_keeps_its_guard;
+fn main() -> usz !{diverge} = {
+    let mut d: usz = 2;
+    let mut acc: usz = 0;
+    loop {
+        if d > 8usz { return acc };
+        acc = acc + (12usz % d);
+        d = d + 1;
+    }
+};

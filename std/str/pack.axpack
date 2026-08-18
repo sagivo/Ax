@@ -1,0 +1,11 @@
+{
+  "api": 1,
+  "name": "str",
+  "version": "0.1.0",
+  "kind": "builtin",
+  "source_hash": "91974ad3f034affba630b62df5f8e797726d395e995b8f897a6dfc7594eabe1a",
+  "files": {
+    "std/str/lib.ax": "8c25cb3686462e9a86d2883c5688a22fe738b0bbc85f458d2d2b5f3f667c6d5a"
+  },
+  "deps": []
+}

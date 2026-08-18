@@ -1,0 +1,4 @@
+//! expect: 255u8
+// Unsigned underflow wraps, matching Go's uint8 and Rust's wrapping_sub.
+module conf.int.wrap_sub_u8;
+fn main() -> u8 = 0u8 - 1u8;

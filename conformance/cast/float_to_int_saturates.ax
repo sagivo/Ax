@@ -1,0 +1,5 @@
+//! expect: 2147483647i32
+// Out-of-range float to int saturates at the destination bound instead of being
+// undefined. Rust's `as` has saturated since 1.45; C leaves it undefined.
+module conf.cast.float_to_int_saturates;
+fn main() -> i32 = 1.0e30 as i32;

@@ -1,0 +1,5 @@
+//! expect: NaNf64
+// Ax canonicalises NaN to one bit pattern (spec §8.2) so oracle and native
+// agree bit-for-bit. Rust and Go leave the payload unspecified.
+module conf.float.nan_is_canonical;
+fn main() -> f64 = 0.0 / 0.0;

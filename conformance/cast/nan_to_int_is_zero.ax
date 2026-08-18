@@ -1,0 +1,4 @@
+//! expect: 0i32
+// NaN converts to 0, matching Rust.
+module conf.cast.nan_to_int_is_zero;
+fn main() -> i32 = (0.0 / 0.0) as i32;

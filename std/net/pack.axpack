@@ -1,0 +1,14 @@
+{
+  "api": 1,
+  "name": "net",
+  "version": "0.0.0-reserved",
+  "kind": "component",
+  "source_hash": "a08a0fcbdeafd3c1b3a4b495b9a9c9d96850f08946b52bc0622347d3b6e73b78",
+  "files": {},
+  "deps": [
+    {
+      "name": "core",
+      "version": "0.1.0"
+    }
+  ]
+}

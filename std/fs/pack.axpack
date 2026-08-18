@@ -1,0 +1,11 @@
+{
+  "api": 1,
+  "name": "fs",
+  "version": "0.1.0",
+  "kind": "builtin",
+  "source_hash": "3471e0b4a2b97254ccbc827f862a074bad29c2601b5ba10e095f382c54c21911",
+  "files": {
+    "std/fs/lib.ax": "dce7cce055566bed799f788cd0048e209a27a473c0f48b956fa1f1780e80d2c1"
+  },
+  "deps": []
+}

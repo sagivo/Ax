@@ -1,0 +1,3 @@
+//! expect: 5usz
+module conf.string.literal_len;
+fn main() -> usz = len("hello");

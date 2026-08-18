@@ -1,0 +1,3 @@
+//! expect: true
+module conf.string.equality;
+fn main() -> bool = "abc" == "abc";

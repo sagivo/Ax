@@ -1,0 +1,7 @@
+//! expect: 7i32
+// `div_min_by_neg_one` pins the overflow case, and it passes even for a backend
+// that quietly replaces the divisor -1 with 1 — because for the minimum value
+// the two agree. This case does not: 7 is the negation of -7, not -7 itself.
+// Added after fault injection showed the corpus could not tell the difference.
+module conf.int.div_by_neg_one_negates;
+fn main() -> i32 !{err[DivError]} = int.div_trunc(-7i32, -1i32);

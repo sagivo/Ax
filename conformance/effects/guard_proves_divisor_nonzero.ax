@@ -1,0 +1,16 @@
+//! expect: 21usz
+// `while b != 0` proves the divisor non-zero for the body, which is the shape
+// Euclid's algorithm is written in. The fact ends at `b = t`, so a division after
+// that point would still need the row.
+module conf.effects.guard_proves_divisor_nonzero;
+fn gcd(a0: usz, b0: usz) -> usz !{diverge} = {
+    let mut a = a0;
+    let mut b = b0;
+    while b != 0usz {
+        let t = a % b;
+        a = b;
+        b = t;
+    };
+    a
+};
+fn main() -> usz !{diverge} = gcd(1071usz, 462usz);

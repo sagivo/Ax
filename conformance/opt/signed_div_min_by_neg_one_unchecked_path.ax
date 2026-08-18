@@ -1,0 +1,5 @@
+//! expect: -2147483648i32
+// On the proven-non-zero path signed division still has to define INT_MIN / -1,
+// which C leaves undefined. Only the zero test is dropped.
+module conf.opt.signed_div_min_by_neg_one_unchecked_path;
+fn main() -> i32 = catch int.div(-2147483648i32, -1i32) { Zero => 0 };

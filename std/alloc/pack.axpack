@@ -1,0 +1,11 @@
+{
+  "api": 1,
+  "name": "alloc",
+  "version": "0.1.0",
+  "kind": "builtin",
+  "source_hash": "d484543d49a1d8ea4566a18828d28d2ed035a6a42b7e52c815b19a1beff24bf1",
+  "files": {
+    "std/alloc/lib.ax": "bcd3b184b67ff790ed6f1c2cbb4a55e82f1755fbf5f2a3828df60847df7a33b8"
+  },
+  "deps": []
+}

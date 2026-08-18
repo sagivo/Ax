@@ -1,0 +1,14 @@
+{
+  "api": 1,
+  "name": "crypto",
+  "version": "0.0.0-reserved",
+  "kind": "component",
+  "source_hash": "da2f073e06f78938166f247273729dfe465bf7e46105c13ce7cc651047bf0ca4",
+  "files": {},
+  "deps": [
+    {
+      "name": "core",
+      "version": "0.1.0"
+    }
+  ]
+}

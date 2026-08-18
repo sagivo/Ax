@@ -1,0 +1,4 @@
+//! expect: 255i64
+// Widening an unsigned value zero-extends, so 0xff stays 255 rather than -1.
+module conf.cast.widen_unsigned_zero_extends;
+fn main() -> i64 = 255u8 as i64;

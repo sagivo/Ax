@@ -1,0 +1,19 @@
+//! expect: 3120i32
+// Stability is a semantic guarantee, not an implementation detail: equal keys
+// keep their input order, so the permutation is unique and the oracle's
+// insertion sort and the runtime's merge sort must agree exactly.
+//
+// Keys are all equal under this comparator, so the payloads must come out in
+// their original order: 3, 1, 2, 0.
+module conf.sort.stability;
+type Item = { key: i32, tag: i32 };
+fn by_key(x: &Item, y: &Item) -> Ordering = i32.cmp(&x.key, &y.key);
+fn main() -> i32 !{alloc[a], diverge} = {
+    let mut xs: Vec[Item] = vec.new(test.alloc);
+    xs.push(Item { key: 1, tag: 3 });
+    xs.push(Item { key: 1, tag: 1 });
+    xs.push(Item { key: 1, tag: 2 });
+    xs.push(Item { key: 1, tag: 0 });
+    sort(&mut xs, by_key);
+    xs.at(0).tag * 1000 + xs.at(1).tag * 100 + xs.at(2).tag * 10 + xs.at(3).tag
+};

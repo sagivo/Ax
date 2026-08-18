@@ -1,0 +1,6 @@
+//! expect: { x: 1i32, y: 2i32 }
+// A record returned by value: the callee writes through the caller's slot.
+module conf.data.record_return;
+type P = { x: i32, y: i32 };
+fn mk() -> P = P { x: 1, y: 2 };
+fn main() -> P = mk();

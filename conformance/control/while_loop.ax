@@ -1,0 +1,10 @@
+//! expect: 10i32
+// Go test/for.go: a while-shaped loop. `while` carries `diverge` because it has
+// no static bound, unlike `for` over a finite range.
+module conf.control.while_loop;
+fn main() -> i32 !{diverge} = {
+    let mut i = 0;
+    let mut n = 0;
+    while i < 10 { i = i + 1; n = n + 1; };
+    n
+};

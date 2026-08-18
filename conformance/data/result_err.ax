@@ -1,0 +1,5 @@
+//! expect: Err { error: Bad }
+module conf.data.result_err;
+type E = | Bad;
+fn f(b: bool) -> i32 !{err[E]} = if b { raise Bad } else { 1 };
+fn main() -> Result[i32, E] = attempt f(true);

@@ -1,0 +1,9 @@
+//! expect: 7i32
+// The unique visible `dict Ord[i32]` fills the `= default` parameter. Because
+// resolution is unique, dispatch is statically known and lowers to a direct
+// call — there is no vtable and no indirect jump.
+module conf.dicts.default_resolution;
+dict Ord[i32] = { cmp: i32.cmp };
+fn pick(a: i32, b: i32, o: Ord[i32] = default) -> i32 =
+  match o.cmp(&a, &b) { Lt => b; _ => a; };
+fn main() -> i32 = pick(3, 7);

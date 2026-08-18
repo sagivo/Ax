@@ -1,0 +1,5 @@
+//! expect: 2i32
+module conf.error.catch_multiple_arms;
+type E = | First | Second;
+fn f(n: i32) -> i32 !{err[E]} = if n == 1 { raise First } else { raise Second };
+fn main() -> i32 = catch f(2) { First => 1; Second => 2; };

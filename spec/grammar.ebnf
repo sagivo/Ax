@@ -1,0 +1,134 @@
+(*
+  Ax language — normative grammar (v0.2 / research-v1).
+  This file is the single source of truth for surface syntax.
+  The reference card, syntax-highlighting definitions, and parser
+  are generated from / validated against it.
+  A grammar that disagrees with an example is a build failure.
+*)
+
+file           ::= module_decl export_decl? use_decl* decl*
+module_decl    ::= "module" path ";"
+export_decl    ::= "export" "{" ident ("," ident)* "}" ";"
+use_decl       ::= "use" path ("as" ident)? ";"
+
+decl           ::= meta* (fn_decl | type_decl | dict_decl | test_decl | contract_fn_decl)
+
+meta           ::= "@" ident (string | ident | integer)?
+
+fn_decl        ::= "fn" ident generics? "(" params? ")" "->" type
+                   effects? contract* "=" expr ";"
+contract_fn_decl ::= "contract" "fn" ident generics? "(" params? ")" "->" type
+                     "=" expr ";"
+params         ::= param ("," param)*
+param          ::= ident ":" type
+generics       ::= "[" gparam ("," gparam)* "]"
+gparam         ::= ident (":" type)?
+effects        ::= "!{" effect ("," effect)* "}"
+effect         ::= "err" "[" type "]"
+                 | "io" "[" ident "]"
+                 | "alloc" "[" ident "]"
+                 | "susp" | "diverge" | "race" | "nondet" | "abort"
+contract       ::= ("pre" | "post" | "inv") cexpr
+
+type_decl      ::= "type" ident generics? "=" texpr ("with" injection*)? ";"
+texpr          ::= record | variants | type
+record         ::= "{" (ident ":" type) ("," ident ":" type)* ","? "}"
+variants       ::= ("|" ident record?)+
+injection      ::= "from" type "=>" ident ";"
+
+dict_decl      ::= "dict" ident "[" type "]" "=" record_lit ";"
+test_decl      ::= "test" string "=" expr ";"
+
+type           ::= fn_type | ref_type | named_type | primitive | tuple_type
+fn_type        ::= "fn" "(" (type ("," type)*)? ")" "->" type effects?
+ref_type       ::= "&" ident "mut"? type
+(* `own` is reserved: v1 has no move checker, so uniqueness would be
+   unenforced. Use a region for lexical ownership, `&mut` for exclusivity. *)
+named_type     ::= path type_args?
+type_args      ::= "[" type ("," type)* "]"
+tuple_type     ::= "(" type ("," type)+ ")"
+primitive      ::= "i8" | "i16" | "i32" | "i64" | "isz"
+                 | "u8" | "u16" | "u32" | "u64" | "usz"
+                 | "f32" | "f64" | "bool" | "byte" | "unit"
+
+expr           ::= assignment
+assignment     ::= or_expr
+or_expr        ::= and_expr ("||" and_expr)*
+and_expr       ::= cmp_expr ("&&" cmp_expr)*
+cmp_expr       ::= bitor_expr (("==" | "!=" | "<" | ">" | "<=" | ">=") bitor_expr)?
+(* Bitwise precedence follows Rust: | then ^ then & then the shifts. *)
+bitor_expr     ::= bitxor_expr ("|" bitxor_expr)*
+bitxor_expr    ::= bitand_expr ("^" bitand_expr)*
+bitand_expr    ::= shift_expr ("&" shift_expr)*
+shift_expr     ::= add_expr (("<<" | ">>") add_expr)*
+add_expr       ::= mul_expr (("+" | "-") mul_expr)*
+mul_expr       ::= cast_expr (("*" | "/" | "%") cast_expr)*
+(* `as` is the only numeric conversion: there are no implicit ones. *)
+cast_expr      ::= unary ("as" type)*
+unary          ::= ("!" | "~" | "-" | "&" "mut"? | "*") unary | postfix
+postfix        ::= primary (call | index | field | tryop)*
+call           ::= "(" (expr ("," expr)*)? ")"
+index          ::= "[" expr "]"
+field          ::= "." ident
+tryop          ::= "?"
+primary        ::= literal | path | block | if_expr | match_expr
+                 | for_expr | loop_expr | while_expr | break_expr | continue_expr
+                 | let_expr | lambda
+                 | record_lit | variant_lit | paren | hole
+                 | "return" expr? | "raise" expr
+                 | catch_expr | attempt_expr | par_expr | region_expr
+
+literal        ::= integer | float | string | raw_string | "true" | "false"
+hole           ::= "?"
+paren          ::= "(" expr ")"
+block          ::= "{" (stmt ";")* expr? "}"
+stmt           ::= let_stmt | expr
+let_stmt       ::= "let" "mut"? pattern (":" type)? "=" expr
+let_expr       ::= let_stmt
+lambda         ::= "fn" "(" params? ")" ("->" type)? "=>" expr
+if_expr        ::= "if" expr block ("else" (if_expr | block))?
+match_expr     ::= "match" expr "{" (pattern "=>" expr ";")+ "}"
+for_expr       ::= "for" pattern "in" expr block
+loop_expr      ::= "loop" block
+while_expr     ::= "while" expr block
+(* `break` / `continue` carry no value and are legal only inside a loop. *)
+break_expr     ::= "break"
+continue_expr  ::= "continue"
+catch_expr     ::= "catch" expr "{" (pattern "=>" expr ";")+ "}"
+attempt_expr   ::= "attempt" expr
+region_expr    ::= "region" ident block
+par_expr       ::= "par" "{" (let_stmt ";")+ "}"
+record_lit     ::= "{" ( (ident ":" expr) ("," ident ":" expr)* ","? )? "}"
+variant_lit    ::= ident record_lit?
+
+pattern        ::= "_" | literal | ident record_pat? | record_pat | tuple_pat
+record_pat     ::= "{" (ident (":" pattern)? ("," ident (":" pattern)?)*)? ","? "}"
+tuple_pat      ::= "(" pattern ("," pattern)+ ")"
+variant_pat    ::= ident record_pat?
+
+cexpr          ::= or_expr
+
+path           ::= ident ("." ident)*
+ident          ::= letter (letter | digit | "_")*
+letter         ::= "A".."Z" | "a".."z" | "_"
+digit          ::= "0".."9"
+(* `_` is a digit separator anywhere in a numeric literal. *)
+integer        ::= (dec_digits | "0x" hex_digits | "0o" oct_digits | "0b" bin_digits)
+                   int_suffix?
+int_suffix     ::= "i8" | "i16" | "i32" | "i64" | "isz"
+                 | "u8" | "u16" | "u32" | "u64" | "usz"
+dec_digits     ::= digit (digit | "_")*
+hex_digits     ::= hex (hex | "_")*
+oct_digits     ::= ("0".."7") (("0".."7") | "_")*
+bin_digits     ::= ("0" | "1") (("0" | "1") | "_")*
+float          ::= dec_digits "." dec_digits exponent? ("f32" | "f64")?
+                 | dec_digits exponent ("f32" | "f64")?
+exponent       ::= ("e" | "E") ("+" | "-")? dec_digits
+string         ::= '"' string_char* '"'
+raw_string     ::= "`" raw_char* "`"
+string_char    ::= escape | any_except_quote
+escape         ::= "\" ( "n" | "t" | "r" | "\" | '"' | "`" | "0" | "x" hex hex )
+comment        ::= line_comment | block_comment
+line_comment   ::= "//" any* newline
+block_comment  ::= "/*" any* "*/"
+)

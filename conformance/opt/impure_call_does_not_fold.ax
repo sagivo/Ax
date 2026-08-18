@@ -1,0 +1,5 @@
+//! expect-tests
+// A call that performs IO must not be folded away — its effect is the point.
+module conf.opt.impure_call_does_not_fold;
+fn noisy(x: i32) -> i32 !{io[stdout]} = { print("side effect"); x * x };
+test "the effect still happens" = { let v = noisy(3); assert(v == 9) };

@@ -1,0 +1,9 @@
+//! expect-abort: index out of bounds
+// `at` is bounds-checked always (§3.3), in every tier. Go panics, Rust panics;
+// Ax aborts with the same message from the oracle and from native code.
+module conf.stdlib.vec_at_out_of_bounds;
+fn main() -> usz !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.push(1usz);
+    xs.at(5)
+};

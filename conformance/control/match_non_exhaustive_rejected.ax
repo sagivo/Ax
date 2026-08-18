@@ -1,0 +1,8 @@
+//! expect-error: E0112
+// A missing variant is a compile error, not a runtime abort: the type already
+// knows the case list, so an agent should not need a run to discover this.
+// (Rust rejects this too; Go's switch does not.)
+module conf.control.match_non_exhaustive_rejected;
+type Color = | Red | Green | Blue;
+fn name(c: Color) -> i32 = match c { Red => 1; Green => 2; };
+fn main() -> i32 = name(Blue);

@@ -1,0 +1,8 @@
+//! expect: 1usz
+// `get` is the unchecked-index alternative: it yields Option instead of aborting.
+module conf.stdlib.vec_get_returns_option;
+fn main() -> usz !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.push(1usz);
+    match xs.get(5) { Some(v) => 99usz; None => xs.at(0); }
+};

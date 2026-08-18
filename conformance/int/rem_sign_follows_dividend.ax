@@ -1,0 +1,4 @@
+//! expect: -1i32
+// Truncating remainder takes the sign of the dividend: -7 % 3 == -1.
+module conf.int.rem_sign_follows_dividend;
+fn main() -> i32 !{err[DivError]} = int.rem(-7i32, 3i32);

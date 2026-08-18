@@ -1,0 +1,6 @@
+//! expect: 42i32
+// A non-capturing lambda is a plain function pointer. Rust's `fn` items behave
+// the same way; closures that capture need an environment, which v1 omits.
+module conf.fnptr.lambda_noncapturing;
+fn apply(f: fn(i32) -> i32, x: i32) -> i32 = f(x);
+fn main() -> i32 = apply(fn(x: i32) -> i32 => x * 2, 21);

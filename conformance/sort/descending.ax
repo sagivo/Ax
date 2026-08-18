@@ -1,0 +1,9 @@
+//! expect: 5421i32
+module conf.sort.descending;
+fn desc(x: &i32, y: &i32) -> Ordering = i32.cmp(y, x);
+fn main() -> i32 !{alloc[a], diverge} = {
+    let mut xs: Vec[i32] = vec.new(test.alloc);
+    xs.push(5); xs.push(1); xs.push(4); xs.push(2);
+    sort(&mut xs, desc);
+    xs.at(0) * 1000 + xs.at(1) * 100 + xs.at(2) * 10 + xs.at(3)
+};

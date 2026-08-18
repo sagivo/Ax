@@ -1,0 +1,4 @@
+//! expect: 13i32
+module conf.data.record_fields;
+type P = { x: i32, y: i32 };
+fn main() -> i32 = { let p = P { x: 4, y: 9 }; p.x + p.y };

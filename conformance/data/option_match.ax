@@ -1,0 +1,4 @@
+//! expect: 3i32
+module conf.data.option_match;
+fn get(o: Option[i32]) -> i32 = match o { Some(v) => v; None => 0; };
+fn main() -> i32 = get(Some(3));

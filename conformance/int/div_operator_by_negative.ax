@@ -1,0 +1,5 @@
+//! expect: -3i32
+// The `/` operator, not `int.div_trunc`, with a negative divisor: truncation is
+// toward zero, so 7 / -2 is -3 and not -4.
+module conf.int.div_operator_by_negative;
+fn main() -> i32 !{err[DivError]} = 7i32 / -2i32;

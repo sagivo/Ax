@@ -1,0 +1,13 @@
+//! expect: 1usz
+// A divisor assigned in the loop body is not invariant, so it must not use a
+// stale reciprocal. 10 % 3 once, then 10 % 5 three times: 1 + 0 + 0 + 0.
+module conf.opt.recip_assigned_divisor_still_correct;
+fn main() -> usz = {
+    let mut d: usz = 3;
+    let mut s: usz = 0;
+    for i in range(0, 4) {
+        s = s + (10usz % d);
+        d = 5;
+    };
+    s
+};

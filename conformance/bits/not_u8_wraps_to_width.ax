@@ -1,0 +1,4 @@
+//! expect: 255u8
+// The complement is taken at the declared width, not at i32 and truncated.
+module conf.bits.not_u8_wraps_to_width;
+fn main() -> u8 = ~0u8;

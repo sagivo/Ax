@@ -1,0 +1,78 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned rather than `stable`: the Cranelift backend sets the floor at
+      # 1.94, and a moving toolchain makes a red build ambiguous.
+      - uses: dtolnay/rust-toolchain@1.94.0
+      # Go is only needed for the benchmark's fourth column; the suite skips it
+      # when absent rather than reporting a comparison it did not measure.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: unit, kernel, protocol, differential, and conformance tests
+        run: cargo test --workspace
+
+      # The gates the README claims, run explicitly so a regression in any one of
+      # them fails CI with an obvious name rather than inside a test list.
+      - name: the checker rejects what it says it rejects
+        run: cargo run -p ax -- check examples/hello.ax
+
+      - name: native build and run of the error example
+        run: |
+          cargo run -p ax -- build -o /tmp/div examples/div.ax
+          /tmp/div
+
+      - name: native build and run of the worked example
+        run: |
+          cargo run -p ax -- build -o /tmp/loader examples/loader.ax
+          /tmp/loader
+
+      - name: oracle agrees with both native tiers and cranelift on every case
+        run: cargo run -p ax -- conform
+
+      # The dev tier compiles in-process. Running the two worked examples through
+      # it is the same bar the C backend has to clear.
+      - name: the cranelift tier runs the examples
+        run: |
+          cargo run -p ax -- jit examples/div.ax
+          cargo run -p ax -- jit examples/loader.ax
+
+      - name: hole fills compile and the agent loop reaches green
+        run: |
+          cargo run -p ax -- hole --fills examples/holes.ax
+          cargo run -p ax -- test --attempts-to-green examples/holes.ax
+
+      - name: only semantics-preserving fixes are auto-applied
+        run: |
+          printf 'module t;\nfn main() -> u64 = 3usz;\n' > /tmp/widen.ax
+          cargo run -p ax -- fix /tmp/widen.ax
+
+      - name: a recorded run replays from its transcript
+        run: |
+          echo hello > ./ci-input.txt
+          cargo run -p ax -- run --trace /tmp/tr.json examples/io_sum.ax ci-input.txt
+          cargo run -p ax -- replay /tmp/tr.json examples/io_sum.ax
+
+      - name: capability labels are earned
+        run: |
+          cargo run -p ax -- label examples/loader.ax | grep -q capability-contained
+          cargo run -p ax -- label examples/io_sum.ax | grep -q ambient-io
+
+      - name: agent loop measurement runs
+        run: cargo run -p ax -- eval-loop --seed 42 --n 4
+
+      # This also verifies that the terse surface round-trips: each kernel is
+      # rewritten mechanically, recompiled through the terse parser, and run, and
+      # the harness fails unless it produces the same value.
+      - name: terse surface is the same program, and token counts are reported
+        run: cargo run -p ax -- bench tokens
+
+      - name: the card is emittable
+        run: cargo run -p ax -- card

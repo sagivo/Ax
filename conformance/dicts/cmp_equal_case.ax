@@ -1,0 +1,6 @@
+//! expect: 4i32
+module conf.dicts.cmp_equal_case;
+dict Ord[i32] = { cmp: i32.cmp };
+fn pick(a: i32, b: i32, o: Ord[i32] = default) -> i32 =
+  match o.cmp(&a, &b) { Lt => b; Eq => 4; Gt => a; };
+fn main() -> i32 = pick(5, 5);

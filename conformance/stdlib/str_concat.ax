@@ -1,0 +1,3 @@
+//! expect: 11usz
+module conf.stdlib.str_concat;
+fn main() -> usz !{alloc[a]} = len(str.concat(test.alloc, "hello ", "world"));

@@ -1,0 +1,6 @@
+//! expect: 1i32
+// The innermost handler wins, and the outer one does not run.
+module conf.error.nested_catch_inner_wins;
+type E = | Bad;
+fn f() -> i32 !{err[E]} = raise Bad;
+fn main() -> i32 = catch (catch f() { Bad => 1 }) { Bad => 2 };

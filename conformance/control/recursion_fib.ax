@@ -1,0 +1,5 @@
+//! expect: 55i32
+// Go test/fibo.go, Rust bench fib: naive recursion.
+module conf.control.recursion_fib;
+fn fib(n: i32) -> i32 = if n < 2 { n } else { fib(n - 1) + fib(n - 2) };
+fn main() -> i32 = fib(10);

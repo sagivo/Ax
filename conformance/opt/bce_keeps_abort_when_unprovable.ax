@@ -1,0 +1,12 @@
+//! expect-abort: index out of bounds
+// Bounds-check elimination fires only when the index is provably in range. Here
+// the loop bound is a literal, not the container's length, so the check must
+// remain and the program must still abort.
+module conf.opt.bce_keeps_abort_when_unprovable;
+fn main() -> usz !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.push(1usz);
+    let mut last = 0usz;
+    for i in range(0, 10) { last = xs.at(i); };
+    last
+};

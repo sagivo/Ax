@@ -1,0 +1,4 @@
+//! expect: -1i64
+// Widening a signed value sign-extends.
+module conf.cast.widen_sign_extends;
+fn main() -> i64 = (-1i8) as i64;

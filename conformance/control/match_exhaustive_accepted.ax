@@ -1,0 +1,5 @@
+//! expect: 3i32
+module conf.control.match_exhaustive_accepted;
+type Color = | Red | Green | Blue;
+fn name(c: Color) -> i32 = match c { Red => 1; Green => 2; Blue => 3; };
+fn main() -> i32 = name(Blue);

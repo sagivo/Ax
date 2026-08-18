@@ -1,0 +1,3 @@
+//! expect: 14i32
+module conf.bits.or;
+fn main() -> i32 = 12 | 10;

@@ -1,0 +1,11 @@
+{
+  "api": 1,
+  "name": "json",
+  "version": "0.1.0",
+  "kind": "builtin",
+  "source_hash": "c113afc538d5c063b1f2fa1d6da623dcc36ecc6cfb178584de3dd3fc16b2617c",
+  "files": {
+    "std/json/lib.ax": "02bd175f329720378ce83dd56a1b6b1f5291a60182d6c54b5e0d1e8d248a267a"
+  },
+  "deps": []
+}

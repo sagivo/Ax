@@ -1,0 +1,5 @@
+//! expect: -2i32
+// Go and Rust both truncate toward zero: -7/3 == -2, not -3 (that would be
+// floor division). Ax follows.
+module conf.int.div_trunc_negative;
+fn main() -> i32 !{err[DivError]} = int.div_trunc(-7i32, 3i32);

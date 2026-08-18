@@ -1,0 +1,7 @@
+//! expect: 0i32
+// -1 divides everything exactly, so the remainder is zero. This case does not by
+// itself distinguish a backend that substitutes 1 for the divisor (that also
+// gives 0); it is here so the remainder opcode is exercised with a negative
+// divisor at all. `div_by_neg_one_negates` is the one with teeth.
+module conf.int.rem_by_neg_one_is_zero;
+fn main() -> i32 !{err[DivError]} = int.rem(-7i32, -1i32);

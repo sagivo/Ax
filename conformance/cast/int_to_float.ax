@@ -1,0 +1,3 @@
+//! expect: 3f64
+module conf.cast.int_to_float;
+fn main() -> f64 = 3 as f64;

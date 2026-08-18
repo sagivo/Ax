@@ -1,0 +1,20 @@
+//! expect: 25usz
+// `d` starts at 2 and only ever increases, so `n % d` cannot raise and the row
+// says so. Declaring `err[DivError]` here would advertise an error that cannot
+// happen — and force every caller through the fallible ABI to handle it.
+module conf.effects.nonzero_divisor_needs_no_err_row;
+fn is_prime(n: usz) -> bool !{diverge} = {
+    if n < 2 { false } else {
+        let mut d: usz = 2;
+        loop {
+            if d * d > n { return true };
+            if n % d == 0 { return false };
+            d = d + 1;
+        }
+    }
+};
+fn main() -> usz !{diverge} = {
+    let mut c: usz = 0;
+    for i in range(2, 100) { if is_prime(i) { c = c + 1usz } };
+    c
+};

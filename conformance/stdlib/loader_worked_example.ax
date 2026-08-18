@@ -1,0 +1,58 @@
+//! expect-tests
+// The Appendix A worked example, end to end: a capability-mediated read, typed
+// JSON decode driven by the record's layout descriptor, a declared error
+// injection (`from json.Error => LoadJson`), and a stable sort by a float field.
+// Every tier must agree, including the abort-free error path.
+module conf.stdlib.loader_worked_example;
+use std.fs;
+use std.json;
+
+type Rec = { id: u64, name: String, score: f32 };
+
+type LoadError =
+    | LoadIo   { cause: fs.Error }
+    | LoadJson { cause: json.Error }
+    | NegativeScore { index: usz }
+with
+    from fs.Error   => LoadIo;
+    from json.Error => LoadJson;
+
+fn load(fs_cap: fs.ReadCap, a: Alloc, path: &str) -> Vec[Rec]
+    !{io[fs_cap], alloc[a], err[LoadError], diverge}
+= {
+    let raw = fs.read(fs_cap, a, path);
+    let mut recs: Vec[Rec] = json.decode_recs(a, raw);
+    for i in range(0, recs.len()) {
+        if recs.at(i).score < 0.0 {
+            raise NegativeScore { index: i };
+        }
+    };
+    sort(&mut recs, score_desc);
+    recs
+};
+
+fn score_desc(x: &Rec, y: &Rec) -> Ordering = f32.cmp(&y.score, &x.score);
+
+test "sorts descending by score" = {
+    let cap = test.read_cap({ "d.json":
+        `[{"id":1,"name":"a","score":2.0},{"id":2,"name":"b","score":9.5}]` });
+    let rs = load(cap, test.alloc, "d.json");
+    assert(rs.at(0).id == 2u64);
+    assert(rs.at(1).id == 1u64);
+};
+
+test "rejects a negative score" = {
+    let bad = test.read_cap({ "b.json": `[{"id":3,"name":"c","score":-1.0}]` });
+    match attempt load(bad, test.alloc, "b.json") {
+        Err(NegativeScore { index }) => assert(index == 0);
+        _ => fail("expected NegativeScore");
+    };
+};
+
+test "missing file raises through the injection" = {
+    let cap = test.read_cap({ "present.json": `[]` });
+    match attempt load(cap, test.alloc, "absent.json") {
+        Err(LoadIo { cause }) => assert(true);
+        _ => fail("expected LoadIo");
+    };
+};

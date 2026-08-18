@@ -1,0 +1,9 @@
+//! expect: 3u64
+// Without `as` there is no way to change width at all: no implicit numeric
+// conversion exists, so this is the only conversion form.
+module conf.cast.usz_to_u64;
+fn main() -> u64 !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.push(1usz); xs.push(2usz); xs.push(3usz);
+    xs.len() as u64
+};

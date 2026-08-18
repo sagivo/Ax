@@ -1,0 +1,5 @@
+//! expect: 20i32
+// Go test/switch.go: first matching case wins, `_` is the default.
+module conf.control.match_literal;
+fn f(n: i32) -> i32 = match n { 1 => 10; 2 => 20; _ => 99; };
+fn main() -> i32 = f(2);

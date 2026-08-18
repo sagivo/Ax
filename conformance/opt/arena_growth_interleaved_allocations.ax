@@ -1,0 +1,14 @@
+//! expect: 2997usz
+// Two vectors growing in the same region interleave, so neither is always the
+// newest allocation. The in-place growth path must decline whenever extending
+// would run into the other vector's storage.
+module conf.opt.arena_growth_interleaved_allocations;
+fn main() -> usz !{alloc[r]} = region r {
+    let mut a: Vec[usz] = vec.new(r);
+    let mut b: Vec[usz] = vec.new(r);
+    for i in range(0, 1000) {
+        a.push(i);
+        b.push(i * 2usz);
+    };
+    a.at(999) + b.at(999)
+};

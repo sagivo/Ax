@@ -1,0 +1,8 @@
+//! expect: 7usz
+module conf.stdlib.vec_set;
+fn main() -> usz !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.push(1usz);
+    xs.set(0, 7usz);
+    xs.at(0)
+};

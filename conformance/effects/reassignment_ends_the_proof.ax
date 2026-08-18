@@ -1,0 +1,12 @@
+//! expect-error: E0200
+// The guard proves `b != 0`, but `b = t` happens *before* the division, so the
+// proof no longer holds there and the row is required.
+module conf.effects.reassignment_ends_the_proof;
+fn f(a: usz, b0: usz, t: usz) -> usz !{diverge} = {
+    let mut b = b0;
+    while b != 0usz {
+        b = t;
+        let x = a % b;
+    };
+    b
+};

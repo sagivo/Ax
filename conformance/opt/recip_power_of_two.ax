@@ -1,0 +1,15 @@
+//! expect: 56usz
+// A power-of-two invariant divisor that is not a compile-time constant takes
+// the `m == 0` shift path in `ax_div_recip`. `i % 8` for i in 0..16 is two
+// copies of 0..7: 28 + 28.
+module conf.opt.recip_power_of_two;
+fn mix(d: usz) -> usz = {
+    if d != 0 {
+        let mut s: usz = 0;
+        for i in range(0, 16) {
+            s = s + (i % d);
+        };
+        s
+    } else { 0 }
+};
+fn main() -> usz = mix(8);

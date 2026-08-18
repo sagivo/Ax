@@ -1,0 +1,16 @@
+//! expect: 57usz
+// A loop-invariant unsigned divisor that is not a compile-time constant is
+// replaced by a preheader reciprocal. `i % 7` for i in 0..20 is two full
+// residues plus 0..5: 21 + 21 + 15. The oracle has no reciprocal; agreement
+// pins that the transform is exact.
+module conf.opt.recip_invariant_rem;
+fn mix(d: usz) -> usz = {
+    if d != 0 {
+        let mut s: usz = 0;
+        for i in range(0, 20) {
+            s = s + (i % d);
+        };
+        s
+    } else { 0 }
+};
+fn main() -> usz = mix(7);

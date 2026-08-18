@@ -1,0 +1,12 @@
+//! expect: 30usz
+module conf.regions.nested_regions;
+fn main() -> usz !{alloc[outer]} = region outer {
+    let mut a: Vec[usz] = vec.new(outer);
+    a.push(10usz);
+    let inner_total = region inner {
+        let mut b: Vec[usz] = vec.new(inner);
+        b.push(20usz);
+        b.at(0)
+    };
+    a.at(0) + inner_total
+};

@@ -1,0 +1,14 @@
+{
+  "api": 1,
+  "name": "time",
+  "version": "0.0.0-reserved",
+  "kind": "component",
+  "source_hash": "336074805fc853987abe6f7fe3ad97a6a6f3077a16391fec744f671a015fbd7e",
+  "files": {},
+  "deps": [
+    {
+      "name": "core",
+      "version": "0.1.0"
+    }
+  ]
+}

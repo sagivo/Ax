@@ -1,0 +1,8 @@
+//! expect: 0i32
+// An error crosses two call frames before being caught. Each frame forwards the
+// payload without unwinding: the tag is checked at every call site.
+module conf.error.propagate_through_call;
+type E = | Bad;
+fn inner(n: i32) -> i32 !{err[E]} = if n < 0 { raise Bad } else { n };
+fn middle(n: i32) -> i32 !{err[E]} = inner(n) + 1;
+fn main() -> i32 = catch middle(-1) { Bad => 0 };

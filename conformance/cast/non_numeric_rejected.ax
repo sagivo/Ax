@@ -1,0 +1,4 @@
+//! expect-error: E0111
+// `as` converts numbers, not representations: casting a bool is not a bit pun.
+module conf.cast.non_numeric_rejected;
+fn main() -> i32 = true as i32;

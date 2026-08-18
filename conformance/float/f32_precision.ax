@@ -1,0 +1,4 @@
+//! expect: 0.1f32
+// f32 arithmetic stays in f32: no implicit widening to f64 anywhere.
+module conf.float.f32_precision;
+fn main() -> f32 = 0.1f32;

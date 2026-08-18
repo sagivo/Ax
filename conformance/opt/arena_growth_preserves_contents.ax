@@ -1,0 +1,11 @@
+//! expect: 499500usz
+// Arena growth extends in place when the buffer is the newest allocation. If that
+// ever aliased or truncated, the sum would change.
+module conf.opt.arena_growth_preserves_contents;
+fn main() -> usz !{alloc[r]} = region r {
+    let mut xs: Vec[usz] = vec.new(r);
+    for i in range(0, 1000) { xs.push(i); };
+    let mut total = 0usz;
+    for i in range(0, xs.len()) { total = total + xs.at(i); };
+    total
+};

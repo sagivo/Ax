@@ -1,0 +1,5 @@
+//! expect-error: E0200
+// A parameter could be zero, so the row must declare the error. This is the case
+// that keeps the analysis honest.
+module conf.effects.unproven_divisor_still_raises;
+fn f(a: usz, b: usz) -> usz = a % b;

@@ -1,0 +1,14 @@
+{
+  "api": 1,
+  "name": "regex",
+  "version": "0.0.0-reserved",
+  "kind": "component",
+  "source_hash": "42d58222b328681b9923634991312932089876a0242f78cf488157aa24969c1a",
+  "files": {},
+  "deps": [
+    {
+      "name": "core",
+      "version": "0.1.0"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "api": 1,
+  "name": "core",
+  "version": "0.1.0",
+  "kind": "builtin",
+  "source_hash": "ddef1653f1c20e26a50ce54e045acd2fec543d02a2f51b5b0f7e0fee4b73f516",
+  "files": {
+    "std/core/lib.ax": "0d45f5fd462b8c70bffb10021ac1bcff3f58f29b1faf7568595095427d42812c"
+  },
+  "deps": []
+}

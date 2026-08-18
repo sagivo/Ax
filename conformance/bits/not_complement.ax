@@ -1,0 +1,4 @@
+//! expect: -1i32
+// ~0 is all ones, which is -1 in two's complement.
+module conf.bits.not_complement;
+fn main() -> i32 = ~0;

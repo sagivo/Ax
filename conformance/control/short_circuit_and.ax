@@ -1,0 +1,6 @@
+//! expect: true
+// `&&` must not evaluate its right side when the left is false: the division
+// would raise if it were evaluated.
+module conf.control.short_circuit_and;
+fn safe(b: bool, d: i32) -> bool = if b { catch int.div(1, d) == 1 { Zero => false } } else { false };
+fn main() -> bool = !safe(false, 0) && true;

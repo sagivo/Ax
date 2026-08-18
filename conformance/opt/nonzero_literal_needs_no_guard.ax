@@ -1,0 +1,8 @@
+//! expect: 3usz
+// A non-zero literal divisor is unconditionally safe, so the emitted code must
+// contain no zero test at all. Lowering used to emit a guard *and* the
+// already-proven-safe divide, so every division paid a compare and a branch that
+// the checker had just proved dead. The value pins the semantics; the IR shape is
+// pinned by `gate.rs::proven_nonzero_divisor_emits_no_guard`.
+module conf.opt.nonzero_literal_needs_no_guard;
+fn main() -> usz = 17usz % 7usz;

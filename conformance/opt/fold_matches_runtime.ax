@@ -1,0 +1,11 @@
+//! expect: true
+// The folded and unfolded paths must agree. `square(7)` folds; the same
+// computation reached through a runtime value cannot, so comparing them checks
+// that folding did not change the answer.
+module conf.opt.fold_matches_runtime;
+fn square(x: i32) -> i32 = x * x;
+fn main() -> bool = {
+    let mut runtime = 7;
+    runtime = runtime + 0;
+    square(7) == square(runtime)
+};

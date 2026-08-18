@@ -1,0 +1,4 @@
+//! expect: -2i32
+// 2^31-1 * 2 wraps to -2.
+module conf.int.wrap_mul_i32;
+fn main() -> i32 = 2147483647i32 * 2i32;

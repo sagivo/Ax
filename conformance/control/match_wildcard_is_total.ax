@@ -1,0 +1,5 @@
+//! expect: 9i32
+module conf.control.match_wildcard_is_total;
+type Color = | Red | Green | Blue;
+fn name(c: Color) -> i32 = match c { Red => 1; _ => 9; };
+fn main() -> i32 = name(Blue);

@@ -1,0 +1,9 @@
+//! expect-tests
+// Caching requires an empty effect row. A function that prints must run every
+// time, so it must not be cached — the effect is the observable behaviour.
+module conf.opt.memo_skips_impure;
+fn noisy(n: i32) -> i32 !{io[stdout]} = {
+    print("called");
+    if n < 2 { n } else { noisy(n - 1) + noisy(n - 2) }
+};
+test "still recurses" = assert(noisy(5) == 5);

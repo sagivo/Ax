@@ -1,0 +1,11 @@
+{
+  "api": 1,
+  "name": "test",
+  "version": "0.1.0",
+  "kind": "builtin",
+  "source_hash": "f6bb8eb152979da11fcce137d0fd42c2b71e27ba5d7d6df40b2f9ed12032ed39",
+  "files": {
+    "std/test/lib.ax": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+  },
+  "deps": []
+}

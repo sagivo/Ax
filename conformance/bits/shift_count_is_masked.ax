@@ -1,0 +1,7 @@
+//! expect: 1i32
+// Ax defines an over-wide shift count as masked to the operand width, matching
+// the hardware: `1 << 32` on i32 shifts by 32 & 31 == 0. This differs from Go
+// (which yields 0) and from Rust debug builds (which panic); the choice is
+// documented in spec/primitives.md because it is observable.
+module conf.bits.shift_count_is_masked;
+fn main() -> i32 = 1 << 32;

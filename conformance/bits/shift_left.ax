@@ -1,0 +1,3 @@
+//! expect: 8i32
+module conf.bits.shift_left;
+fn main() -> i32 = 1 << 3;

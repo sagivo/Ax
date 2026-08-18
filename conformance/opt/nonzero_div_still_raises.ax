@@ -1,0 +1,5 @@
+//! expect: 0i32
+// The divisor test is what licenses emitting an unchecked divide on the ok-path,
+// so removing the redundant second check must not remove the raise.
+module conf.opt.nonzero_div_still_raises;
+fn main() -> i32 = catch int.div(1, 0) { Zero => 0 };

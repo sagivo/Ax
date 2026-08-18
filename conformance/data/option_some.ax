@@ -1,0 +1,3 @@
+//! expect: Some { value: 3i32 }
+module conf.data.option_some;
+fn main() -> Option[i32] = Some(3);

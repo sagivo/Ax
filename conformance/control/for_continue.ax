@@ -1,0 +1,11 @@
+//! expect: 20usz
+// 0+2+4+6+8 with the odd indices skipped.
+module conf.control.for_continue;
+fn main() -> usz !{err[DivError]} = {
+    let mut sum = 0usz;
+    for i in range(0, 10) {
+        if int.rem(i, 2usz) == 1usz { continue; };
+        sum = sum + i;
+    };
+    sum
+};

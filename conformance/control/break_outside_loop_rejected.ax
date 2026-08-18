@@ -1,0 +1,3 @@
+//! expect-error: E0110
+module conf.control.break_outside_loop_rejected;
+fn main() -> i32 = { break; 1 };

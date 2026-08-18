@@ -1,0 +1,10 @@
+//! expect: 7i32
+module conf.control.loop_with_break;
+fn main() -> i32 !{diverge} = {
+    let mut i = 0;
+    loop {
+        i = i + 1;
+        if i == 7 { break; };
+    };
+    i
+};

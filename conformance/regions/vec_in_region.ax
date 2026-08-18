@@ -1,0 +1,10 @@
+//! expect: 100usz
+// A region's name is an allocator handle, so `vec.new(r)` bump-allocates in the
+// arena and the whole arena is released at the closing brace. This is what makes
+// regions a code-generation feature rather than an annotation.
+module conf.regions.vec_in_region;
+fn main() -> usz !{alloc[r]} = region r {
+    let mut xs: Vec[usz] = vec.new(r);
+    for i in range(0, 100) { xs.push(i); };
+    xs.len()
+};

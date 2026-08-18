@@ -1,0 +1,8 @@
+//! expect: 45usz
+// Go test/for.go: a counted loop accumulating into a mutable local.
+module conf.control.for_range_sum;
+fn main() -> usz = {
+    let mut acc = 0usz;
+    for i in range(0, 10) { acc = acc + i; };
+    acc
+};

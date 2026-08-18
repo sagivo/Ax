@@ -1,0 +1,5 @@
+//! expect: 5i32
+module conf.error.attempt_ok_path;
+type E = | Bad;
+fn f(n: i32) -> i32 !{err[E]} = if n < 0 { raise Bad } else { n };
+fn main() -> i32 = match attempt f(5) { Ok(v) => v; Err(_) => -1; };

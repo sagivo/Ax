@@ -1,0 +1,16 @@
+//! expect: 3usz
+// The bound is `xs.len()` evaluated once at loop entry, and a Vec cannot shrink
+// in v1, so indices stay in range even though the body pushes. The elimination
+// is sound here; if a shrinking operation is ever added this case must change.
+module conf.opt.bce_sound_when_pushing_inside_loop;
+fn main() -> usz !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.push(1usz);
+    xs.push(2usz);
+    let mut total = 0usz;
+    for i in range(0, xs.len()) {
+        total = total + xs.at(i);
+        xs.push(9usz);
+    };
+    total
+};

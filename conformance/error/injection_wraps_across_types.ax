@@ -1,0 +1,18 @@
+//! expect: 20i32
+// A declared `from Inner => Wrapped` converts at the raising function's
+// boundary, so `mid` propagating `deep`'s Inner error yields Outer.Wrapped.
+// Forwarding the payload bytes unchanged would reinterpret Inner's tag as
+// Outer's — which is exactly the bug this pins: with Second (tag 1) and Own2
+// (tag 1), an unwrapped forward reads as Own2.
+module conf.error.injection_wraps_across_types;
+type Inner = | First | Second;
+type Outer = | Wrapped { cause: Inner } | Own2
+with
+    from Inner => Wrapped;
+fn deep() -> i32 !{err[Inner]} = raise Second;
+fn mid() -> i32 !{err[Outer]} = deep();
+fn main() -> i32 = match attempt mid() {
+    Err(Wrapped { cause }) => match cause { First => 10; Second => 20; };
+    Err(Own2) => 2;
+    Ok(v) => 3;
+};

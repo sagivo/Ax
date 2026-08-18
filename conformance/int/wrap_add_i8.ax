@@ -1,0 +1,6 @@
+//! expect: -128i8
+// Go test/: integer overflow wraps for sized types; Rust: `wrapping_add`.
+// Ax makes `+ - *` wrapping unconditionally (spec §3.3), so no annotation is
+// needed and there is no debug/release split in behaviour.
+module conf.int.wrap_add_i8;
+fn main() -> i8 = 127i8 + 1i8;

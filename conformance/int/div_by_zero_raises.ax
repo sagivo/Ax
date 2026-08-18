@@ -1,0 +1,6 @@
+//! expect: 0i32
+// Division by zero is a recoverable error, not a panic: it raises DivError.Zero
+// and the caller may catch it. This is the main place Ax departs from both Go
+// (runtime panic) and Rust (panic).
+module conf.int.div_by_zero_raises;
+fn main() -> i32 = catch int.div(1i32, 0i32) { Zero => 0 };

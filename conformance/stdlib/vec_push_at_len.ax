@@ -1,0 +1,11 @@
+//! expect: 23usz
+// A Vec carries the allocator handle it was created with, so `push` can grow
+// without the call site threading one through.
+module conf.stdlib.vec_push_at_len;
+fn main() -> usz !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.push(10usz);
+    xs.push(20usz);
+    xs.push(30usz);
+    xs.at(1) + xs.len()
+};

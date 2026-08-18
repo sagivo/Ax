@@ -1,0 +1,4 @@
+//! expect: 6i32
+// 0b1100 & 0b1010 == 0b1000; | == 0b1110; ^ == 0b0110 (6).
+module conf.bits.and_or_xor;
+fn main() -> i32 = 12 ^ 10;

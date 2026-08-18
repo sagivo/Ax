@@ -1,0 +1,3 @@
+//! expect: 8i32
+module conf.bits.and;
+fn main() -> i32 = 12 & 10;

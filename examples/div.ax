@@ -1,0 +1,22 @@
+module examples.div;
+export { div, DivError };
+
+type DivError = | Zero;
+
+fn div(a: i32, b: i32) -> i32 !{err[DivError]}
+= if b == 0 { raise Zero } else { int.div_trunc(a, b) };
+
+fn safe_div(a: i32, b: i32) -> i32
+= catch div(a, b) { Zero => 0 };
+
+fn attempted(a: i32, b: i32) -> Result[i32, DivError]
+= attempt div(a, b);
+
+test "div zero raises" = {
+    assert(safe_div(10, 2) == 5);
+    assert(safe_div(10, 0) == 0);
+    match attempt div(7, 0) {
+        Err(Zero) => assert(true);
+        _ => fail("expected Zero");
+    };
+};

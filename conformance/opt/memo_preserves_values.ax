@@ -1,0 +1,7 @@
+//! expect: 6765i32
+// A pure single-argument tree recursion is cached. Caching a function the effect
+// row proves pure cannot change what it returns, so the oracle (which does not
+// cache) and native code (which does) must agree exactly.
+module conf.opt.memo_preserves_values;
+fn fib(n: i32) -> i32 = if n < 2 { n } else { fib(n - 1) + fib(n - 2) };
+fn main() -> i32 = fib(20);

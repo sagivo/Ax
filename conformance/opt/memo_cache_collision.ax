@@ -1,0 +1,7 @@
+//! expect: -4096i32
+// 0, 4096 and 8192 land in the same slot of a 4096-entry direct-mapped cache.
+// The stored key has to be compared or two of these would return the third's
+// value; this case fails loudly if that check is ever dropped.
+module conf.opt.memo_cache_collision;
+fn g(n: i32) -> i32 = if n < 4096 { n } else { g(n - 4096) + g(n - 8192) };
+fn main() -> i32 = g(8192);

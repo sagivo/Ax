@@ -1,0 +1,4 @@
+//! expect: 1i32
+module conf.control.early_return;
+fn f(n: i32) -> i32 = { if n > 0 { return 1; }; 0 };
+fn main() -> i32 = f(5);

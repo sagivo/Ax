@@ -1,0 +1,16 @@
+/target
+**/*.rs.bk
+.DS_Store
+*.pdb
+.ax-cache/
+dist/
+
+# Build products `ax build` leaves next to a source file. The C is a build
+# artifact, not a source of truth: the IR is (see `ax ir`).
+*.release
+*.release.c
+*.dev
+*.dev.c
+*.portable
+*.portable.c
+*.dSYM/

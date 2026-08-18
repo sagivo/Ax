@@ -1,0 +1,8 @@
+//! expect: 144i32
+// A pure function applied to constants is evaluated at compile time. The effect
+// row is the licence: an empty row means the result depends on nothing else.
+// The oracle performs the evaluation, so a folded result cannot disagree with a
+// run. Rust needs `const fn` plus a const context to do this.
+module conf.opt.pure_call_folds;
+fn square(x: i32) -> i32 = x * x;
+fn main() -> i32 = square(12);

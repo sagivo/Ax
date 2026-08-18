@@ -1,0 +1,14 @@
+//! expect: 4932904490461320209u64
+// FNV-1a over four bytes: the standard mixing loop, which needs xor, wrapping
+// multiply, and unsigned arithmetic to agree exactly with any other language's
+// implementation. The expected value was cross-checked against an independent
+// Python implementation of the same loop.
+module conf.bits.fnv_hash;
+fn main() -> u64 = {
+    let mut h = 14695981039346656037u64;
+    for i in range(0, 4) {
+        h = h ^ (i as u64);
+        h = h * 1099511628211u64;
+    };
+    h
+};

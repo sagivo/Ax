@@ -1,0 +1,4 @@
+module examples.hello;
+export { main };
+
+fn main() -> i32 = 1 + 2;

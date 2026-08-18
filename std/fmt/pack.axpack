@@ -1,0 +1,11 @@
+{
+  "api": 1,
+  "name": "fmt",
+  "version": "0.1.0",
+  "kind": "builtin",
+  "source_hash": "df9b0efbd8e69189eb14cf90def5707e39ffed0d90e8f20407ae59ffeefe32b1",
+  "files": {
+    "std/fmt/lib.ax": "c63e082dd70f83c72efe6d52dbc055cc68fe8fe597ca035ecc6c23a363a231b2"
+  },
+  "deps": []
+}

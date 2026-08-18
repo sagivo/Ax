@@ -1,0 +1,10 @@
+//! expect: 3i32
+// Rust ui/shadowing: an inner `let` shadows the outer binding for the rest of
+// the block, and the outer value is unaffected outside it.
+module conf.control.shadowing;
+fn main() -> i32 = {
+    let x = 1;
+    let y = { let x = 2; x + 1 };
+    let _ = x;
+    y
+};

@@ -1,0 +1,4 @@
+//! expect: 99i32
+module conf.control.match_default;
+fn f(n: i32) -> i32 = match n { 1 => 10; 2 => 20; _ => 99; };
+fn main() -> i32 = f(7);

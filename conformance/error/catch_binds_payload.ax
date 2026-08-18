@@ -1,0 +1,5 @@
+//! expect: 7i32
+module conf.error.catch_binds_payload;
+type E = | Code { n: i32 };
+fn f() -> i32 !{err[E]} = raise Code { n: 7 };
+fn main() -> i32 = catch f() { Code { n } => n; };

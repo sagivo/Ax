@@ -1,0 +1,4 @@
+//! expect: 57i8
+// Narrowing keeps the low bits, as Rust's `as` does: 313 & 0xff == 57.
+module conf.cast.narrow_wraps;
+fn main() -> i8 = 313 as i8;

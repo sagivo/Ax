@@ -1,0 +1,3 @@
+//! expect: 7i32
+module conf.opt.nonzero_rem_still_raises;
+fn main() -> i32 = catch int.rem(1, 0) { Zero => 7 };

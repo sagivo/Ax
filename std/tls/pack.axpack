@@ -1,0 +1,14 @@
+{
+  "api": 1,
+  "name": "tls",
+  "version": "0.0.0-reserved",
+  "kind": "component",
+  "source_hash": "b7e651cbb43ba0ca3498759c8c3596c3a11a199004cd9e5a198d50d4585ec8c5",
+  "files": {},
+  "deps": [
+    {
+      "name": "core",
+      "version": "0.1.0"
+    }
+  ]
+}

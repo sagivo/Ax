@@ -1,0 +1,5 @@
+//! expect: 5i32
+module conf.data.variant_payload;
+type Shape = | Dot | Line { len: i32 };
+fn size(s: Shape) -> i32 = match s { Dot => 0; Line { len } => len; };
+fn main() -> i32 = size(Line { len: 5 });

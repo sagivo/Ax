@@ -1,0 +1,6 @@
+//! expect-error: E0200
+// The row is the interface: raising without declaring `err[E]` is a static
+// error, so a caller can never be surprised by an error it cannot see.
+module conf.error.undeclared_raise_rejected;
+type E = | Bad;
+fn f() -> i32 = raise Bad;

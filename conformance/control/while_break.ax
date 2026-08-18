@@ -1,0 +1,10 @@
+//! expect: 5i32
+module conf.control.while_break;
+fn main() -> i32 !{diverge} = {
+    let mut i = 0;
+    while true {
+        if i == 5 { break; };
+        i = i + 1;
+    };
+    i
+};

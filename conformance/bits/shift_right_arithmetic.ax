@@ -1,0 +1,5 @@
+//! expect: -2i32
+// Signed right shift is arithmetic: the sign bit is replicated, as in Go and
+// Rust. -4 >> 1 == -2, not a large positive number.
+module conf.bits.shift_right_arithmetic;
+fn main() -> i32 = -4 >> 1;

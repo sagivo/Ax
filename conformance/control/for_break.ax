@@ -1,0 +1,10 @@
+//! expect: 3usz
+module conf.control.for_break;
+fn main() -> usz = {
+    let mut last = 0usz;
+    for i in range(0, 100) {
+        if i == 3 { break; };
+        last = i;
+    };
+    last + 1usz
+};

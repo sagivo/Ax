@@ -1,0 +1,5 @@
+//! expect-error: E0600
+// `par` is rejected rather than run sequentially: a sequential `par` would make
+// programs with racing mutable captures look correct.
+module conf.concurrency.par_rejected;
+fn main() -> i32 = { par { let a = 1; let b = 2; }; 3 };

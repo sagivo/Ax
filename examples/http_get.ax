@@ -1,0 +1,4 @@
+module examples.http_get;
+export { main };
+
+fn main() -> u64 !{io[net], abort} = http.get_bytesum(argv(1));

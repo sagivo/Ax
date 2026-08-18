@@ -1,0 +1,11 @@
+//! expect: 7i32
+module conf.sort.empty_and_single;
+fn asc(x: &i32, y: &i32) -> Ordering = i32.cmp(x, y);
+fn main() -> i32 !{alloc[a], diverge} = {
+    let mut e: Vec[i32] = vec.new(test.alloc);
+    sort(&mut e, asc);
+    let mut one: Vec[i32] = vec.new(test.alloc);
+    one.push(7);
+    sort(&mut one, asc);
+    one.at(0)
+};

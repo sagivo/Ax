@@ -1,0 +1,5 @@
+//! expect: 6usz
+// `len` is byte length, like Go's len(string) and Rust's str::len. Two-byte
+// code points count twice.
+module conf.string.utf8_len_is_bytes;
+fn main() -> usz = len("héllo");

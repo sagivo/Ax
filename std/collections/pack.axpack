@@ -1,0 +1,11 @@
+{
+  "api": 1,
+  "name": "collections",
+  "version": "0.1.0",
+  "kind": "builtin",
+  "source_hash": "8b826c764a1b43ee70c1d18812bde435a8368c33c559138e0b87d359906707b3",
+  "files": {
+    "std/collections/lib.ax": "00699f600cf5a0ff57479ad90a83a32a0f993732fce1b33adc551556c35d066c"
+  },
+  "deps": []
+}

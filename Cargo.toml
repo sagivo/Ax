@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/ax"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/ax-lang/ax"
+# Set by the Cranelift dev backend, which requires 1.94. Everything else in the
+# workspace still builds on older toolchains; this is the binding constraint.
+rust-version = "1.94"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = 3
+panic = "abort"
+strip = "symbols"
+
+[profile.dev]
+opt-level = 1

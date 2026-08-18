@@ -1,0 +1,4 @@
+//! expect: 2147483646u32
+// Unsigned right shift is logical: no sign extension.
+module conf.bits.shift_right_logical_unsigned;
+fn main() -> u32 = 4294967292u32 >> 1;

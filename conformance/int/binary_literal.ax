@@ -1,0 +1,3 @@
+//! expect: 10i32
+module conf.int.binary_literal;
+fn main() -> i32 = 0b1010;

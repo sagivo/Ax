@@ -1,0 +1,5 @@
+//! expect: 0.30000000000000004f64
+// The classic 0.1 + 0.2. Identical in Go, Rust, and Ax: this is IEEE-754, not
+// a language choice.
+module conf.float.float_add;
+fn main() -> f64 = 0.1 + 0.2;

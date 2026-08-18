@@ -1,0 +1,5 @@
+//! expect: true
+// `&` binds tighter than `==`, as in Rust: this is (12 & 10) == 8, not
+// 12 & (10 == 8).
+module conf.bits.precedence_below_comparison;
+fn main() -> bool = 12 & 10 == 8;

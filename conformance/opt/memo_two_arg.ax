@@ -1,0 +1,8 @@
+//! expect: 210i32
+// A pure two-argument tree recursion is cached. C(10, 4) = 210, and the oracle
+// (which does not cache) must agree with the C tiers (which do) and with
+// Cranelift (which deliberately does not).
+module conf.opt.memo_two_arg;
+fn comb(n: i32, k: i32) -> i32 =
+    if k == 0 { 1 } else { if k == n { 1 } else { comb(n - 1, k - 1) + comb(n - 1, k) } };
+fn main() -> i32 = comb(10, 4);

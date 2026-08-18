@@ -1,0 +1,4 @@
+//! expect: false
+// IEEE-754: NaN != NaN, even canonicalised.
+module conf.float.nan_not_equal_itself;
+fn main() -> bool = { let n = 0.0 / 0.0; n == n };
