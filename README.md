@@ -85,6 +85,7 @@ ax bench io|http|metrics|tokens|all  |  ax eval-loop [--seed N] [--n K]
 ax merge --semantic | label | card | pkg list | pkg write
 ax perf [--json] [--diff baseline.json] | complete | context | repair
 ax bench gate | gate-check
+ax caps | translate | gbnf --check N
 ```
 
 `ax hole --fills` is the piece that matters. It synthesises candidate

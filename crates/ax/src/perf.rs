@@ -467,7 +467,9 @@ pub fn complete(intern: &Interner, checked: &CheckOutput) -> CompleteReport {
         });
     }
     CompleteReport {
-        gbnf_fragment: r#"ident ::= [A-Za-z_][A-Za-z0-9_]*"#.into(),
+        gbnf_fragment: crate::gbnf::fragment_at(
+            &completions.iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
+        ),
         completions,
     }
 }

@@ -496,6 +496,9 @@ impl<'a> Checker<'a> {
                 inferred: env.inferred,
                 contracts: f.contracts.clone(),
             });
+            // Affine `own` is the one place the ownership ladder may reject.
+            // Run it per function as we go so A2020/A2021 land with the rest
+            // of the diagnostics.
             let _ = is_c;
         }
 
@@ -531,7 +534,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        let exports = file
+        let exports: Vec<String> = file
             .exports
             .iter()
             .map(|i| self.intern.get(i.name).to_string())
@@ -566,6 +569,31 @@ impl<'a> Checker<'a> {
             out.dedup_by(|a, b| a.name == b.name);
             out
         };
+        let prelim = CheckOutput {
+            module: self.module.clone(),
+            exports: exports.clone(),
+            fns: checked_fns.clone(),
+            tests: tests.clone(),
+            types: self.type_defs.values().cloned().collect(),
+            dicts: self.dicts.clone(),
+            dict_decls: dict_decls.clone(),
+            diags: Vec::new(),
+            holes: Vec::new(),
+            hashes: Vec::new(),
+            injections: Vec::new(),
+            node_types: Vec::new(),
+            caught: HashMap::new(),
+            pat_variant: HashMap::new(),
+            dict_defaults: HashMap::new(),
+            nonzero_div: Default::default(),
+            nonzero_div_needs_guard: Default::default(),
+            callables: Vec::new(),
+        };
+        let (_own, affine) = crate::ownership::analyze(self.intern, &prelim);
+        for e in affine {
+            self.err(e.code, e.span, e.msg);
+        }
+
         CheckOutput {
             module: self.module.clone(),
             exports,

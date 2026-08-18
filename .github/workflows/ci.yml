@@ -85,3 +85,14 @@ jobs:
 
       - name: §5.6 gate programs compile and agree with C and Rust
         run: cargo run -p ax -- bench gate-check
+
+      - name: GBNF generator/parser equivalence
+        run: cargo run -p ax -- gbnf --check 2000
+
+      - name: rust-to-ax translate strips lifetimes
+        run: |
+          printf 'fn add(x: i32) -> i32 { x }\n' > /tmp/t.rs
+          cargo run -p ax -- translate /tmp/t.rs
+
+      - name: capability reachability
+        run: cargo run -p ax -- caps examples/io_sum.ax

@@ -45,6 +45,9 @@ fn main() -> ExitCode {
         "complete" => cmd_complete(&args),
         "context" => cmd_context(&args),
         "repair" => cmd_repair(&args),
+        "caps" => cmd_caps(&args),
+        "translate" => cmd_translate(&args),
+        "gbnf" => cmd_gbnf(&args),
         "pkg" => cmd_pkg(&args),
         "eval-loop" => cmd_eval_loop(&args),
         "help" | "-h" | "--help" => {
@@ -93,6 +96,9 @@ Usage:
   ax complete --at <pos> [--json] <file>
   ax context [--limit=N] <file>
   ax repair [--apply] [--json] <file>
+  ax caps [--json] <file>
+  ax translate <rust-file>
+  ax gbnf [--check N]
   ax pkg list | ax pkg write
   ax eval-loop [--seed N] [--n K]
 "
@@ -1175,6 +1181,76 @@ fn cmd_repair(args: &[String]) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
+    }
+}
+
+fn cmd_caps(args: &[String]) -> ExitCode {
+    let flags = parse_flags(args);
+    match compile_file(&flags) {
+        Err(c) => c,
+        Ok((s, out)) => {
+            let r = ax::reach::analyze(&s.intern, &out);
+            if flags.json {
+                println!("{}", serde_json::to_string_pretty(&r).unwrap());
+            } else {
+                println!("caps from {}", r.from);
+                for c in &r.capabilities {
+                    if c.reachable {
+                        println!("  {}  {}", c.cap, c.path.join(" → "));
+                    } else {
+                        println!("  {}  (not reachable)", c.cap);
+                    }
+                }
+            }
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+fn cmd_translate(args: &[String]) -> ExitCode {
+    let Some(path) = args.iter().find(|a| !a.starts_with('-')) else {
+        eprintln!("usage: ax translate <rust-file>");
+        return ExitCode::from(2);
+    };
+    let src = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::from(1);
+        }
+    };
+    let r = ax::translate::translate_rust(&src);
+    print!("{}", r.source);
+    for n in &r.notes {
+        eprintln!("note: {n}");
+    }
+    for n in &r.rejected {
+        eprintln!("rejected: {n}");
+    }
+    if r.rejected.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+fn cmd_gbnf(args: &[String]) -> ExitCode {
+    if let Some(n) = args
+        .windows(2)
+        .find(|w| w[0] == "--check")
+        .and_then(|w| w[1].parse::<usize>().ok())
+    {
+        let a = ax::gbnf::check_generator_parses(n, 1);
+        let b = ax::gbnf::check_parser_subset(n, 2);
+        println!("gbnf check  n={n}  gen_parse_fail={a}  fmt_roundtrip_fail={b}");
+        if a == 0 && b == 0 {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        }
+    } else {
+        print!("{}", ax::gbnf::file_gbnf());
+        ExitCode::SUCCESS
     }
 }
 

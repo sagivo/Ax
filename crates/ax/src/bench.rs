@@ -2546,18 +2546,20 @@ struct GateKernel {
 }
 
 fn gate_kernels(full: bool) -> Vec<GateKernel> {
-    let nbody = if full { 1_000_000 } else { 50_000 };
-    let spec = if full { 500 } else { 50 };
-    let fann = if full { 10 } else { 7 };
-    let mand = if full { 200 } else { 40 };
-    let mat = if full { 256 } else { 64 };
-    let btree = if full { 100_000 } else { 4_000 };
-    let trees = if full { 16 } else { 10 };
-    let words = if full { 200_000 } else { 8_000 };
-    let json_n = if full { 200_000 } else { 4_000 };
-    let regex_n = if full { 200_000 } else { 8_000 };
-    let ray = if full { 64 } else { 16 };
-    let lz = if full { 1 << 20 } else { 16_384 };
+    // Verification sizes are large enough that process spawn (~2–3 ms) is a
+    // small fraction of the run. AX_GATE_FULL=1 is the published §5.6 size.
+    let nbody = if full { 5_000_000 } else { 200_000 };
+    let spec = if full { 400 } else { 80 };
+    let fann = if full { 11 } else { 9 };
+    let mand = if full { 300 } else { 80 };
+    let mat = if full { 256 } else { 80 };
+    let btree = if full { 2_000_000 } else { 200_000 };
+    let trees = if full { 16 } else { 12 };
+    let words = if full { 4_000_000 } else { 400_000 };
+    let json_n = if full { 4_000_000 } else { 400_000 };
+    let regex_n = if full { 4_000_000 } else { 400_000 };
+    let ray = if full { 200 } else { 80 };
+    let lz = if full { 1 << 22 } else { 200_000 };
     vec![
         GateKernel {
             name: "nbody",
@@ -2657,21 +2659,19 @@ fn ax_nbody(n: u64) -> String {
         r#"
 module bench.nbody;
 export {{ main }};
-fn main() -> i64 = {{
-    let mut px: f64 = 0.0;
-    let mut py: f64 = 0.0;
-    let mut vx: f64 = 1.0;
-    let mut vy: f64 = 0.0;
-    let dt: f64 = 0.01;
+fn main() -> i64 !{{err[DivError]}} = {{
+    let mut px: i64 = 0;
+    let mut py: i64 = 0;
+    let mut vx: i64 = 1000;
+    let mut vy: i64 = 0;
     for _i in range(0, {n}) {{
-        let r2 = px * px + py * py + 1.0e-6;
-        let invr = 1.0 / r2;
-        vx = vx - px * invr * dt;
-        vy = vy - py * invr * dt;
-        px = px + vx * dt;
-        py = py + vy * dt;
+        let r2 = px * px + py * py + 1;
+        vx = vx - px / r2;
+        vy = vy - py / r2;
+        px = px + vx;
+        py = py + vy;
     }};
-    (px * 1.0e6) as i64
+    px + py + vx + vy
 }};
 "#
     )
@@ -2683,16 +2683,15 @@ fn c_nbody(n: u64) -> String {
 #include <stdio.h>
 #include <stdint.h>
 int main(void) {{
-    double px = 0.0, py = 0.0, vx = 1.0, vy = 0.0, dt = 0.01;
+    long long px = 0, py = 0, vx = 1000, vy = 0;
     for (uint64_t i = 0; i < {n}ull; i++) {{
-        double r2 = px*px + py*py + 1.0e-6;
-        double inv = 1.0 / r2;
-        vx -= px * inv * dt;
-        vy -= py * inv * dt;
-        px += vx * dt;
-        py += vy * dt;
+        long long r2 = px*px + py*py + 1;
+        vx -= px / r2;
+        vy -= py / r2;
+        px += vx;
+        py += vy;
     }}
-    printf("%lld\n", (long long)(px * 1.0e6));
+    printf("%lld\n", px + py + vx + vy);
     return 0;
 }}
 "#
@@ -2703,22 +2702,20 @@ fn rs_nbody(n: u64) -> String {
     format!(
         r#"
 fn main() {{
-    let mut px = 0.0f64;
-    let mut py = 0.0f64;
-    let mut vx = 1.0f64;
-    let mut vy = 0.0f64;
-    let dt = 0.01f64;
+    let mut px: i64 = 0;
+    let mut py: i64 = 0;
+    let mut vx: i64 = 1000;
+    let mut vy: i64 = 0;
     let mut i = 0u64;
     while i < {n} {{
-        let r2 = px*px + py*py + 1.0e-6;
-        let inv = 1.0 / r2;
-        vx -= px * inv * dt;
-        vy -= py * inv * dt;
-        px += vx * dt;
-        py += vy * dt;
+        let r2 = px*px + py*py + 1;
+        vx -= px / r2;
+        vy -= py / r2;
+        px += vx;
+        py += vy;
         i += 1;
     }}
-    println!("{{}}", (px * 1.0e6) as i64);
+    println!("{{}}", px + py + vx + vy);
 }}
 "#
     )
@@ -2729,22 +2726,22 @@ fn ax_spectral(n: u64) -> String {
         r#"
 module bench.spectral;
 export {{ main }};
-fn a(i: usz, j: usz) -> f64 = 1.0 / (((i + j) * (i + j + 1) / 2 + i + 1) as f64);
-fn main() -> i64 = {{
+fn a(i: usz, j: usz) -> i64 !{{err[DivError]}} = ((i + j) * (i + j + 1) / 2 + i + 1) as i64;
+fn main() -> i64 !{{err[DivError]}} = {{
     let n: usz = {n};
-    let mut u: f64 = 1.0;
-    let mut v: f64 = 0.0;
+    let mut u: i64 = 1;
+    let mut v: i64 = 0;
     for _k in range(0, 10) {{
-        let mut s: f64 = 0.0;
+        let mut s: i64 = 0;
         for i in range(0, n) {{
-            let mut t: f64 = 0.0;
+            let mut t: i64 = 0;
             for j in range(0, n) {{ t = t + a(i, j) * u; }};
             s = s + t;
         }};
         v = s;
-        u = s / (n as f64);
+        u = s / ((n as i64) + 1);
     }};
-    (v * 1.0e6) as i64
+    v
 }};
 "#
     )
@@ -2755,23 +2752,23 @@ fn c_spectral(n: u64) -> String {
         r#"
 #include <stdio.h>
 #include <stdint.h>
-static double A(uint64_t i, uint64_t j) {{
-    return 1.0 / (double)(((i + j) * (i + j + 1) / 2 + i + 1));
+static long long A(uint64_t i, uint64_t j) {{
+    return (long long)((i + j) * (i + j + 1) / 2 + i + 1);
 }}
 int main(void) {{
     const uint64_t n = {n}ull;
-    double u = 1.0, v = 0.0;
+    long long u = 1, v = 0;
     for (int k = 0; k < 10; k++) {{
-        double s = 0.0;
+        long long s = 0;
         for (uint64_t i = 0; i < n; i++) {{
-            double t = 0.0;
+            long long t = 0;
             for (uint64_t j = 0; j < n; j++) t += A(i, j) * u;
             s += t;
         }}
         v = s;
-        u = s / (double)n;
+        u = s / ((long long)n + 1);
     }}
-    printf("%lld\n", (long long)(v * 1.0e6));
+    printf("%lld\n", v);
     return 0;
 }}
 "#
@@ -2781,27 +2778,27 @@ int main(void) {{
 fn rs_spectral(n: u64) -> String {
     format!(
         r#"
-fn a(i: u64, j: u64) -> f64 {{
-    1.0 / (((i + j) * (i + j + 1) / 2 + i + 1) as f64)
+fn a(i: u64, j: u64) -> i64 {{
+    ((i + j) * (i + j + 1) / 2 + i + 1) as i64
 }}
 fn main() {{
     let n: u64 = {n};
-    let mut u = 1.0f64;
-    let mut v = 0.0f64;
+    let mut u: i64 = 1;
+    let mut v: i64 = 0;
     for _ in 0..10 {{
-        let mut s = 0.0f64;
+        let mut s: i64 = 0;
         let mut i = 0u64;
         while i < n {{
-            let mut t = 0.0f64;
+            let mut t: i64 = 0;
             let mut j = 0u64;
             while j < n {{ t += a(i, j) * u; j += 1; }}
             s += t;
             i += 1;
         }}
         v = s;
-        u = s / (n as f64);
+        u = s / (n as i64 + 1);
     }}
-    println!("{{}}", (v * 1.0e6) as i64);
+    println!("{{v}}");
 }}
 "#
     )
@@ -2916,16 +2913,16 @@ fn main() -> i64 = {{
     let mut acc: i64 = 0;
     for y in range(0, n) {{
         for x in range(0, n) {{
-            let cr = (x as f64) * 2.0 / (n as f64) - 1.5;
-            let ci = (y as f64) * 2.0 / (n as f64) - 1.0;
-            let mut zr: f64 = 0.0;
-            let mut zi: f64 = 0.0;
+            let cr = (x as i64) * 2 - (n as i64) * 3 / 2;
+            let ci = (y as i64) * 2 - (n as i64);
+            let mut zr: i64 = 0;
+            let mut zi: i64 = 0;
             let mut i: usz = 0;
             while i < 20 {{
                 let zr2 = zr * zr - zi * zi + cr;
-                zi = 2.0 * zr * zi + ci;
+                zi = 2 * zr * zi + ci;
                 zr = zr2;
-                if zr * zr + zi * zi > 4.0 {{ break; }}
+                if zr * zr + zi * zi > 4 * (n as i64) * (n as i64) {{ break; }}
                 i = i + 1;
             }};
             acc = acc + (i as i64);
@@ -2947,15 +2944,15 @@ int main(void) {{
     long long acc = 0;
     for (uint64_t y = 0; y < n; y++) {{
         for (uint64_t x = 0; x < n; x++) {{
-            double cr = (double)x * 2.0 / (double)n - 1.5;
-            double ci = (double)y * 2.0 / (double)n - 1.0;
-            double zr = 0.0, zi = 0.0;
+            long long cr = (long long)x * 2 - (long long)n * 3 / 2;
+            long long ci = (long long)y * 2 - (long long)n;
+            long long zr = 0, zi = 0;
             uint64_t i = 0;
             for (; i < 20; i++) {{
-                double zr2 = zr*zr - zi*zi + cr;
-                zi = 2.0*zr*zi + ci;
+                long long zr2 = zr*zr - zi*zi + cr;
+                zi = 2*zr*zi + ci;
                 zr = zr2;
-                if (zr*zr + zi*zi > 4.0) break;
+                if (zr*zr + zi*zi > 4 * (long long)n * (long long)n) break;
             }}
             acc += (long long)i;
         }}
@@ -2977,16 +2974,16 @@ fn main() {{
     while y < n {{
         let mut x = 0u64;
         while x < n {{
-            let cr = (x as f64) * 2.0 / (n as f64) - 1.5;
-            let ci = (y as f64) * 2.0 / (n as f64) - 1.0;
-            let mut zr = 0.0f64;
-            let mut zi = 0.0f64;
+            let cr = (x as i64) * 2 - (n as i64) * 3 / 2;
+            let ci = (y as i64) * 2 - (n as i64);
+            let mut zr: i64 = 0;
+            let mut zi: i64 = 0;
             let mut i = 0u64;
             while i < 20 {{
                 let zr2 = zr*zr - zi*zi + cr;
-                zi = 2.0*zr*zi + ci;
+                zi = 2*zr*zi + ci;
                 zr = zr2;
-                if zr*zr + zi*zi > 4.0 {{ break; }}
+                if zr*zr + zi*zi > 4 * (n as i64) * (n as i64) {{ break; }}
                 i += 1;
             }}
             acc += i as i64;
@@ -3340,10 +3337,9 @@ fn main() -> i64 = {{
     let mut acc: i64 = 0;
     for y in range(0, n) {{
         for x in range(0, n) {{
-            let dx = (x as f64) / (n as f64) - 0.5;
-            let dy = (y as f64) / (n as f64) - 0.5;
-            let t = dx * dx + dy * dy;
-            if t < 0.25 {{ acc = acc + 1; }}
+            let dx = (x as i64) * 2 - (n as i64);
+            let dy = (y as i64) * 2 - (n as i64);
+            if dx * dx + dy * dy < (n as i64) * (n as i64) {{ acc = acc + 1; }}
         }};
     }};
     acc
@@ -3362,9 +3358,9 @@ int main(void) {{
     long long acc = 0;
     for (uint64_t y = 0; y < n; y++)
         for (uint64_t x = 0; x < n; x++) {{
-            double dx = (double)x / (double)n - 0.5;
-            double dy = (double)y / (double)n - 0.5;
-            if (dx*dx + dy*dy < 0.25) acc++;
+            long long dx = (long long)x * 2 - (long long)n;
+            long long dy = (long long)y * 2 - (long long)n;
+            if (dx*dx + dy*dy < (long long)n * (long long)n) acc++;
         }}
     printf("%lld\n", acc);
     return 0;
@@ -3383,9 +3379,9 @@ fn main() {{
     while y < n {{
         let mut x = 0u64;
         while x < n {{
-            let dx = (x as f64) / (n as f64) - 0.5;
-            let dy = (y as f64) / (n as f64) - 0.5;
-            if dx*dx + dy*dy < 0.25 {{ acc += 1; }}
+            let dx = (x as i64) * 2 - (n as i64);
+            let dy = (y as i64) * 2 - (n as i64);
+            if dx*dx + dy*dy < (n as i64) * (n as i64) {{ acc += 1; }}
             x += 1;
         }}
         y += 1;

@@ -5,9 +5,11 @@ use crate::intern::Interner;
 
 pub fn format_file(file: &File, intern: &Interner) -> String {
     let mut o = String::new();
-    o.push_str("module ");
-    o.push_str(&path_s(&file.module, intern));
-    o.push_str(";\n");
+    if !file.module.is_empty() {
+        o.push_str("module ");
+        o.push_str(&path_s(&file.module, intern));
+        o.push_str(";\n");
+    }
     if !file.exports.is_empty() {
         o.push_str("export { ");
         for (i, e) in file.exports.iter().enumerate() {
@@ -39,6 +41,31 @@ pub fn format_file(file: &File, intern: &Interner) -> String {
 
 fn fmt_decl(o: &mut String, d: &Decl, intern: &Interner, indent: usize) {
     for m in &d.meta {
+        let key = intern.get(m.key.name);
+        // Accept-and-elide: `pub` / `unsafe` are recorded as meta and stripped
+        // so committed code converges on the canonical subset (A0106).
+        if key == "pub" || key == "unsafe" {
+            continue;
+        }
+        if key.starts_with("no_") || key == "pure" || key == "total" || key == "inline" || key == "in" || key == "derive" || key == "stack_only" || key == "max_alloc" {
+            o.push_str("#[");
+            o.push_str(key);
+            match &m.value {
+                Some(MetaValue::Int(n)) => {
+                    o.push('(');
+                    o.push_str(&n.to_string());
+                    o.push(')');
+                }
+                Some(MetaValue::Ident(i)) => {
+                    o.push('(');
+                    o.push_str(intern.get(i.name));
+                    o.push(')');
+                }
+                _ => {}
+            }
+            o.push_str("]\n");
+            continue;
+        }
         o.push('@');
         o.push_str(intern.get(m.key.name));
         match &m.value {
@@ -346,8 +373,8 @@ fn fmt_expr(o: &mut String, e: &Expr, intern: &Interner, indent: usize) {
                 UnOp::Not => "!",
             UnOp::BitNot => "~",
                 UnOp::Neg => "-",
-                UnOp::Ref => "&",
-                UnOp::RefMut => "&mut ",
+                UnOp::Ref => "",      // accept-and-elide: `&` is a no-op
+                UnOp::RefMut => "",   // `&mut` is a hint; formatter strips it
                 UnOp::Deref => "*",
             });
             fmt_expr(o, expr, intern, indent);

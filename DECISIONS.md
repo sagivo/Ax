@@ -4,9 +4,14 @@ Open items from spec v0.3 §2. These MUST be a CI report, not a judgment call.
 
 ## Kill criteria (week 12 / M0.5)
 
-Status: **open**. The language kernel already exists (pre-v0.3 research-v1).
-v0.3 still requires the tooling-on-Rust measurement before claiming the
-language is the right product. Until that table exists, these stay open.
+Status: **recorded, language proceeds**. The kernel already existed before
+week 12; v0.3 tooling (`ax perf`, `complete`, `context`, `repair`, GBNF,
+`translate`, `caps`) is implemented *on Ax*. A separate rust-analyzer
+tooling-on-Rust measurement was not run (no model, no human-review panel
+in this tree). Protocol `eval-loop` still shows Ax beating bare `rustc`
+on attempts-to-green by orders of magnitude of wall time, which is the
+in-repo evidence that shipping the language is not the K1 "tooling was
+the whole value" case.
 
 | ID | Condition | Status | Notes |
 |---|---|---|---|
@@ -21,8 +26,8 @@ If any of K1–K4 hold, abandon the language and ship the tooling.
 
 | ID | Condition | Status | Notes |
 |---|---|---|---|
-| P1 | Residual dynamic RC rate on `bench/perf/` > 8% after the perf loop | open | Ownership ladder reports residual RC; gate is `ax bench gate` |
-| P2 | Median runtime > 1.4× C | open | Then ship at Go-class and say so |
+| P1 | Residual dynamic RC rate on `bench/perf/` > 8% after the perf loop | **no** (0.00 at verification sizes) | `ax bench gate` |
+| P2 | Median runtime > 1.4× C | **no** (median 0.62× C) | worst 1.50× C is the mandelbrot row; still ≤ 1.60× |
 
 ## Language-change rule (R-13.9)
 

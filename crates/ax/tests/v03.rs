@@ -195,3 +195,71 @@ fn main() -> i64 = checksum_no_alloc(2);
         r.contracts
     );
 }
+
+#[test]
+fn gbnf_generated_strings_parse() {
+    let fails = ax::gbnf::check_generator_parses(200, 42);
+    assert_eq!(fails, 0, "generator produced {fails} unparsable strings");
+    let fails = ax::gbnf::check_parser_subset(200, 7);
+    assert_eq!(fails, 0, "format round-trip failed on {fails} strings");
+}
+
+#[test]
+fn translate_strips_rust_noise() {
+    let rust = r#"
+pub fn add<'a>(x: &'a i32, y: &'a i32) -> i32 {
+    let z = Box::new(*x);
+    z.clone() + *y
+}
+"#;
+    let r = ax::translate::translate_rust(rust);
+    assert!(!r.source.contains("Box::new"), "{}", r.source);
+    assert!(!r.source.contains(".clone()"), "{}", r.source);
+    assert!(!r.source.contains("'a"), "{}", r.source);
+    assert!(r.notes.iter().any(|n| n.contains("lifetime") || n.contains("Box") || n.contains("clone")));
+}
+
+#[test]
+fn translate_rejects_unknown_macros() {
+    let rust = r#"fn f() { println!("hi"); todo!("no"); }"#;
+    let r = ax::translate::translate_rust(rust);
+    assert!(r.rejected.iter().any(|x| x.contains("todo")), "{:?}", r.rejected);
+}
+
+#[test]
+fn caps_reports_shortest_path() {
+    let src = r#"
+module t;
+fn inner() -> u64 !{io[fs], abort} = io.bytesum_file("x");
+fn main() -> u64 !{io[fs], abort} = inner();
+"#;
+    let (s, out) = compile(src);
+    let r = ax::reach::analyze(&s.intern, &out);
+    let io = r.capabilities.iter().find(|c| c.cap == "io").expect("io cap");
+    assert!(io.reachable, "{r:?}");
+    assert!(io.path.len() >= 2, "path {:?}", io.path);
+}
+
+#[test]
+fn own_unused_is_check_error() {
+    let src = r#"
+module t;
+fn take(p: own i32) -> i32 = 0;
+fn main() -> i32 = 0;
+"#;
+    let mut s = Session::new();
+    match s.compile("t.ax", src) {
+        Ok(_) => panic!("expected A2021"),
+        Err(d) => assert!(d.iter().any(|x| x.code == "A2021"), "{d:?}"),
+    }
+}
+
+#[test]
+fn formatter_strips_ref_and_pub() {
+    let src = "pub fn go(x: i32) -> i32 { &x }\n";
+    let mut intern = ax::Interner::new();
+    let file = Parser::parse_file(src, FileId(0), &mut intern).unwrap();
+    let out = ax::fmt::format_file(&file, &intern);
+    assert!(!out.contains("pub "), "{out}");
+    assert!(!out.contains("&x"), "{out}");
+}
