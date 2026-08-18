@@ -1,0 +1,17 @@
+//@ id:        T-INV-0021
+//@ requires:  R-1.2.2, R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/borrowck/borrowck-lend-flow-if.rs (E0502)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      inverted-mechanical
+//@ expect:    value: 4i32
+//@ diags:     A0101
+// Rust: conditional freeze then `&mut` is E0502. Ax compiles.
+module tests.rust_ported.inverted.e0502_cond_freeze;
+fn main() -> i32 = {
+    let mut v: i32 = 3;
+    let w = if true { &v } else { &v };
+    let m = &mut v;
+    v = 4;
+    v
+};

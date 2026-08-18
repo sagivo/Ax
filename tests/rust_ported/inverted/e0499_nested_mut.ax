@@ -1,0 +1,18 @@
+//@ id:        T-INV-0023
+//@ requires:  R-1.2.2, R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/borrowck/borrowck-borrow-from-owned-ptr.rs (E0499 nested)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      inverted-mechanical
+//@ expect:    value: 1i32
+//@ diags:     A0101
+// Rust: `&mut foo.bar1.int1` then `&mut foo.bar1` is E0499. Ax compiles.
+module tests.rust_ported.inverted.e0499_nested_mut;
+type Bar = { int1: i32, int2: i32 };
+type Foo = { bar1: Bar, bar2: Bar };
+fn main() -> i32 = {
+    let mut foo = Foo { bar1: Bar { int1: 1, int2: 2 }, bar2: Bar { int1: 3, int2: 4 } };
+    let a = &mut foo.bar1.int1;
+    let b = &mut foo.bar1;
+    foo.bar1.int1
+};

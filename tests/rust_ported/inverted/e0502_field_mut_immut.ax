@@ -1,0 +1,17 @@
+//@ id:        T-INV-0012
+//@ requires:  R-1.2.2, R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/borrowck/borrow-tuple-fields.rs (E0502)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      inverted-mechanical
+//@ expect:    value: 3i32
+//@ diags:     A0101
+// Rust: `&x.0` then `&mut x.0` is E0502. Ax compiles.
+module tests.rust_ported.inverted.e0502_field_mut_immut;
+type Bar = { a: i32, b: i32 };
+fn main() -> i32 = {
+    let mut x = Bar { a: 1, b: 2 };
+    let p = &x.a;
+    let q = &mut x.a;
+    x.a + x.b
+};

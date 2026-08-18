@@ -1,0 +1,9 @@
+//@ id:        T-DIFF-0005
+//@ requires:  R-3.3.1
+//@ origin:    authored rustc-oracle companion
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      oracle
+//@ expect:    rustc-oracle
+module tests.differential.match_lit;
+fn main() -> i32 = match 1 { 0 => 0; 1 => 2; _ => 9 };

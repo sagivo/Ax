@@ -1,0 +1,10 @@
+//@ id:        T-DIFF-0008
+//@ requires:  R-3.3.1
+//@ origin:    authored rustc-oracle companion
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      oracle
+//@ expect:    rustc-oracle
+module tests.differential.record;
+type P = { x: i32, y: i32 };
+fn main() -> i32 = { let p = P { x: 4, y: 9 }; p.x + p.y };

@@ -47,11 +47,13 @@ fn main() -> ExitCode {
         "repair" => cmd_repair(&args),
         "caps" => cmd_caps(&args),
         "translate" => cmd_translate(&args),
+        "harvest" => cmd_harvest(&args),
         "gbnf" => cmd_gbnf(&args),
         "testharness" => cmd_testharness(&args),
         "daemon" => cmd_daemon(&args),
         "kill-criteria" => cmd_kill_criteria(&args),
         "silent-wrongness" => cmd_silent(&args),
+        "k1" => cmd_k1(&args),
         "pkg" => cmd_pkg(&args),
         "eval-loop" => cmd_eval_loop(&args),
         "help" | "-h" | "--help" => {
@@ -102,11 +104,13 @@ Usage:
   ax repair [--apply] [--json] <file>
   ax caps [--json] <file>
   ax translate <rust-file>
+  ax harvest <rust-tests-ui-dir>
   ax gbnf [--check N]
   ax testharness [filter]
   ax daemon
   ax kill-criteria
   ax silent-wrongness [--json] [filter]
+  ax k1 [--json] [--seed N] [--n K]
   ax pkg list | ax pkg write
   ax eval-loop [--seed N] [--n K]
 "
@@ -1274,6 +1278,37 @@ fn cmd_translate(args: &[String]) -> ExitCode {
     }
 }
 
+fn cmd_harvest(args: &[String]) -> ExitCode {
+    let Some(dir) = args.iter().find(|a| !a.starts_with('-')) else {
+        eprintln!("usage: ax harvest <rust-tests-ui-dir>");
+        return ExitCode::from(2);
+    };
+    let dest = ax::testharness::suite_dir().join("rust_ported/inverted/harvested");
+    match ax::harvest::harvest_into(
+        Path::new(dir),
+        &dest,
+        "4d91de4e48198da2e33413efdcd9cd2cc0c46688",
+    ) {
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::from(1)
+        }
+        Ok(r) => {
+            println!(
+                "harvest  hits={}  written={}  skipped_unsafe_or_macro={}  skipped_other={}",
+                r.hits.len(),
+                r.written.len(),
+                r.skipped_unsafe_or_macro,
+                r.skipped_other.len()
+            );
+            for s in r.skipped_other.iter().take(20) {
+                eprintln!("skipped: {s}");
+            }
+            ExitCode::SUCCESS
+        }
+    }
+}
+
 fn cmd_testharness(args: &[String]) -> ExitCode {
     let filter = args.iter().find(|a| !a.starts_with('-')).cloned();
     let root = ax::testharness::suite_dir();
@@ -1312,6 +1347,21 @@ fn cmd_daemon(_args: &[String]) -> ExitCode {
             continue;
         }
         println!("{}", ax::daemon::handle_line(&line));
+    }
+    ExitCode::SUCCESS
+}
+
+fn cmd_k1(args: &[String]) -> ExitCode {
+    let flags = parse_flags(args);
+    let n = args
+        .windows(2)
+        .find_map(|w| if w[0] == "--n" { w[1].parse().ok() } else { None })
+        .unwrap_or(24);
+    let r = ax::evalloop::run_2x2(flags.seed, n, 12);
+    if flags.json {
+        println!("{}", serde_json::to_string_pretty(&r).unwrap());
+    } else {
+        print!("{}", ax::evalloop::render_2x2(&r));
     }
     ExitCode::SUCCESS
 }

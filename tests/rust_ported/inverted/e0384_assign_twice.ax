@@ -1,0 +1,14 @@
+//@ id:        T-INV-0016
+//@ requires:  R-1.2.2, R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/borrowck/assign-imm-local-twice.rs
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      inverted-mechanical
+//@ expect:    value: 2i32
+// Rust: second assign to immutable `v` is rejected. Ax uses `let mut`.
+module tests.rust_ported.inverted.e0384_assign_twice;
+fn main() -> i32 = {
+    let mut v: i32 = 1;
+    v = 2;
+    v
+};

@@ -49,3 +49,43 @@ Why: holes are an incomplete-build status.
 
 ## E0009 / own reserved (historical)
 v0.3 accepts `own T`. If you still see a reservation error, update the toolchain.
+
+## E0100 unknown name
+Wrong: `fn main() -> i32 = no_such_name;`
+Right: bind the name, or import the module that defines it
+Why: every path must resolve; the harness emits this from `tests/diagnostics/unknown_name.ax`.
+
+## E0103 arity mismatch
+Wrong: `add(1)` when `add` takes two arguments
+Right: `add(1, 2)`
+Why: Ax does not default missing arguments.
+
+## E0104 unknown field
+Wrong: `r.nope` on `{ x: i32 }`
+Right: `r.x`
+Why: field names are checked, not delayed to runtime.
+
+## E0106 not a function
+Wrong: `let x: i32 = 1; x(2)`
+Right: call a function, or index/match the value
+Why: only function-typed values are callable.
+
+## E0112 non-exhaustive match
+Wrong: `match c { Red => 1; Green => 2; }` on `| Red | Green | Blue`
+Right: cover every variant, or add `_ => …`
+Why: a missed case is an abort at runtime if it were accepted.
+
+## A2020 own use-after-move
+Wrong: `fn take(p: own i32) -> i32 = p + p;`
+Right: `fn take(p: own i32) -> i32 = p;`
+Why: affine `own T` is used exactly once; a second use is A2020 (`tests/affine/use_after_move.ax`).
+
+## A5102 Secret in format
+Wrong: `f"secret {s}"` when `s: Secret[i32]`
+Right: do not format secrets; declassify only at an audited sink
+Why: Secret cannot reach f-strings (`tests/taint/secret_fstring.ax`).
+
+## capturing lambda (native)
+Wrong: `|x| x + n` when `n` is a local
+Right: `|x, n| x + n` and pass `n` at the call site
+Why: v1 function values are bare pointers; they do not carry an environment.

@@ -1,0 +1,15 @@
+//@ id:        T-INV-0015
+//@ requires:  R-1.2.2, R-1.1.2
+//@ origin:    rust-lang/rust tests/ui/borrowck/borrowck-argument.rs (E0596)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      inverted-mechanical
+//@ expect:    value: 3i32
+//@ diags:     A0101
+// Rust: `&mut` of an immutable binding is E0596. Ax elides `&mut`.
+module tests.rust_ported.inverted.e0596_mut_arg;
+fn bump(x: i32) -> i32 = {
+    let m = &mut x;
+    x + 1
+};
+fn main() -> i32 = bump(2);

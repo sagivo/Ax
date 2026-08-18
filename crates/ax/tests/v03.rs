@@ -420,8 +420,51 @@ fn ax_mock_n200_validity() {
 
 #[test]
 fn fuzz_oracle_vs_native_small() {
-    let fails = ax::fuzz::differential(12, 7);
-    assert_eq!(fails, 0, "{fails} disagreements");
+    let r = ax::fuzz::differential_report(32, 7);
+    assert_eq!(r.fails, 0, "{} disagreements:\n{}", r.fails, r.details.join("\n"));
+}
+
+#[test]
+fn unique_free_emitted_for_map_local() {
+    let src = r#"
+module t;
+fn main() -> i64 !{alloc[a]} = {
+    let mut m: Map[String, i64] = map.new(test.alloc);
+    m.insert("k", 7i64);
+    match m.get("k") { Some(v) => v; None => 0; }
+};
+"#;
+    let (s, out) = compile(src);
+    let prog = ax::lower::lower_program(&s.intern, &out).expect("lower");
+    let dump = prog.to_text();
+    assert!(
+        dump.contains("unique.free"),
+        "expected UniqueFree in IR for last-use Map:\n{dump}"
+    );
+}
+
+#[test]
+fn capturing_lambda_suggests_env_param() {
+    let src = r#"
+module t;
+fn main() -> i32 = {
+    let n: i32 = 3;
+    let f = |x: i32| x + n;
+    f(1)
+};
+"#;
+    let mut s = Session::new();
+    match s.compile("t.ax", src) {
+        Ok(out) => {
+            let err = ax::lower::lower_program(&s.intern, &out).unwrap_err();
+            assert!(err.contains("captures `n`"), "{err}");
+            assert!(err.contains("|x, n|"), "{err}");
+        }
+        Err(d) => {
+            let msg = format!("{d:?}");
+            assert!(msg.contains("n") || msg.contains("capture"), "{msg}");
+        }
+    }
 }
 
 #[test]

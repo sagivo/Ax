@@ -1,0 +1,9 @@
+//@ id:        T-DIFF-0007
+//@ requires:  R-3.3.1
+//@ origin:    authored rustc-oracle companion
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      oracle
+//@ expect:    rustc-oracle
+module tests.differential.shadow;
+fn main() -> i32 = { let x: i32 = 1; let x: i32 = 2; x };

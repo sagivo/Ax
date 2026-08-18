@@ -215,23 +215,57 @@ five. Two things got it there, and neither is cosmetic:
 Shortening keywords would *not* have helped: `fn` and `f` are both one token. What
 costs tokens is syntax that exists, so the wins came from removing it.
 
-**Cost to reach a working program** — every candidate written out plus every byte
-of compiler output read back, over five seeds (`ax eval-loop --seed S --n 6`):
+**Cost to reach a working program.** An earlier version of this section compared
+Ax-with-its-protocol against bare `rustc` and reported ~600× less wall time,
+fewer cycles, and up to 8.6× fewer tokens. That was the wrong control, and not
+by a little: it varied the language and the protocol at the same time, so it
+could not tell which one produced the result. Since the whole question is
+whether the language is needed or only the protocol, that comparison answered
+nothing. `ax k1` runs all four cells; medians over four seeds, n=12:
 
-| metric | ax | rust (real `rustc`) | ratio |
+| cell | median attempts | median wall | median tokens |
 |---|---:|---:|---:|
-| wall time to green | 1.0–1.4 ms | 685–904 ms | **~600× less** |
-| compile-and-run cycles | 1.0–2.5 | 3.0 every seed | fewer or equal |
-| tokens written + read | 64–72 | 75–569 | 1.04×–8.6× less |
+| ax + protocol | 1.0 | **0.6–1.0 ms** | 64–77 |
+| ax − protocol | 3.0 | 872–1099 ms | 51–63 |
+| rust + protocol | **1.0** | 361–612 ms | 79–204 |
+| rust − protocol | 3.0 | 673–877 ms | 75–224 |
 
-The wall-time result is the stable one, and it follows directly from `ax check`
-costing 100 µs: the protocol can reject a candidate without building anything. The
-token margin swings by seed because it depends on whether a rejected candidate
-made `rustc` print a paragraph or merely produced a wrong answer quietly — so
-"fewer, sometimes far fewer, never more" is the claim, not the best case.
+The `rust + protocol` arm is the control that was missing. It verifies each
+candidate with `rustc --emit=metadata` — a full type-check with no codegen and
+no link — then ranks in-scope bindings ahead of literals, which is what
+rust-analyzer's expected-type completion does for free.
 
-This is where designing for a model pays off, and it is a property of the protocol
-rather than the syntax.
+**What survived and what did not:**
+
+- **The attempt-count advantage was the protocol, not the language.** Rust with
+  a protocol matches Ax at 1.0 attempts, and on one seed beats it (2.0 vs 2.5).
+- **The latency advantage is real and is ~400×, not ~600×.** 0.6–1.0 ms vs
+  ~390 ms. It is a property of in-process checking and a Cranelift tier that
+  needs no `cc`, and no wrapper over `rustc` reaches it: the floor is one
+  process launch per probe, and `--emit=metadata` alone is 37 ms.
+- **The token margin is ~1.0×–2.7×, not 1.04×–8.6×.** Two accounting bugs
+  inflated the old number, both of which had favoured Ax: ax probes were billed
+  as free, and the tooled Rust arm was not billed for its build attempts.
+- **Strip the protocol and Ax is 1.04×–1.32× *slower* than Rust** over nine
+  seeds, because `build_tier` recompiles the runtime every time.
+
+So this section is evidence for the protocol, and — read honestly — evidence
+*against* the language on this axis. The language's own case is measured
+separately, by `ax silent-wrongness`:
+
+| | ax | rust |
+|---|---:|---:|
+| silent wrongness (accepted, ran, wrong, nothing said) | **36%** | 64% |
+| tier-divergent (one source, different answers across its own tiers) | **0%** | 18% |
+| has a mechanism for the hazard class at all | **100%** | 55% |
+
+Nothing in that table depends on `ax check` being fast, on holes, on ranked
+fills, or on structured diagnostics — so it is the part a protocol over Rust
+cannot copy. It also includes a row where Rust is better (`overflow-literal`:
+the `arithmetic_overflow` lint rejects what Ax accepts and wraps) and two rows
+of parity, and a test fails the build if those rows are ever removed.
+`DECISIONS.md` records both experiments, including that K1's numeric condition
+now **fires**.
 
 ## Tests
 
@@ -265,19 +299,18 @@ value, where substituting `1` for the divisor gives the same answer by
 coincidence. Three cases were added, and that mutation now fails.
 
 ```sh
-ax eval-loop --seed 42 --n 8
+ax k1 --seed 42 --n 12          # attempts-to-green, all four cells
+ax silent-wrongness             # hazard corpus, every tier, both languages
+ax eval-loop --seed 42 --n 8    # the original two-arm diagonal, kept for history
 ```
 
-Two-arm attempts-to-green measurement. Both arms get the same candidate pool; the
-ax arm may ask which candidates typecheck first. An attempt is one
-compile-and-run cycle:
+`ax k1` is the four-cell version and the one to quote: `eval-loop`'s two arms
+vary the language and the protocol together, so its ratio cannot be attributed
+to either. `ax silent-wrongness` is the axis neither can reach, because every
+`eval-loop` task is a hole-fill task and no hole-fill task exercises semantics.
 
-| arm | pass | median attempts | median wall |
-|---|---:|---:|---:|
-| ax | 8/8 | 1.0 | 1.3 ms |
-| rust (real `rustc`) | 8/8 | 3.0 | 903 ms |
-
-No model is involved; this measures the protocol, not an LLM.
+No model is involved in any of the three. They measure the protocol and the
+language, not an LLM.
 
 ## Capabilities
 

@@ -1,0 +1,15 @@
+//@ id:        T-INV-0017
+//@ requires:  R-1.2.2, R-3.3.1
+//@ origin:    rust-lang/rust tests/ui (E0515 return reference to local)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      inverted-mechanical
+//@ expect:    value: 7i32
+// Rust: cannot return `&` to a local. Ax copies the value out.
+module tests.rust_ported.inverted.e0515_return_local;
+fn local() -> i32 = {
+    let x: i32 = 7;
+    let r = &x;
+    x
+};
+fn main() -> i32 = local();

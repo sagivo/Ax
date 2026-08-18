@@ -23,6 +23,7 @@ pub mod fmt;
 pub mod frontend;
 pub mod fuzz;
 pub mod gbnf;
+pub mod harvest;
 pub mod hash;
 pub mod indep;
 pub mod intern;

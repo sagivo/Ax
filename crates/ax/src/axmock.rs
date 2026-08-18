@@ -9,7 +9,7 @@ Write Ax as if it were Rust, with these restrictions:
 - no lifetimes, no &'a / &mut T as types (bare names are fine)
 - no .clone(), Box/Rc/Arc/RefCell, unsafe, macros, async
 - use Result/Option/? as in Rust
-- integer overflow panics; use wrapping_* or prove the range
+- integer arithmetic wraps (spec/card.md); use checked_add/sub/mul for Option[T]
 - f\"…\" for interpolation, not format!
 Return only a complete .ax module.
 ";

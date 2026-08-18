@@ -1,0 +1,17 @@
+//@ id:        T-INV-0019
+//@ requires:  R-1.2.2, R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/borrowck/borrowck-assign-comp.rs fn c (E0506)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      inverted-mechanical
+//@ expect:    value: 5i32
+//@ diags:     A0101
+// Rust: overwrite `p` while `q = &p.y` is E0506. Ax reassigns.
+module tests.rust_ported.inverted.e0506_reassign_whole;
+type Point = { x: i32, y: i32 };
+fn main() -> i32 = {
+    let mut p = Point { x: 3, y: 4 };
+    let q = &p.y;
+    p = Point { x: 5, y: 7 };
+    p.x
+};

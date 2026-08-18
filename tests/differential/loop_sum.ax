@@ -1,0 +1,13 @@
+//@ id:        T-DIFF-0006
+//@ requires:  R-3.3.1
+//@ origin:    authored rustc-oracle companion
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      oracle
+//@ expect:    rustc-oracle
+module tests.differential.loop_sum;
+fn main() -> i32 = {
+    let mut s: i32 = 0;
+    for i in range(0, 5) { s = s + 1; };
+    s
+};

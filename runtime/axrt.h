@@ -274,6 +274,8 @@ void ax_rt_rc_release(void *p);
 void ax_rt_map_insert(AxMap *m, const AxStr *key, int64_t val);
 int ax_rt_map_get(AxMap *m, const AxStr *key, int64_t *out);
 uint64_t ax_rt_map_len(AxMap *m);
+/* Free entries only; the Map header is UniqueFree'd by lowering at last use. */
+void ax_rt_map_free_entries(AxMap *m);
 void ax_rt_vec_push(AxVec *v, const void *elem, uint64_t elem_size);
 /* Capacity growth only. `push` is lowered inline by the backend — a capacity
    test and a typed store — and calls this only when the buffer is full, so the

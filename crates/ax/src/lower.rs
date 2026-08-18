@@ -939,6 +939,10 @@ struct Local {
     /// division by a constant into a multiply; hoisting a reciprocal would
     /// only hide that from it.
     const_div: bool,
+    /// Unique-heap pointer (today: `map.new`). Freed at last use with
+    /// `UniqueFree` after releasing internal entries. Not set on values
+    /// that escape the current frame.
+    unique_heap: bool,
 }
 
 struct FnLower<'l, 'a> {
@@ -977,7 +981,43 @@ impl<'l, 'a> FnLower<'l, 'a> {
     }
 
     fn pop_scope(&mut self) {
-        self.scopes.pop();
+        self.pop_scope_keeping(None);
+    }
+
+    fn pop_scope_keeping(&mut self, keep: Option<Symbol>) {
+        if let Some(s) = self.scopes.pop() {
+            self.drop_unique_locals(&s, keep);
+        }
+    }
+
+    /// Free unique-heap locals at last use. `keep` is a local that is the
+    /// block's result (it escapes this scope; the caller owns the pointer).
+    fn drop_unique_locals(&mut self, locals: &[(Symbol, Local)], keep: Option<Symbol>) {
+        if self.fb.terminated() {
+            return;
+        }
+        for (name, loc) in locals.iter().rev() {
+            if !loc.unique_heap {
+                continue;
+            }
+            if keep == Some(*name) {
+                continue;
+            }
+            let ptr = if loc.by_ref {
+                loc.addr
+            } else {
+                self.fb.load(IrTy::Ptr, loc.addr)
+            };
+            // Entries first, then the unique header. `map_free_entries` does
+            // not free `ptr`; `UniqueFree` is the last use.
+            self.fb.push_void(Op::CallExt {
+                name: "ax_rt_map_free_entries".into(),
+                args: vec![ptr],
+                ret: IrTy::Unit,
+                fallible: false,
+            });
+            self.fb.push_void(Op::UniqueFree(ptr));
+        }
     }
 
     fn bind(&mut self, name: Symbol, local: Local) {
@@ -1022,6 +1062,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     agg,
                     by_ref: true,
                     const_div: false,
+                    unique_heap: false,
                 },
             );
         } else if !needs_slot {
@@ -1035,6 +1076,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     // load is needed to read it.
                     by_ref: true,
                     const_div: false,
+                    unique_heap: false,
                 },
             );
         } else {
@@ -1050,6 +1092,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     agg,
                     by_ref: false,
                     const_div: false,
+                    unique_heap: false,
                 },
             );
         }
@@ -1245,7 +1288,12 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 } else {
                     LVal::scalar(self.fb.unit(), IrTy::Unit)
                 };
-                self.pop_scope();
+                // A tail that is just a unique-heap local escapes this scope.
+                let keep = tail.as_ref().and_then(|t| match &t.kind {
+                    ExprKind::Path(p) if p.segs.len() == 1 => Some(p.segs[0].name),
+                    _ => None,
+                });
+                self.pop_scope_keeping(keep);
                 Ok(out)
             }
             ExprKind::Let(l) => {
@@ -1358,10 +1406,11 @@ impl<'l, 'a> FnLower<'l, 'a> {
         collect_free_names(body, &params.iter().map(|p| p.name.name).collect::<Vec<_>>(), &mut captured);
         for name in &captured {
             if self.lookup(*name).is_some() {
+                let cap = self.l.sym(*name);
                 return Err(format!(
-                    "native backend: lambda captures `{}`; v1 function values do not carry an \
-                     environment, so pass it as a parameter instead",
-                    self.l.sym(*name)
+                    "native backend: lambda captures `{cap}`; v1 function values do not carry an \
+                     environment. Rewrite as an explicit parameter, e.g. `|x| x + {cap}` → \
+                     `|x, {cap}| x + {cap}` and pass `{cap}` at the call site"
                 ));
             }
         }
@@ -1889,6 +1938,17 @@ impl<'l, 'a> FnLower<'l, 'a> {
             return Ok(());
         }
         self.bind_pattern(&l.pat, init, l.mutable)?;
+        // `map.new` is a unique-heap pointer. Mark the binding so last-use
+        // can emit UniqueFree. Copies / aliases stay unmarked (conservative).
+        if let PatKind::Bind(id) = &l.pat.kind {
+            if expr_is_map_new(&l.init, self.l.intern) {
+                if let Some(scope) = self.scopes.last_mut() {
+                    if let Some((_, loc)) = scope.iter_mut().rev().find(|(n, _)| *n == id.name) {
+                        loc.unique_heap = true;
+                    }
+                }
+            }
+        }
         // A non-zero integer literal binding is a compile-time constant
         // divisor: clang already strength-reduces `% 7`, so the reciprocal
         // hoist would only hide that and lose. Mark it so `hoist_recips`
@@ -1918,40 +1978,33 @@ impl<'l, 'a> FnLower<'l, 'a> {
             PatKind::Bind(_) if self.l.co.pat_variant.contains_key(&pat.id) => Ok(()),
             PatKind::Bind(id) => {
                 if val.agg.is_some() {
-                    // Aggregates bind by address. A mutable binding needs its
-                    // own storage so assignment cannot alias the initialiser.
-                    if mutable {
-                        let a = val.agg.unwrap();
-                        let slot = self
-                            .fb
-                            .alloc_slot(SlotKind::Agg(a), &self.l.sym(id.name));
-                        self.fb.push_void(Op::CopyAgg {
-                            ty: a,
-                            dst: slot,
-                            src: val.v,
-                        });
-                        self.bind(
-                            id.name,
-                            Local {
-                                addr: slot,
-                                ir: IrTy::Ptr,
-                                agg: val.agg,
-                                by_ref: true,
-                                const_div: false,
-                            },
-                        );
-                    } else {
-                        self.bind(
-                            id.name,
-                            Local {
-                                addr: val.v,
-                                ir: IrTy::Ptr,
-                                agg: val.agg,
-                                by_ref: true,
-                                const_div: false,
-                            },
-                        );
-                    }
+                    // Copy-on-conflict ([R-3.3.1]): an aggregate bind is a
+                    // copy. Aliasing the initialiser made `let y = x; x.s = 6`
+                    // mutate `y` in native while the oracle copied — inverted
+                    // E0382 (T-INV-0010) caught it. A later last-use pass may
+                    // elide the copy; sharing storage is never correct when
+                    // the source is used again.
+                    let a = val.agg.unwrap();
+                    let slot = self
+                        .fb
+                        .alloc_slot(SlotKind::Agg(a), &self.l.sym(id.name));
+                    self.fb.push_void(Op::CopyAgg {
+                        ty: a,
+                        dst: slot,
+                        src: val.v,
+                    });
+                    self.bind(
+                        id.name,
+                        Local {
+                            addr: slot,
+                            ir: IrTy::Ptr,
+                            agg: val.agg,
+                            by_ref: true,
+                            const_div: false,
+                            unique_heap: false,
+                        },
+                    );
+                    let _ = mutable;
                 } else if val.ty == IrTy::Ptr {
                     // A reference binding: keep the pointer itself.
                     let slot = self
@@ -1966,6 +2019,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                             agg: None,
                             by_ref: false,
                             const_div: false,
+                            unique_heap: false,
                         },
                     );
                 } else {
@@ -1981,6 +2035,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                             agg: None,
                             by_ref: false,
                             const_div: false,
+                            unique_heap: false,
                         },
                     );
                 }
@@ -3145,6 +3200,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 agg: None,
                 by_ref: true,
                 const_div: false,
+                unique_heap: false,
             },
         );
         let v = self.expr(body)?;
@@ -5037,6 +5093,16 @@ fn print_fn(ty: IrTy) -> &'static str {
         IrTy::Bool => "ax_rt_print_bool",
         t if t.is_signed() => "ax_rt_print_i64",
         _ => "ax_rt_print_u64",
+    }
+}
+
+/// `map.new(...)` — unique-heap Map allocation.
+fn expr_is_map_new(e: &Expr, intern: &Interner) -> bool {
+    match &e.kind {
+        ExprKind::Call { callee, .. } => {
+            callee_name(callee, intern).is_some_and(|n| n == "map.new" || n.ends_with(".map.new"))
+        }
+        _ => false,
     }
 }
 

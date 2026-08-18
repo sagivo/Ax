@@ -23,6 +23,7 @@
 //! `rustc` — but it is also not an expert Rust programmer.
 
 use crate::agent;
+use crate::codegen::Tier;
 use crate::driver::{run_main, Session};
 use crate::frontend::Surface;
 use serde::Serialize;
@@ -68,6 +69,11 @@ pub struct LoopResult {
     /// structured diagnostic beats a paragraph of prose.
     pub tokens_read: u32,
     pub last_error: Option<String>,
+    /// The arm could not run this task for a reason unrelated to the candidate
+    /// (no `cc`, no `rustc`, a construct the native backend lacks). Excluded
+    /// from the medians rather than scored as a failure, and counted in the
+    /// report so the exclusion is never silent.
+    pub unsupported: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -235,6 +241,10 @@ pub fn run_ax_loop(task: &HiddenTask, max_attempts: u32) -> LoopResult {
         if !ordered.contains(&c.ax) {
             let patched = fill_first_hole(&task.ax_starter, &c.ax);
             probes += 1;
+            // A probed candidate is still an expression the agent had to emit.
+            // Billing it as free understated this arm against the rust one,
+            // where every probe wrote a candidate out too.
+            written += crate::tokens::count(&c.ax).tokens as u32;
             let mut s = Session::new();
             if s.compile("task.ax", &patched).is_ok() {
                 ordered.push(c.ax.clone());
@@ -263,6 +273,7 @@ pub fn run_ax_loop(task: &HiddenTask, max_attempts: u32) -> LoopResult {
                         tokens_written: written,
                         tokens_read: read,
                         last_error: None,
+                        unsupported: false,
                     };
                 }
                 Ok(v) => last = Some(format!("{cand} produced {}", v.display())),
@@ -291,6 +302,7 @@ pub fn run_ax_loop(task: &HiddenTask, max_attempts: u32) -> LoopResult {
         tokens_written: written,
         tokens_read: read,
         last_error: last,
+        unsupported: false,
     }
 }
 
@@ -352,6 +364,7 @@ pub fn run_rust_loop(task: &HiddenTask, max_attempts: u32) -> LoopResult {
                         tokens_written: written,
                         tokens_read: read,
                         last_error: None,
+                        unsupported: false,
                     };
                 }
                 last = Some(format!("{} produced {}", cand.rust, stdout.trim()));
@@ -370,6 +383,7 @@ pub fn run_rust_loop(task: &HiddenTask, max_attempts: u32) -> LoopResult {
         tokens_written: written,
         tokens_read: read,
         last_error: last,
+        unsupported: false,
     }
 }
 
@@ -546,4 +560,358 @@ fn replace_at(src: &str, start: u32, end: u32, with: &str) -> String {
         return src.to_string();
     }
     format!("{}{}{}", &src[..s], with, &src[e..])
+}
+
+// ---------------------------------------------------------------------------
+// E1: the 2×2. `run_eval_loop` above compares ax+protocol against
+// rust−protocol, which is one diagonal of a two-factor design — the language
+// and the protocol are perfectly confounded, so its result is equally
+// consistent with "the protocol was the whole value", which is exactly what
+// `DECISIONS.md` K1 asks. The two missing cells are below.
+// ---------------------------------------------------------------------------
+
+/// Compare a printed answer across languages: `55i32` and `55` agree.
+fn same_value(got: &str, expected: i64) -> bool {
+    let t = got.trim();
+    let base = [
+        "i8", "i16", "i32", "i64", "isz", "u8", "u16", "u32", "u64", "usz",
+    ]
+    .iter()
+    .find_map(|suf| t.strip_suffix(suf))
+    .unwrap_or(t);
+    base.trim() == expected.to_string()
+}
+
+fn scratch(sub: &str) -> PathBuf {
+    let d = std::env::temp_dir().join("ax_k1").join(sub);
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
+
+/// **ax − protocol**: the language with a conventional batch compiler. No
+/// ranked fills, no cheap check — every candidate costs a full native build and
+/// run, which is what the Rust arm has always paid. What survives here is
+/// attributable to the semantics, not to `ax check` costing 89 µs.
+pub fn run_ax_noprotocol_loop(task: &HiddenTask, max_attempts: u32) -> LoopResult {
+    let t0 = Instant::now();
+    let dir = scratch("ax_noproto");
+    let name = format!("{}.ax", task.id.replace('-', "_"));
+    let mut attempts = 0u32;
+    let mut written = 0u32;
+    let mut read = 0u32;
+    let mut last = None;
+
+    let finish = |attempts, written, read, green, last: Option<String>, unsupported| LoopResult {
+        task_id: task.id.clone(),
+        arm: "ax-noproto".into(),
+        attempts,
+        probes: 0,
+        green,
+        wall_ms: t0.elapsed().as_secs_f64() * 1000.0,
+        tokens_est: estimate_tokens(&task.ax_starter),
+        tokens_written: written,
+        tokens_read: read,
+        last_error: last,
+        unsupported,
+    };
+
+    for cand in task.candidates.iter().take(max_attempts as usize) {
+        let patched = fill_first_hole(&task.ax_starter, &cand.ax);
+        attempts += 1;
+        written += crate::tokens::count(&patched).tokens as u32;
+        let mut s = Session::new();
+        let checked = match s.compile(&name, &patched) {
+            Err(d) => {
+                let text = d
+                    .iter()
+                    .map(|x| format!("{} {}", x.code, x.msg))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                read += crate::tokens::count(&text).tokens as u32;
+                last = Some(format!("{}: {text}", cand.ax));
+                continue;
+            }
+            Ok(c) => c,
+        };
+        // Tier::Dev is -O0, which is what the Rust arm builds too: an agent
+        // testing for correctness never needs an optimising build.
+        let built = match crate::codegen::build_tier(&s.intern, &checked, &name, &dir, Tier::Dev) {
+            Ok(b) => b,
+            Err(e) => {
+                // A missing `cc`, or a construct the C backend lacks, is a
+                // harness limit and not a cost the language imposes. Excluded
+                // rather than scored, and reported.
+                return finish(attempts, written, read, false, Some(e), true);
+            }
+        };
+        match crate::codegen::run_bin(&built.bin_path) {
+            Ok(out) if same_value(&out, task.expected) => {
+                return finish(attempts, written, read, true, None, false)
+            }
+            Ok(out) => last = Some(format!("{} produced {out}", cand.ax)),
+            Err(e) => last = Some(format!("{}: {e}", cand.ax)),
+        }
+    }
+    finish(attempts, written, read, false, last, false)
+}
+
+/// **rust + protocol**: K1's actual control. The protocol Ax gets is "verify a
+/// candidate without producing an artifact, then only build the survivors", and
+/// stable `rustc` can do exactly that with `--emit=metadata`: a full type-check
+/// with no codegen and no link.
+///
+/// This is deliberately the *strongest* Rust arm buildable from what ships:
+/// rust-analyzer would additionally rank candidates by expected type with no
+/// `rustc` invocation at all, making this arm's probe cost an upper bound. Every
+/// way this measurement is imprecise, it is imprecise against Ax.
+pub fn run_rust_tooled_loop(task: &HiddenTask, max_attempts: u32) -> LoopResult {
+    let t0 = Instant::now();
+    let dir = scratch("rust_proto");
+    let stem = task.id.replace('-', "_");
+    let src_path = dir.join(format!("{stem}.rs"));
+    let bin_path = dir.join(format!("{stem}_bin"));
+    let mut probes = 0u32;
+    let mut attempts = 0u32;
+    let mut written = 0u32;
+    let mut read = 0u32;
+    let mut last = None;
+
+    // Phase 1: cheap verification. The agent writes each candidate out once and
+    // pays a type-check, not a build.
+    let mut survivors: Vec<&Candidate> = Vec::new();
+    for cand in task.candidates.iter() {
+        let src = task.rust_template.replace("{FILL}", &cand.rust);
+        if std::fs::write(&src_path, &src).is_err() {
+            break;
+        }
+        probes += 1;
+        written += crate::tokens::count(&cand.rust).tokens as u32;
+        let out = Command::new("rustc")
+            .args(["--edition", "2021", "--emit=metadata", "--out-dir"])
+            .arg(&dir)
+            .arg(&src_path)
+            .output();
+        match out {
+            Ok(o) => {
+                read += crate::tokens::count(&String::from_utf8_lossy(&o.stderr)).tokens as u32;
+                if o.status.success() {
+                    survivors.push(cand);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    // Rank the survivors the way rust-analyzer's expected-type completion would:
+    // a bare in-scope binding of the right type before a synthesised literal.
+    // This costs no `rustc` invocation, so it is free in both wall time and
+    // tokens — and omitting it was the difference between a control arm and a
+    // strawman, because ranking is exactly how `ax hole --fills` reaches the
+    // answer on its first attempt.
+    survivors.sort_by_key(|c| {
+        let ident = c
+            .rust
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+            && c.rust.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
+        !ident
+    });
+
+    // Phase 2: build and run only what type-checked.
+    for cand in survivors.iter().take(max_attempts as usize) {
+        let src = task.rust_template.replace("{FILL}", &cand.rust);
+        if std::fs::write(&src_path, &src).is_err() {
+            break;
+        }
+        attempts += 1;
+        // Same accounting as every other arm: an attempt bills the whole
+        // program text. Billing probes by expression and attempts by file has
+        // to be uniform across the four cells or the token column compares
+        // nothing.
+        written += crate::tokens::count(&src).tokens as u32;
+        let out = Command::new("rustc")
+            .args(["--edition", "2021", "-o"])
+            .arg(&bin_path)
+            .arg(&src_path)
+            .output();
+        if let Ok(o) = &out {
+            read += crate::tokens::count(&String::from_utf8_lossy(&o.stderr)).tokens as u32;
+        }
+        if !matches!(&out, Ok(o) if o.status.success()) {
+            last = Some(format!("{}: rustc rejected it", cand.rust));
+            continue;
+        }
+        match run_bin_capture(&bin_path) {
+            Some(stdout) if stdout.trim() == task.expected.to_string() => {
+                return LoopResult {
+                    task_id: task.id.clone(),
+                    arm: "rust-proto".into(),
+                    attempts,
+                    probes,
+                    green: true,
+                    wall_ms: t0.elapsed().as_secs_f64() * 1000.0,
+                    tokens_est: estimate_tokens(&src),
+                    tokens_written: written,
+                    tokens_read: read,
+                    last_error: None,
+                    unsupported: false,
+                };
+            }
+            Some(stdout) => last = Some(format!("{} produced {}", cand.rust, stdout.trim())),
+            None => last = Some(format!("{}: binary failed", cand.rust)),
+        }
+    }
+    LoopResult {
+        task_id: task.id.clone(),
+        arm: "rust-proto".into(),
+        attempts,
+        probes,
+        green: false,
+        wall_ms: t0.elapsed().as_secs_f64() * 1000.0,
+        tokens_est: estimate_tokens(&task.rust_template),
+        tokens_written: written,
+        tokens_read: read,
+        last_error: last,
+        unsupported: false,
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct Cell {
+    pub arm: String,
+    pub language: String,
+    pub protocol: bool,
+    /// Tasks this cell actually scored.
+    pub scored: usize,
+    /// Tasks dropped for a harness reason, never counted as a failure.
+    pub excluded: usize,
+    pub pass: usize,
+    pub median_attempts: f64,
+    pub median_probes: f64,
+    pub median_wall_ms: f64,
+    pub median_tokens: f64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FactorialReport {
+    pub seed: u64,
+    pub n: usize,
+    pub cells: Vec<Cell>,
+    pub rustc_available: bool,
+    pub cc_available: bool,
+    pub results: Vec<LoopResult>,
+}
+
+fn cell(arm: &str, language: &str, protocol: bool, rs: &[&LoopResult]) -> Cell {
+    let scored: Vec<&&LoopResult> = rs.iter().filter(|r| !r.unsupported).collect();
+    let med = |f: &dyn Fn(&LoopResult) -> f64| median(scored.iter().map(|r| f(r)).collect());
+    Cell {
+        arm: arm.into(),
+        language: language.into(),
+        protocol,
+        scored: scored.len(),
+        excluded: rs.len() - scored.len(),
+        pass: scored.iter().filter(|r| r.green).count(),
+        median_attempts: med(&|r| r.attempts as f64),
+        median_probes: med(&|r| r.probes as f64),
+        median_wall_ms: med(&|r| r.wall_ms),
+        median_tokens: med(&|r| (r.tokens_written + r.tokens_read) as f64),
+    }
+}
+
+/// All four cells of the K1 design.
+pub fn run_2x2(seed: u64, n: usize, max_attempts: u32) -> FactorialReport {
+    let tasks = generate_hidden(seed, n);
+    let have_rustc = rustc_available();
+    let have_cc = crate::silent::cc_available();
+    let mut results: Vec<LoopResult> = Vec::new();
+    for t in &tasks {
+        results.push(run_ax_loop(t, max_attempts));
+        if have_cc {
+            results.push(run_ax_noprotocol_loop(t, max_attempts));
+        }
+        if have_rustc {
+            results.push(run_rust_loop(t, max_attempts));
+            results.push(run_rust_tooled_loop(t, max_attempts));
+        }
+    }
+    let pick = |arm: &str| -> Vec<&LoopResult> {
+        results.iter().filter(|r| r.arm == arm).collect()
+    };
+    let cells = vec![
+        cell("ax+proto", "ax", true, &pick("ax")),
+        cell("ax−proto", "ax", false, &pick("ax-noproto")),
+        cell("rust+proto", "rust", true, &pick("rust-proto")),
+        cell("rust−proto", "rust", false, &pick("rust")),
+    ];
+    FactorialReport {
+        seed,
+        n,
+        cells,
+        rustc_available: have_rustc,
+        cc_available: have_cc,
+        results,
+    }
+}
+
+pub fn render_2x2(r: &FactorialReport) -> String {
+    let mut s = String::new();
+    s.push_str(&format!(
+        "E1 two-factor attempts-to-green  n={}  seed={}\n\
+         an attempt is one build-and-run cycle; a probe is a static query that builds nothing\n\n",
+        r.n, r.seed
+    ));
+    if !r.rustc_available {
+        s.push_str("  rustc absent — both rust cells are missing\n");
+    }
+    if !r.cc_available {
+        s.push_str("  cc absent — the ax−proto ablation is missing\n");
+    }
+    s.push_str(&format!(
+        "{:<12} {:>6} {:>9} {:>8} {:>11} {:>9} {:>6}\n",
+        "cell", "pass", "attempts", "probes", "wall ms", "tokens", "excl"
+    ));
+    for c in &r.cells {
+        if c.scored == 0 {
+            s.push_str(&format!("{:<12}   not measured\n", c.arm));
+            continue;
+        }
+        s.push_str(&format!(
+            "{:<12} {:>3}/{:<2} {:>9.1} {:>8.1} {:>11.1} {:>9.0} {:>6}\n",
+            c.arm, c.pass, c.scored, c.median_attempts, c.median_probes, c.median_wall_ms,
+            c.median_tokens, c.excluded
+        ));
+    }
+    let get = |arm: &str| r.cells.iter().find(|c| c.arm == arm).filter(|c| c.scored > 0);
+    s.push('\n');
+    if let (Some(axp), Some(rp)) = (get("ax+proto"), get("rust+proto")) {
+        s.push_str(&format!(
+            "protocol held fixed (both arms verify before building):\n  \
+             attempts {:.1} vs {:.1}   wall {:.1} ms vs {:.1} ms ({:.0}×)\n",
+            axp.median_attempts,
+            rp.median_attempts,
+            axp.median_wall_ms,
+            rp.median_wall_ms,
+            rp.median_wall_ms / axp.median_wall_ms.max(f64::MIN_POSITIVE),
+        ));
+        s.push_str(
+            "  if attempts are equal here, the attempt-count win was the protocol, not the language\n",
+        );
+    }
+    if let (Some(axn), Some(rn)) = (get("ax−proto"), get("rust−proto")) {
+        s.push_str(&format!(
+            "language held fixed (neither arm has a protocol):\n  \
+             attempts {:.1} vs {:.1}   wall {:.1} ms vs {:.1} ms\n",
+            axn.median_attempts, rn.median_attempts, axn.median_wall_ms, rn.median_wall_ms,
+        ));
+    }
+    if let (Some(axp), Some(axn)) = (get("ax+proto"), get("ax−proto")) {
+        s.push_str(&format!(
+            "protocol's own contribution, within ax:\n  \
+             attempts {:.1} → {:.1}   wall {:.1} ms → {:.1} ms\n",
+            axn.median_attempts, axp.median_attempts, axn.median_wall_ms, axp.median_wall_ms,
+        ));
+    }
+    s
 }

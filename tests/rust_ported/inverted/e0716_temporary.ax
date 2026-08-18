@@ -1,0 +1,15 @@
+//@ id:        T-INV-0018
+//@ requires:  R-1.2.2, R-3.3.1
+//@ origin:    rust-lang/rust tests/ui (E0716 temporary dropped while borrowed)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      inverted-mechanical
+//@ expect:    value: 4i32
+// Rust: `let r = &foo();` drops the temporary. Ax copies.
+module tests.rust_ported.inverted.e0716_temporary;
+fn foo() -> i32 = 4;
+fn main() -> i32 = {
+    let t = foo();
+    let r = &t;
+    t
+};

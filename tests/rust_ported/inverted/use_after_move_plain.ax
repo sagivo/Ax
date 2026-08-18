@@ -1,7 +1,7 @@
 //@ id:        T-INV-0003
 //@ requires:  R-1.2.2, R-3.3.1
 //@ origin:    rust-lang/rust tests/ui/borrowck (E0382 use of moved value)
-//@ upstream:  unpinned-pending-acquisition
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
 //@ license:   MIT OR Apache-2.0
 //@ port:      inverted-mechanical
 //@ expect:    value: 8i32

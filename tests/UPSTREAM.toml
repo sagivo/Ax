@@ -5,15 +5,15 @@
 [suite.rust_ui]
 name = "rust-lang/rust tests/ui"
 url = "https://github.com/rust-lang/rust"
-commit = "unpinned-pending-acquisition"
+commit = "4d91de4e48198da2e33413efdcd9cd2cc0c46688"
 license = "MIT OR Apache-2.0"
 port = "inverted-mechanical"
-notes = "Acquire by error-code query over //~ ERROR. Do not port borrowck-positive, macros, async, unsafe."
+notes = "Pinned to rustc 1.85.0 (2025-02-20). Acquire by error-code query over //~ ERROR. Do not port borrowck-positive, macros, async, unsafe."
 
 [suite.rust_library]
 name = "rust-lang/rust library/{core,alloc,std}/tests"
 url = "https://github.com/rust-lang/rust"
-commit = "unpinned-pending-acquisition"
+commit = "4d91de4e48198da2e33413efdcd9cd2cc0c46688"
 license = "MIT OR Apache-2.0"
 port = "mechanical"
 notes = "Via ax translate. Target ≥70% by M5 ([T-2.4.3])."

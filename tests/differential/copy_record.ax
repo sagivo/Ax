@@ -1,0 +1,16 @@
+//@ id:        T-DIFF-0009
+//@ requires:  R-3.3.1
+//@ origin:    rustc-oracle for copy-on-conflict (T-INV-0010 companion)
+//@ upstream:  none
+//@ license:   MIT
+//@ port:      oracle
+//@ expect:    rustc-oracle
+// Rust `R` is Copy (all i32). Ax copies on conflict. Same observable.
+module tests.differential.copy_record;
+type R = { s: i32 };
+fn main() -> i32 = {
+    let mut x = R { s: 5 };
+    let y = x;
+    x.s = 6;
+    y.s + x.s
+};

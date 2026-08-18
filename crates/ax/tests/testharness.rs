@@ -217,6 +217,71 @@ fn fault_injection_all_variants_caught() {
 }
 
 #[test]
+fn harvest_extracts_invert_codes() {
+    let src = r#"
+fn main() {
+    let mut i = 0;
+    let x = &mut i;
+    let a = &mut i; //~ ERROR cannot borrow `i` as mutable more than once
+    let y = x; //~ ERROR E0382
+}
+"#;
+    let codes = ax::harvest::extract_codes(src);
+    assert!(codes.iter().any(|c| c == "E0499"), "{codes:?}");
+    assert!(codes.iter().any(|c| c == "E0382"), "{codes:?}");
+}
+
+#[test]
+fn harvest_from_in_tree_fixture() {
+    let fixtures = root().join("rust_ported/inverted/fixtures");
+    let dest = testharness::temp_out().join("harvest-fixture");
+    let _ = std::fs::remove_dir_all(&dest);
+    let r = ax::harvest::harvest_into(
+        &fixtures,
+        &dest,
+        "4d91de4e48198da2e33413efdcd9cd2cc0c46688",
+    )
+    .expect("harvest fixture");
+    assert!(
+        r.hits.len() >= 1,
+        "fixture should yield at least one invert hit"
+    );
+}
+
+#[test]
+fn harvest_skips_unsafe() {
+    let src = "fn main() { unsafe { let x = 1; } } //~ ERROR E0382\n";
+    let tr = ax::translate::translate_rust(src);
+    assert!(tr.rejected.iter().any(|r| r.contains("unsafe")), "{tr:?}");
+}
+
+#[test]
+fn inverted_bucket_has_pinned_origin() {
+    let root = root().join("rust_ported/inverted");
+    let cases = testharness::discover(&root).expect("discover inverted");
+    assert!(
+        cases.len() >= 10,
+        "inverted bucket too small: {}",
+        cases.len()
+    );
+    for c in &cases {
+        assert_eq!(c.header.port, testharness::PortKind::InvertedMechanical);
+        assert!(
+            c.header.upstream.contains("4d91de4e") || c.header.upstream == "none",
+            "{} unpinned: {}",
+            c.header.id,
+            c.header.upstream
+        );
+    }
+}
+
+#[test]
+fn ownership_fuzz_agrees_interpreter_native() {
+    let fails = ax::fuzz::differential(24, 7);
+    assert_eq!(fails, 0, "ownership/semantics fuzz disagreements: {fails}");
+}
+
+#[test]
 fn inverted_region_rule_disagrees() {
     // [T-10.2.3]
     assert!(!ax::indep::store_legal(1, 0));

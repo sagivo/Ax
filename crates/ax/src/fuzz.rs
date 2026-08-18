@@ -47,7 +47,17 @@ pub fn generate(seed: u64) -> String {
 
 /// Run `n` random programs. Returns the number of disagreements.
 pub fn differential(n: usize, seed: u64) -> usize {
+    differential_report(n, seed).fails
+}
+
+pub struct DiffReport {
+    pub fails: usize,
+    pub details: Vec<String>,
+}
+
+pub fn differential_report(n: usize, seed: u64) -> DiffReport {
     let mut fails = 0;
+    let mut details = Vec::new();
     let mut s = seed | 1;
     let dir = std::env::temp_dir().join("ax-fuzz");
     let _ = std::fs::create_dir_all(&dir);
@@ -70,13 +80,23 @@ pub fn differential(n: usize, seed: u64) -> usize {
                     let w = numeric_prefix(want.trim());
                     if g != w {
                         fails += 1;
+                        details.push(format!(
+                            "seed={s} kind={} interp={want:?} native={:?} status={}",
+                            (s >> 3) % 8,
+                            got.trim(),
+                            run.status
+                        ));
                     }
                 } else {
                     fails += 1;
+                    details.push(format!("seed={s} spawn failed"));
                 }
             }
-            Err(_) => fails += 1,
+            Err(e) => {
+                fails += 1;
+                details.push(format!("seed={s} build: {e}"));
+            }
         }
     }
-    fails
+    DiffReport { fails, details }
 }

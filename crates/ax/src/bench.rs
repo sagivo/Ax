@@ -3083,9 +3083,13 @@ fn main() -> i64 !{{alloc[a]}} = {{
     let n: usz = {n};
     let mut m: Map[String, i64] = map.new(test.alloc);
     for i in range(0, n) {{
-        let k = if (i % 2) == 0 {{ "e" }} else {{ "o" }};
-        let cur = match m.get(k) {{ Some(v) => v; None => 0; }};
-        m.insert(k, cur + (i as i64));
+        if (i % 2) == 0 {{
+            let cur = match m.get("e") {{ Some(v) => v; None => 0; }};
+            m.insert("e", cur + (i as i64));
+        }} else {{
+            let cur = match m.get("o") {{ Some(v) => v; None => 0; }};
+            m.insert("o", cur + (i as i64));
+        }};
     }};
     let e = match m.get("e") {{ Some(v) => v; None => 0; }};
     let o = match m.get("o") {{ Some(v) => v; None => 0; }};

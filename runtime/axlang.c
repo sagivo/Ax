@@ -239,6 +239,19 @@ int ax_rt_map_get(AxMap *m, const AxStr *key, int64_t *out) {
 
 uint64_t ax_rt_map_len(AxMap *m) { return m ? m->len : 0; }
 
+void ax_rt_map_free_entries(AxMap *m) {
+    if (!m) return;
+    AxMapEntry *e = m->head;
+    while (e) {
+        AxMapEntry *n = e->next;
+        free(e->key);
+        free(e);
+        e = n;
+    }
+    m->head = NULL;
+    m->len = 0;
+}
+
 void ax_rt_vec_new(const AxAlloc *a, uint64_t elem_size, AxVec *out) {
     (void)elem_size;
     out->data = NULL;

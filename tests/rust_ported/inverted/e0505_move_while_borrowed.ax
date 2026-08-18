@@ -1,0 +1,17 @@
+//@ id:        T-INV-0014
+//@ requires:  R-1.2.2, R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/borrowck/borrow-tuple-fields.rs (E0505)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      inverted-mechanical
+//@ expect:    value: 3i32
+//@ diags:     A0101
+// Rust: `let y = x` while `r = &x.0` is E0505. Ax copies.
+module tests.rust_ported.inverted.e0505_move_while_borrowed;
+type Foo = { a: i32, b: i32 };
+fn main() -> i32 = {
+    let x = Foo { a: 1, b: 2 };
+    let r = &x.a;
+    let y = x;
+    y.a + y.b
+};
