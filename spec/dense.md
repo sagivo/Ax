@@ -11,12 +11,12 @@ not write it.
 ## Program
 
 ```
-#add(a I, b I) I = a + b
-#sum(n Z) Z = +/n
-#sumv(xs V[Z]) Z = +/xs#
-#pick(b B) I = $b{1}{0}
-#get(m M[S, L], k S) L = m[k]?0
-#main() Z = { s Z:= 1; i~n { s = s * 6364136223846793005 + i }; s }
+#add(a,b)=a+b
+#sum(n:Z)=+/n
+#sumv(xs V[Z])Z=+/xs#
+#pick(b B)=b??1:0
+#get(m M[S,L],k S)L=m[k]?0
+#main()Z={s Z:=1;i~n{s=s*6364136223846793005+i};s}
 ```
 
 A file is a sequence of declarations. The module name is the file
@@ -64,18 +64,24 @@ name--              assign `name = name - 1`
 #name(a T, b U) R = body
 #name(a T) R !err[E] = body
 #name() R !alloc[a] = body
+#add(a,b)=a+b
+#same(a,b:L)=a+b
 ```
 
 `#name` starts a function. The body is an expression. A one-liner
 does not need a trailing `;`. A block `{ … }` is an expression; its
 value is the last expression.
 
+An omitted parameter or result type is `I`, so `#add(a,b)=a+b` is the
+same signature as `#add(a I,b I)I=a+b`. `a,b:T` shares `T` across all
+parameters and the result; use it for a monomorphic non-`I` helper.
+
 `^e` returns `e` from the enclosing function.
 
 ## Control
 
 ```
-$c{t}{e}            if `c` then `t` else `e`
+c??t:e              if `c` then `t` else `e` (right-associative)
 $c{t}               if `c` then `t`
 i~n { … }           `i` from 0 to `n` (exclusive)
 i~lo..hi { … }      `i` from `lo` to `hi`
@@ -116,6 +122,7 @@ by construction.
 ```
 []                  empty vec
 %                   empty map
+%{"k":2L}           inferred homogeneous map literal (`M[S,L]` here)
 xs#                 length of `xs`
 xs[i]               element `i` (aborts if out of range, unless proven)
 xs<-e               append `e`
@@ -124,7 +131,8 @@ m[k]<-v             insert `k → v`
 m[k]?d              get `k`, or `d` if missing
 ```
 
-`[]` and `%` allocate from the test allocator. `xs[i]` and
+`[]`, `%`, and `%{k:v}` allocate from the test allocator. Literal key
+and value types are inferred from homogeneous literals. `xs[i]` and
 `xs[i]<-v` use a numeric index. `m[k]<-v` / `m[k]?d` use a key
 (usually a string).
 
@@ -132,7 +140,7 @@ m[k]?d              get `k`, or `d` if missing
 
 ```
 e?d                 option: value, or `d` if none
-e|d                 result: ok value, or `d` if err
+e|d                 attempt `e`: value, or `d` if it raises
 raise e             fail with `e` (a branch, not unwind)
 ```
 
@@ -145,8 +153,11 @@ Inferred from the body, checked against the signature.
 ```
 #f() I !err[E] = …
 #f() I !alloc[a] = …
+#f()I!a=…
 #f() I !io[c] = …
 ```
+
+`!a` is the compact spelling of the common `!alloc[a]` row.
 
 Omit the row and `diverge` is reconstructed from `@` / `loop`. An
 explicit empty row claims termination.
@@ -159,5 +170,5 @@ explicit empty row claims termination.
 - Not Unicode APL. Glyphs are ASCII letters and punctuation a
   tokenizer already stores as whole tokens.
 
-Token counts against Rust / C / Go: `docs/usecases.md`
-(`ax bench usecases`).
+Exact BPE counts against TypeScript / Python / C / Rust: `docs/usecases.md`
+(`cargo run -p ax-density -- --write`, development workspace only).

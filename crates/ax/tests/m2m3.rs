@@ -72,7 +72,7 @@ fn main() -> i64 !{alloc[a]} = {
 };
 "#;
     let dense = to_dense(conv);
-    assert!(dense.contains('$'), "{dense}");
+    assert!(dense.contains("??") || dense.contains('$'), "{dense}");
     assert!(dense.contains('?'), "{dense}");
     let mut a = Session::new();
     let mut b = Session::new();
@@ -145,6 +145,86 @@ fn dense_compound_assign_same_value() {
         ax::tokens::count("s += i").tokens < ax::tokens::count("s = s + i").tokens,
         "+= must be cheaper than s = s + i"
     );
+}
+
+#[test]
+fn dense_i32_defaults_and_conditional_same_value() {
+    let written = "#fib(n)=n<2??n:fib(n-1)+fib(n-2)\n#main()=fib(10)\n";
+    let expanded = rewrite_dense_to_terse(written);
+    assert!(expanded.contains("n i32"), "{expanded}");
+    assert!(expanded.contains(") i32"), "{expanded}");
+
+    let mut s = Session::new();
+    s.surface = Surface::Dense;
+    let out = s
+        .compile("defaults.ax", written)
+        .unwrap_or_else(|d| panic!("{expanded}\n{d:?}"));
+    let value = ax::driver::run_main(&s.intern, &out, 0).unwrap();
+    assert_eq!(value.display(), "55i32");
+
+    let nested = "#sign(n)=n<0??-1:n==0??0:1\n#main()=sign(0)\n";
+    let mut t = Session::new();
+    t.surface = Surface::Dense;
+    let out = t
+        .compile("nested.ax", nested)
+        .unwrap_or_else(|d| panic!("{d:?}"));
+    assert_eq!(
+        ax::driver::run_main(&t.intern, &out, 0).unwrap().display(),
+        "0i32"
+    );
+}
+
+#[test]
+fn dense_packer_removes_optional_signature_types_and_space() {
+    let conventional =
+        "module t;\nfn add(a: i32, b: i32) -> i32 = a + b;\nfn wide(a: i64) -> i64 = a;\n";
+    let dense = to_dense(conventional);
+    assert!(dense.contains("#add(a,b)=a+b"), "{dense}");
+    assert!(dense.contains("#wide(a:L)=a"), "{dense}");
+    assert!(!dense.contains(" = "), "{dense}");
+
+    let mut s = Session::new();
+    s.surface = Surface::Dense;
+    s.compile("packed.ax", &dense)
+        .unwrap_or_else(|d| panic!("{dense}\n{d:?}"));
+    assert!(
+        ax::tokens::count("#add(a,b)=a+b").tokens < ax::tokens::count("#add(a I,b I)I=a+b").tokens
+    );
+}
+
+#[test]
+fn dense_shared_type_and_alloc_alias_compile() {
+    let written = "#sum(n:Z)=+/n\n#main()Z!a={xs V[Z]:=[];xs<-2Z;xs<-3Z;sum(+/xs#)}\n";
+    let expanded = rewrite_dense_to_terse(written);
+    assert!(expanded.contains("n usz"), "{expanded}");
+    assert!(expanded.contains("alloc[a]"), "{expanded}");
+    let mut s = Session::new();
+    s.surface = Surface::Dense;
+    s.compile("shared.ax", written)
+        .unwrap_or_else(|d| panic!("{expanded}\n{d:?}"));
+}
+
+#[test]
+fn dense_inferred_map_literal_matches_expanded_form() {
+    let written = "#main()L!a={m:=%{\"e\":2L,\"o\":3L};m[\"e\"]?0+m[\"o\"]?0}\n";
+    let expanded = rewrite_dense_to_terse(written);
+    assert!(
+        expanded.contains("Map[String,i64]") || expanded.contains("Map[String, i64]"),
+        "{expanded}"
+    );
+    let mut s = Session::new();
+    s.surface = Surface::Dense;
+    let out = s
+        .compile("maplit.ax", written)
+        .unwrap_or_else(|d| panic!("{expanded}\n{d:?}"));
+    assert_eq!(
+        ax::driver::run_main(&s.intern, &out, 0).unwrap().display(),
+        "5i64"
+    );
+
+    let conventional = "module t;\nfn main() -> i64 !{alloc[a]} = { let mut m: Map[String, i64] = map.new(test.alloc); m.insert(\"e\", 2i64); m.insert(\"o\", 3i64); match m.get(\"e\") { Some(v) => v; None => 0; } + match m.get(\"o\") { Some(v) => v; None => 0; } };\n";
+    let packed = to_dense(conventional);
+    assert!(packed.contains("%{\"e\":2L,\"o\":3L}"), "{packed}");
 }
 
 #[test]
@@ -317,7 +397,10 @@ fn main() -> i64 !{alloc[a]} = {
 };
 "#;
     let dense = to_dense(conv);
-    assert!(dense.contains("<-"), "expected insert pack, got {dense}");
+    assert!(
+        dense.contains("%{\"k\":7L}"),
+        "expected map-literal pack, got {dense}"
+    );
     assert!(
         dense.contains('[') && dense.contains('?'),
         "expected m[k]? , got {dense}"
@@ -508,32 +591,4 @@ fn default_session_compiles_short_syntax() {
     let mut s = Session::new();
     s.compile("t.ax", "#add(a I, b I) I = a + b\n")
         .unwrap_or_else(|d| panic!("{d:?}"));
-}
-
-#[test]
-fn usecase_ax_snippets_compile() {
-    for c in ax::usecases::cases() {
-        let has_main = c.src.ax.contains("fn main(");
-        let src = if has_main {
-            format!("module t;\nexport {{ main }};\n{}", c.src.ax)
-        } else {
-            format!(
-                "module t;\nexport {{ main }};\n{}\nfn main() -> i32 = 0;\n",
-                c.src.ax
-            )
-        };
-        let mut s = Session::new();
-        s.compile(&format!("{}.ax", c.id), &src)
-            .unwrap_or_else(|d| panic!("{}:\n{src}\n{d:?}", c.id));
-        let dense = ax::frontend::to_dense(c.src.ax);
-        let dsrc = if dense.contains("#main(") || dense.contains("fn main(") {
-            format!("module t;\nexport {{ main }};\n{dense}\n")
-        } else {
-            format!("module t;\nexport {{ main }};\n{dense}\nfn main() -> i32 = 0;\n")
-        };
-        let mut b = Session::new();
-        b.surface = Surface::Dense;
-        b.compile(&format!("{}d.ax", c.id), &dsrc)
-            .unwrap_or_else(|d| panic!("{} dense:\n{dsrc}\n{d:?}", c.id));
-    }
 }

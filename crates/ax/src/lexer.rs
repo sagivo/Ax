@@ -59,6 +59,7 @@ pub enum TokenKind {
     FatArrow,
     Bang,
     Question,
+    QuestionQuestion,
     At,
     Pipe,
     Amp,
@@ -190,7 +191,12 @@ impl<'a> Lexer<'a> {
             }
             b'?' => {
                 self.pos += 1;
-                Ok(self.mk(TokenKind::Question, start, self.pos, ""))
+                if self.peek() == Some(b'?') {
+                    self.pos += 1;
+                    Ok(self.mk(TokenKind::QuestionQuestion, start, self.pos, ""))
+                } else {
+                    Ok(self.mk(TokenKind::Question, start, self.pos, ""))
+                }
             }
             b'@' => {
                 self.pos += 1;

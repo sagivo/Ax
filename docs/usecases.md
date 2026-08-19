@@ -1,439 +1,118 @@
-# Syntax & token cost — basic use cases
+# Ax token efficiency — side-by-side
 
-Same task in Rust, C, Go, and Ax. Token counts use the **in-repo proxy** (`ax::tokens`): letters split at `_` / case / digit boundaries; each punctuation mark is one token except two-char operators (`->`, `:=`, `==` …); a newline is one token; spaces are free. Absolute numbers are not any particular model’s vocabulary; the comparison is identical across languages.
+Compact implementations of the same eight tasks in TypeScript, Python, C, Rust, and Ax. Counts are exact BPE counts, not character counts or a home-grown approximation.
 
-**Ax** is the language. The Rust-shaped column is the corpus dialect the tests still parse — not what you write. `ax fmt` prints Ax.
+## o200k_base
 
-## Summary
-
-| case | rust | c | go | ax-conv | ax | ax/rust |
+| case | TypeScript | Python | C | Rust | Ax | Ax vs best mainstream |
 |---|---:|---:|---:|---:|---:|---:|
-| Add two integers | 24 | 19 | 22 | 22 | 15 | 0.62× |
-| If / else | 24 | 22 | 24 | 22 | 17 | 0.71× |
-| Sum a range | 58 | 51 | 41 | 45 | 11 | 0.19× |
-| Recursion | 34 | 31 | 34 | 32 | 26 | 0.76× |
-| Option unwrap-or | 52 | 57 | 41 | 44 | 23 | 0.44× |
-| Map insert + get | 112 | 156 | 56 | 126 | 67 | 0.60× |
-| Fallible parse | 35 | 52 | 42 | 48 | 26 | 0.74× |
-| String interpolation | 25 | 37 | 25 | 19 | 16 | 0.64× |
-| **total** | 364 | 425 | 285 | 358 | 201 | 0.55× |
+| Add two integers | 12 | 8 | 11 | 15 | 7 | 12% |
+| If / else | 13 | 12 | 12 | 17 | 10 | 17% |
+| Sum a range | 26 | 10 | 28 | 15 | 8 | 20% |
+| Recursion | 20 | 19 | 18 | 24 | 16 | 11% |
+| Map get-or | 19 | 12 | 27 | 27 | 13 | -8% |
+| Map insert + get | 42 | 28 | 46 | 49 | 34 | -21% |
+| Fallible parse | 13 | 16 | 30 | 17 | 12 | 8% |
+| String interpolation | 11 | 11 | 21 | 15 | 11 | 0% |
+| **total** | **156** | **116** | **193** | **179** | **111** | **4%** |
 
-Read the totals as *how much text an agent pays to write the same idea*. **Ax** is the language. The Rust-shaped column is the corpus dialect the tests still parse — not what you write.
+## cl100k_base
 
-## Add two integers
+| case | TypeScript | Python | C | Rust | Ax | Ax vs best mainstream |
+|---|---:|---:|---:|---:|---:|---:|
+| Add two integers | 12 | 8 | 11 | 15 | 7 | 12% |
+| If / else | 13 | 12 | 12 | 17 | 10 | 17% |
+| Sum a range | 26 | 10 | 28 | 14 | 8 | 20% |
+| Recursion | 20 | 19 | 18 | 23 | 16 | 11% |
+| Map get-or | 18 | 12 | 27 | 25 | 13 | -8% |
+| Map insert + get | 41 | 28 | 46 | 48 | 34 | -21% |
+| Fallible parse | 12 | 15 | 29 | 17 | 12 | 0% |
+| String interpolation | 11 | 11 | 21 | 15 | 11 | 0% |
+| **total** | **153** | **115** | **192** | **174** | **111** | **3%** |
 
-A named function that returns `a + b`.
+Lower is better. The percentage compares Ax with the smallest of the four mainstream implementations on that row. A negative percentage means Ax lost that case.
 
-| rust | c | go | ax-conv | ax |
-|---:|---:|---:|---:|---:|
-| 24 | 19 | 22 | 22 | 15 |
+## Source, side by side
 
-**Rust**
+### Add two integers
 
-```rust
-fn add(a: i32, b: i32) -> i32 {
-    a + b
-}
+Define a two-argument integer addition function.
+
+| TypeScript | Python | C | Rust | Ax |
+|---|---|---|---|---|
+| <pre>const add=(a:number,b:number):number=&gt;a+b</pre><small>12 tokens</small> | <pre>def add(a,b):return a+b</pre><small>8 tokens</small> | <pre>int add(int a,int b){return a+b;}</pre><small>11 tokens</small> | <pre>fn add(a:i32,b:i32)-&gt;i32{a+b}</pre><small>15 tokens</small> | <pre>#add(a,b)=a+b</pre><small>7 tokens</small> |
+
+### If / else
+
+Choose one of two integers from a boolean.
+
+| TypeScript | Python | C | Rust | Ax |
+|---|---|---|---|---|
+| <pre>const pick=(b:boolean):number=&gt;b?1:0</pre><small>13 tokens</small> | <pre>def pick(b):return 1 if b else 0</pre><small>12 tokens</small> | <pre>int pick(int b){return b?1:0;}</pre><small>12 tokens</small> | <pre>fn pick(b:bool)-&gt;i32{if b{1}else{0}}</pre><small>17 tokens</small> | <pre>#pick(b B)=b??1:0</pre><small>10 tokens</small> |
+
+### Sum a range
+
+Accumulate the integers from zero through n-1.
+
+| TypeScript | Python | C | Rust | Ax |
+|---|---|---|---|---|
+| <pre>function sum(n:number){let s=0;for(let i=0;i&lt;n;i++)s+=i;return s}</pre><small>26 tokens</small> | <pre>def sum_n(n):return sum(range(n))</pre><small>10 tokens</small> | <pre>unsigned long sum(unsigned n){unsigned long s=0;for(unsigned i=0;i&lt;n;i++)s+=i;return s;}</pre><small>28 tokens</small> | <pre>fn sum(n:usize)-&gt;usize{(0..n).sum()}</pre><small>15 tokens</small> | <pre>#sum(n:Z)=+/n</pre><small>8 tokens</small> |
+
+### Recursion
+
+Define factorial with a single recursive call.
+
+| TypeScript | Python | C | Rust | Ax |
+|---|---|---|---|---|
+| <pre>const fac=(n:number):number=&gt;n&lt;2?1:n*fac(n-1)</pre><small>20 tokens</small> | <pre>def fac(n):return 1 if n&lt;2 else n*fac(n-1)</pre><small>19 tokens</small> | <pre>int fac(int n){return n&lt;2?1:n*fac(n-1);}</pre><small>18 tokens</small> | <pre>fn fac(n:i32)-&gt;i32{if n&lt;2{1}else{n*fac(n-1)}}</pre><small>24 tokens</small> | <pre>#fac(n)=n&lt;2??1:n*fac(n-1)</pre><small>16 tokens</small> |
+
+### Map get-or
+
+Read a map entry and return zero when the key is absent.
+
+| TypeScript | Python | C | Rust | Ax |
+|---|---|---|---|---|
+| <pre>const get=(m:Map&lt;string,number&gt;,k:string)=&gt;m.get(k)??0</pre><small>19 tokens</small> | <pre>def get(m,k):return m.get(k,0)</pre><small>12 tokens</small> | <pre>long get(AxMap*m,AxStr*k){long v=0;ax_map_get(m,k,&amp;v);return v;}</pre><small>27 tokens</small> | <pre>fn get(m:&amp;HashMap&lt;String,i64&gt;,k:&amp;str)-&gt;i64{*m.get(k).unwrap_or(&amp;0)}</pre><small>27 tokens</small> | <pre>#get(m M[S,L],k S)L=m[k]?0</pre><small>13 tokens</small> |
+
+### Map insert + get
+
+Allocate a map, insert two keys, and return their sum.
+
+| TypeScript | Python | C | Rust | Ax |
+|---|---|---|---|---|
+| <pre>function f(){const m=new Map&lt;string,number&gt;();m.set("e",2);m.set("o",3);return(m.get("e")??0)+(m.get("o")??0)}</pre><small>42 tokens</small> | <pre>def f():m={"e":2,"o":3};return m.get("e",0)+m.get("o",0)</pre><small>28 tokens</small> | <pre>long f(){AxMap*m=ax_map_new();ax_map_put(m,"e",2);ax_map_put(m,"o",3);return ax_map_get0(m,"e")+ax_map_get0(m,"o");}</pre><small>46 tokens</small> | <pre>fn f()-&gt;i64{let mut m=HashMap::new();m.insert("e",2);m.insert("o",3);m.get("e").unwrap_or(&amp;0)+m.get("o").unwrap_or(&amp;0)}</pre><small>49 tokens</small> | <pre>#main()L!a={m:=%{"e":2L,"o":3L};m["e"]?0+m["o"]?0}</pre><small>34 tokens</small> |
+
+### Fallible parse
+
+Parse an integer and return zero on failure.
+
+| TypeScript | Python | C | Rust | Ax |
+|---|---|---|---|---|
+| <pre>const parseOr=(s:string)=&gt;Number.parseInt(s)&#124;&#124;0</pre><small>13 tokens</small> | <pre>def parse_or(s):
+ try:return int(s)
+ except ValueError:return 0</pre><small>16 tokens</small> | <pre>int parse_or(char*s){char*e;long v=strtol(s,&amp;e,10);return e==s?0:(int)v;}</pre><small>30 tokens</small> | <pre>fn parse_or(s:&amp;str)-&gt;i32{s.parse().unwrap_or(0)}</pre><small>17 tokens</small> | <pre>#parse_or(s S)=parse_i32(s)&#124;0</pre><small>12 tokens</small> |
+
+### String interpolation
+
+Build `hello {name}` with the language's standard interpolation.
+
+| TypeScript | Python | C | Rust | Ax |
+|---|---|---|---|---|
+| <pre>const greet=(name:string)=&gt;`hello ${name}`</pre><small>11 tokens</small> | <pre>def greet(name):return f"hello {name}"</pre><small>11 tokens</small> | <pre>void greet(char*name,char*out,int n){snprintf(out,n,"hello %s",name);}</pre><small>21 tokens</small> | <pre>fn greet(name:&amp;str)-&gt;String{format!("hello {name}")}</pre><small>15 tokens</small> | <pre>#greet(name:S)=f"hello {name}"</pre><small>11 tokens</small> |
+
+## Method
+
+- Primary encoding: `o200k_base`, used by current GPT, reasoning, and Codex model families.
+- Regression encoding: `cl100k_base`, used by GPT-4-era models.
+- Counter: `tiktoken-rs`, using the actual OpenAI vocabulary files.
+- Scope: method bodies/signatures only. Imports, tests, comments, and executable wrappers are excluded for every language.
+- Formatting: optional whitespace is removed in every language. Required Python indentation remains.
+- Ax is generated mechanically from the conventional corpus form with `to_dense`, then compiled by the conformance test.
+
+This is a controlled corpus, not proof that Ax is shortest for every possible program or tokenizer. Cases live in `tools/ax-density/src/lib.rs`; counterexamples should be added there.
+
+## Regenerate
+
+```sh
+cargo run -p ax-density -- --write
 ```
-
-**C**
-
-```c
-int add(int a, int b) {
-    return a + b;
-}
-```
-
-**Go**
-
-```go
-func add(a int32, b int32) int32 {
-    return a + b
-}
-```
-
-**Corpus dialect (not Ax)**
-
-```ax
-fn add(a: i32, b: i32) -> i32 = a + b;
-```
-
-**Ax**
-
-```ax
-#add(a I, b I) I = a + b;
-```
-## If / else
-
-Pick one of two integers from a boolean.
-
-| rust | c | go | ax-conv | ax |
-|---:|---:|---:|---:|---:|
-| 24 | 22 | 24 | 22 | 17 |
-
-**Rust**
-
-```rust
-fn pick(b: bool) -> i32 {
-    if b { 1 } else { 0 }
-}
-```
-
-**C**
-
-```c
-int pick(int b) {
-    if (b) return 1;
-    return 0;
-}
-```
-
-**Go**
-
-```go
-func pick(b bool) int32 {
-    if b {
-        return 1
-    }
-    return 0
-}
-```
-
-**Corpus dialect (not Ax)**
-
-```ax
-fn pick(b: bool) -> i32 = if b { 1 } else { 0 };
-```
-
-**Ax**
-
-```ax
-#pick(b B) I = $b{1}{0};
-```
-## Sum a range
-
-Accumulate `0 + 1 + … + (n-1)`.
-
-| rust | c | go | ax-conv | ax |
-|---:|---:|---:|---:|---:|
-| 58 | 51 | 41 | 45 | 11 |
-
-**Rust**
-
-```rust
-fn sum(n: u64) -> u64 {
-    let mut s = 0u64;
-    let mut i = 0u64;
-    while i < n {
-        s = s.wrapping_add(i);
-        i += 1;
-    }
-    s
-}
-```
-
-**C**
-
-```c
-uint64_t sum(uint64_t n) {
-    uint64_t s = 0;
-    for (uint64_t i = 0; i < n; i++) s += i;
-    return s;
-}
-```
-
-**Go**
-
-```go
-func sum(n uint64) uint64 {
-    var s uint64
-    var i uint64
-    for i < n {
-        s += i
-        i++
-    }
-    return s
-}
-```
-
-**Corpus dialect (not Ax)**
-
-```ax
-fn sum(n: usz) -> usz = {
-    let mut s: usz = 0;
-    for i in range(0, n) { s = s + i; };
-    s
-};
-```
-
-**Ax**
-
-```ax
-#sum(n Z) Z = +/n;
-```
-## Recursion
-
-Factorial by a single recursive call.
-
-| rust | c | go | ax-conv | ax |
-|---:|---:|---:|---:|---:|
-| 34 | 31 | 34 | 32 | 26 |
-
-**Rust**
-
-```rust
-fn fac(n: i32) -> i32 {
-    if n < 2 { 1 } else { n * fac(n - 1) }
-}
-```
-
-**C**
-
-```c
-int fac(int n) {
-    if (n < 2) return 1;
-    return n * fac(n - 1);
-}
-```
-
-**Go**
-
-```go
-func fac(n int32) int32 {
-    if n < 2 {
-        return 1
-    }
-    return n * fac(n-1)
-}
-```
-
-**Corpus dialect (not Ax)**
-
-```ax
-fn fac(n: i32) -> i32 = if n < 2 { 1 } else { n * fac(n - 1) };
-```
-
-**Ax**
-
-```ax
-#fac(n I) I = $n < 2{1}{n * fac(n - 1)};
-```
-## Option unwrap-or
-
-Read a map entry, default to `0` when missing.
-
-| rust | c | go | ax-conv | ax |
-|---:|---:|---:|---:|---:|
-| 52 | 57 | 41 | 44 | 23 |
-
-**Rust**
-
-```rust
-fn get(m: &HashMap<String, i64>, k: &str) -> i64 {
-    match m.get(k) {
-        Some(v) => *v,
-        None => 0,
-    }
-}
-```
-
-**C**
-
-```c
-int64_t get(AxMap *m, const AxStr *k) {
-    int64_t v = 0;
-    if (!ax_rt_map_get(m, k, &v)) return 0;
-    return v;
-}
-```
-
-**Go**
-
-```go
-func get(m map[string]int64, k string) int64 {
-    if v, ok := m[k]; ok {
-        return v
-    }
-    return 0
-}
-```
-
-**Corpus dialect (not Ax)**
-
-```ax
-fn get(m: Map[String, i64], k: String) -> i64 =
-    match m.get(k) { Some(v) => v; None => 0; };
-```
-
-**Ax**
-
-```ax
-#get(m M[S, L], k S) L = m[k]?0;
-```
-## Map insert + get
-
-Allocate a map, insert two keys, return their sum.
-
-| rust | c | go | ax-conv | ax |
-|---:|---:|---:|---:|---:|
-| 112 | 156 | 56 | 126 | 67 |
-
-**Rust**
-
-```rust
-fn main() {
-    let mut m = HashMap::new();
-    m.insert("e".into(), 2i64);
-    m.insert("o".into(), 3i64);
-    let e = *m.get("e").unwrap_or(&0);
-    let o = *m.get("o").unwrap_or(&0);
-    println!("{}", e + o);
-}
-```
-
-**C**
-
-```c
-int main(void) {
-    AxMap *m = ax_rt_map_new();
-    AxStr e = {"e", 1}, o = {"o", 1};
-    ax_rt_map_insert(m, &e, 2);
-    ax_rt_map_insert(m, &o, 3);
-    int64_t ev = 0, ov = 0;
-    ax_rt_map_get(m, &e, &ev);
-    ax_rt_map_get(m, &o, &ov);
-    printf("%lld\n", (long long)(ev + ov));
-    return 0;
-}
-```
-
-**Go**
-
-```go
-func main() {
-    m := map[string]int64{}
-    m["e"] = 2
-    m["o"] = 3
-    fmt.Println(m["e"] + m["o"])
-}
-```
-
-**Corpus dialect (not Ax)**
-
-```ax
-fn main() -> i64 !{alloc[a]} = {
-    let mut m: Map[String, i64] = map.new(test.alloc);
-    m.insert("e", 2i64);
-    m.insert("o", 3i64);
-    let e = match m.get("e") { Some(v) => v; None => 0; };
-    let o = match m.get("o") { Some(v) => v; None => 0; };
-    e + o
-};
-```
-
-**Ax**
-
-```ax
-#main() L !alloc[a] = { m M[S, L]:= %; m["e"]<-2L; m["o"]<-3L; e:= m["e"]?0; o:= m["o"]?0; e + o };
-```
-## Fallible parse
-
-Parse an integer; on failure return a default.
-
-| rust | c | go | ax-conv | ax |
-|---:|---:|---:|---:|---:|
-| 35 | 52 | 42 | 48 | 26 |
-
-**Rust**
-
-```rust
-fn parse_or(s: &str) -> i32 {
-    s.parse::<i32>().unwrap_or(0)
-}
-```
-
-**C**
-
-```c
-int parse_or(const char *s) {
-    char *end = NULL;
-    long v = strtol(s, &end, 10);
-    if (end == s) return 0;
-    return (int)v;
-}
-```
-
-**Go**
-
-```go
-func parseOr(s string) int32 {
-    v, err := strconv.Atoi(s)
-    if err != nil {
-        return 0
-    }
-    return int32(v)
-}
-```
-
-**Corpus dialect (not Ax)**
-
-```ax
-fn parse_or(s: String) -> i32 !{err[ParseError]} =
-    match parse_i32(s) { Ok(v) => v; Err(_) => 0; };
-```
-
-**Ax**
-
-```ax
-#parse_or(s S) I !err[ParseError] = parse_i32(s)|0;
-```
-## String interpolation
-
-Build `hello {name}` without a format macro.
-
-| rust | c | go | ax-conv | ax |
-|---:|---:|---:|---:|---:|
-| 25 | 37 | 25 | 19 | 16 |
-
-**Rust**
-
-```rust
-fn greet(name: &str) -> String {
-    format!("hello {name}")
-}
-```
-
-**C**
-
-```c
-void greet(const char *name, char *out, size_t n) {
-    snprintf(out, n, "hello %s", name);
-}
-```
-
-**Go**
-
-```go
-func greet(name string) string {
-    return fmt.Sprintf("hello %s", name)
-}
-```
-
-**Corpus dialect (not Ax)**
-
-```ax
-fn greet(name: String) -> String = f"hello {name}";
-```
-
-**Ax**
-
-```ax
-#greet(name S) S = f"hello {name}";
-```
-## How to regenerate
-
-```
-ax bench usecases
-```
-
-Writes this file from `ax::usecases` so the numbers cannot drift from the tokenizer. Ax snippets are complete enough to type-check as a module body (wrap in `module t; export { main };` plus a `main` if needed).

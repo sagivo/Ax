@@ -516,7 +516,7 @@ pub struct ContextPack {
 pub fn context_pack(intern: &Interner, checked: &CheckOutput, limit: usize) -> ContextPack {
     let cheatsheet = "\
 Ax (`#name`, `:=`, `$c{t}{e}`, `i~n`, `+/n`, type glyphs I/Z/B).
-- `#add(a I, b I) I = a + b` — a file that opens with `(` is the tree
+- `#add(a,b)=a+b` — omitted signature types default to i32
 - `own T` is affine (use exactly once)
 - `Untrusted[T]` / `Secret[T]` are lattice annotations
 - `raise` / `catch` / `attempt` — no unwinding; `e|d` is ok/err

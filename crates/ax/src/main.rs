@@ -97,7 +97,7 @@ Usage:
   ax conform [filter]
   ax fix [--apply] [--json] <file>
   ax build [-o <bin>] [--tier dev|release|portable] <file>
-  ax bench io|http|metrics|tokens|usecases|software|gate|gate-check|all
+  ax bench io|http|metrics|tokens|software|gate|gate-check|all
   ax perf [--json] [--diff <baseline.json>] <file>
   ax complete --at <pos> [--json] <file>
   ax context [--limit=N] <file>

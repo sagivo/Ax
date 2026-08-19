@@ -436,11 +436,13 @@ impl<'a> Emit<'a> {
         }
 
         let loops = find_counted_loops(f);
+        let whiles = find_while_loops(f, &loops);
         let skip = counted_skip_set(f, &loops);
+        let wskip = while_skip_set(f, &whiles);
         let mut i = 0;
         while i < f.blocks.len() {
             let b = &f.blocks[i];
-            if skip.contains(&b.id) {
+            if skip.contains(&b.id) || wskip.contains(&b.id) {
                 i += 1;
                 continue;
             }
@@ -450,6 +452,8 @@ impl<'a> Emit<'a> {
             }
             if let Some(lp) = jump_into_counted(&b.term, &loops) {
                 self.emit_counted_for(f, lp, &loops)?;
+            } else if let Some(wp) = jump_into_while(&b.term, &whiles) {
+                self.emit_while(f, wp, &loops, &whiles)?;
             } else {
                 self.term(f, &b.term)?;
             }
@@ -495,6 +499,84 @@ impl<'a> Emit<'a> {
         self.out.push_str("    }\n");
         let _ = writeln!(self.out, "    goto bb{};", lp.exit);
         Ok(())
+    }
+
+    /// `while (1) { head; if (!cond) break; body }` then jump to the exit.
+    fn emit_while(
+        &mut self,
+        f: &Func,
+        wp: &WhileLoop,
+        loops: &[CountedLoop],
+        whiles: &[WhileLoop],
+    ) -> Result<(), String> {
+        self.out.push_str("    while (1) {\n");
+        let head = f.block(wp.head);
+        for inst in &head.insts {
+            self.inst(f, inst)?;
+        }
+        let _ = writeln!(self.out, "    if (!v{}) break;", wp.cond);
+        let mut members = while_body_blocks(f, wp, loops, whiles);
+        members.retain(|id| *id != wp.body);
+        members.insert(0, wp.body);
+        for bid in members {
+            if bid != wp.body {
+                let _ = writeln!(self.out, "bb{}: ;", bid);
+            }
+            let b = f.block(bid);
+            for inst in &b.insts {
+                self.inst(f, inst)?;
+            }
+            if let Some(inner) = jump_into_counted(&b.term, loops) {
+                self.emit_counted_for(f, inner, loops)?;
+            } else if let Some(inner) =
+                jump_into_while(&b.term, whiles).filter(|n| n.head != wp.head)
+            {
+                self.emit_while(f, inner, loops, whiles)?;
+            } else if bid == wp.body && matches!(&b.term, Term::Jump(e) if e.to == wp.head) {
+                // Fall through to the next `while` test.
+            } else {
+                self.term_in_while(f, &b.term, wp)?;
+            }
+        }
+        self.out.push_str("    }\n");
+        let _ = writeln!(self.out, "    goto bb{};", wp.exit);
+        Ok(())
+    }
+
+    fn term_in_while(&mut self, f: &Func, t: &Term, wp: &WhileLoop) -> Result<(), String> {
+        match t {
+            Term::Jump(e) if e.to == wp.head => {
+                self.out.push_str("    continue;\n");
+                Ok(())
+            }
+            Term::Jump(e) if e.to == wp.exit => {
+                self.out.push_str("    break;\n");
+                Ok(())
+            }
+            Term::Br {
+                cond,
+                then_e,
+                else_e,
+            } => {
+                let _ = writeln!(self.out, "    if (v{cond}) {{");
+                self.edge_in_while(f, then_e, wp, "        ");
+                self.out.push_str("    } else {\n");
+                self.edge_in_while(f, else_e, wp, "        ");
+                self.out.push_str("    }\n");
+                Ok(())
+            }
+            other => self.term(f, other),
+        }
+    }
+
+    fn edge_in_while(&mut self, f: &Func, e: &Edge, wp: &WhileLoop, indent: &str) {
+        if e.to == wp.head {
+            let _ = writeln!(self.out, "{indent}continue;");
+        } else if e.to == wp.exit {
+            let _ = writeln!(self.out, "{indent}break;");
+        } else {
+            self.edge(f, e, indent);
+        }
     }
 
     /// Like [`Self::term`], but a jump to this loop's step is `continue`
@@ -605,6 +687,28 @@ impl<'a> Emit<'a> {
         let dst = i.result();
         if let Some(v) = dst {
             self.defs.insert(v, i.op.clone());
+        }
+        // Book-keeping first so a later `s += p[i]*q[i]` can inline even
+        // when the ElemPtr / SlotAddr assignment itself is skipped.
+        match &i.op {
+            Op::ElemPtr { elem, ptr, idx } => {
+                if let Some(v) = dst {
+                    self.elem_of.insert(v, (*elem, *ptr, *idx));
+                }
+            }
+            Op::SlotAddr(s) => {
+                if let Some(v) = dst {
+                    if matches!(
+                        f.slots.get(*s as usize).map(|si| &si.kind),
+                        Some(Repr::Scalar(_))
+                    ) {
+                        self.slot_of.insert(v, *s);
+                    }
+                }
+            }
+            _ => {}
+        }
+        if let Some(v) = dst {
             if self.skip_emit.contains(&v) {
                 return Ok(());
             }
@@ -692,11 +796,7 @@ impl<'a> Emit<'a> {
                     }
                     let _ = writeln!(self.out, "    s{s} = v{val};");
                 } else if let Some((elem, base, idx)) = self.elem_of.get(ptr).copied() {
-                    let _ = writeln!(
-                        self.out,
-                        "    {} = v{val};",
-                        index_expr(elem, base, idx)
-                    );
+                    let _ = writeln!(self.out, "    {} = v{val};", index_expr(elem, base, idx));
                 } else {
                     let _ = writeln!(self.out, "    *({} *)v{ptr} = v{val};", cty(*ty));
                 }
@@ -1254,6 +1354,11 @@ fn bin_expr(op: BinKind, t: IrTy, l: &str, r: &str) -> String {
     let u = uty(t);
     let c = cty(t);
     match op {
+        // Unsigned wrapping is C's native `+ * -`. Extra casts hid the
+        // reduction from clang (`s += p[i]*q[i]`).
+        BinKind::Add if !t.is_signed() && t != IrTy::Bool => format!("({l} + {r})"),
+        BinKind::Sub if !t.is_signed() && t != IrTy::Bool => format!("({l} - {r})"),
+        BinKind::Mul if !t.is_signed() && t != IrTy::Bool => format!("({l} * {r})"),
         BinKind::Add => format!("({c})(({u}){l} + ({u}){r})"),
         BinKind::Sub => format!("({c})(({u}){l} - ({u}){r})"),
         BinKind::Mul => format!("({c})(({u}){l} * ({u}){r})"),
@@ -1302,7 +1407,9 @@ fn unused_ssa(f: &Func) -> std::collections::HashSet<ValId> {
         }
     }
     // Results of `s = s + x` are not live; the store becomes `s += x`.
+    // Map the dead add → the addend (`x`), so we keep `x`'s tree live.
     let mut dead = std::collections::HashSet::new();
+    let mut addend_of = std::collections::HashMap::new();
     for b in &f.blocks {
         for inst in &b.insts {
             if let Op::Store { ptr, val, .. } = &inst.op {
@@ -1316,6 +1423,7 @@ fn unused_ssa(f: &Func) -> std::collections::HashSet<ValId> {
                     let r_is = matches!(defs.get(r), Some(Op::Load { ptr: p, .. }) if p == ptr);
                     if l_is ^ r_is {
                         dead.insert(*val);
+                        addend_of.insert(*val, if l_is { *r } else { *l });
                     }
                 }
             }
@@ -1329,6 +1437,22 @@ fn unused_ssa(f: &Func) -> std::collections::HashSet<ValId> {
         for b in &f.blocks {
             for inst in &b.insts {
                 if inst.result().is_some_and(|v| dead.contains(&v)) {
+                    // Inlined as `p[i]` / `s += …` — the array base and
+                    // index still appear in the C, so they stay live.
+                    // `s += x` still names every value inside `x`.
+                    if let Some(x) = inst.result().and_then(|v| addend_of.get(&v)) {
+                        // Keep the leaves `c_expr` will name (array bases /
+                        // indexes / consts), not the intermediate SSA temps.
+                        mark_expr_leaves(*x, &defs, &mut used);
+                    } else if let Op::Load { ptr, .. } = &inst.op {
+                        if let Some(Op::ElemPtr { ptr: base, idx, .. }) = defs.get(ptr) {
+                            used.insert(*base);
+                            used.insert(*idx);
+                        }
+                    } else if let Op::ElemPtr { ptr, idx, .. } = &inst.op {
+                        used.insert(*ptr);
+                        used.insert(*idx);
+                    }
                     continue;
                 }
                 collect_op_uses(&inst.op, &mut used);
@@ -1338,7 +1462,10 @@ fn unused_ssa(f: &Func) -> std::collections::HashSet<ValId> {
         for b in &f.blocks {
             for inst in &b.insts {
                 let Some(v) = inst.result() else { continue };
-                if dead.contains(&v) || used.contains(&v) || f.params.contains(&v) || b.params.contains(&v)
+                if dead.contains(&v)
+                    || used.contains(&v)
+                    || f.params.contains(&v)
+                    || b.params.contains(&v)
                 {
                     continue;
                 }
@@ -1363,6 +1490,52 @@ fn unused_ssa(f: &Func) -> std::collections::HashSet<ValId> {
         }
     }
     dead
+}
+
+/// Values that appear as C identifiers in an inlined expression: array
+/// bases, indexes, constants. Intermediate muls/loads are rebuilt by
+/// `c_expr` and must not stay as emitted SSA.
+fn mark_expr_leaves<'a>(
+    v: ValId,
+    defs: &std::collections::HashMap<ValId, &'a Op>,
+    used: &mut std::collections::HashSet<ValId>,
+) {
+    match defs.get(&v) {
+        Some(Op::Bin { l, r, .. }) => {
+            mark_expr_leaves(*l, defs, used);
+            mark_expr_leaves(*r, defs, used);
+        }
+        Some(Op::Un { v: x, .. } | Op::Cast { v: x, .. }) => {
+            // Casts are not inlined by `c_expr` today; keep the SSA value.
+            used.insert(v);
+            mark_expr_leaves(*x, defs, used);
+        }
+        Some(Op::Load { ptr, .. }) => {
+            if matches!(defs.get(ptr), Some(Op::FieldPtr { .. })) {
+                // `xs.at(i).score` is FieldPtr + load; `c_expr` does not
+                // inline field loads, so the SSA result must stay.
+                used.insert(v);
+            }
+            mark_expr_leaves(*ptr, defs, used);
+        }
+        Some(Op::FieldPtr { ptr, .. }) => {
+            used.insert(v);
+            mark_expr_leaves(*ptr, defs, used);
+        }
+        Some(Op::ElemPtr { ptr, idx, .. }) => {
+            used.insert(*ptr);
+            used.insert(*idx);
+        }
+        Some(Op::Select { c, a, b }) => {
+            mark_expr_leaves(*c, defs, used);
+            mark_expr_leaves(*a, defs, used);
+            mark_expr_leaves(*b, defs, used);
+        }
+        Some(Op::ConstInt(_) | Op::ConstFloat(_) | Op::ConstBool(_) | Op::ConstUnit) => {}
+        _ => {
+            used.insert(v);
+        }
+    }
 }
 
 fn collect_op_uses(op: &Op, used: &mut std::collections::HashSet<ValId>) {
@@ -1692,6 +1865,203 @@ fn counted_body_blocks(f: &Func, lp: &CountedLoop, loops: &[CountedLoop]) -> Vec
         }
         if let Some(nested) = loops.iter().find(|n| n.head == id && n.head != lp.head) {
             // Resume after the nested `for`; do not flatten its internals.
+            stack.push(nested.exit);
+            continue;
+        }
+        if !seen.insert(id) {
+            continue;
+        }
+        out.push(id);
+        let b = f.block(id);
+        match &b.term {
+            Term::Jump(e) => stack.push(e.to),
+            Term::Br { then_e, else_e, .. } => {
+                stack.push(then_e.to);
+                stack.push(else_e.to);
+            }
+            Term::Switch { cases, default, .. } => {
+                for (_, e) in cases {
+                    stack.push(e.to);
+                }
+                stack.push(default.to);
+            }
+            _ => {}
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Header-test `while`: head has no params, compares, body eventually
+/// jumps back to head with no args.
+struct WhileLoop {
+    head: BlockId,
+    body: BlockId,
+    exit: BlockId,
+    cond: ValId,
+}
+
+fn jump_into_while<'a>(t: &Term, loops: &'a [WhileLoop]) -> Option<&'a WhileLoop> {
+    match t {
+        Term::Jump(e) => loops.iter().find(|l| l.head == e.to),
+        _ => None,
+    }
+}
+
+fn find_while_loops(f: &Func, counted: &[CountedLoop]) -> Vec<WhileLoop> {
+    let counted_heads: std::collections::HashSet<BlockId> =
+        counted.iter().map(|l| l.head).collect();
+    let mut out = Vec::new();
+    for b in &f.blocks {
+        if counted_heads.contains(&b.id) {
+            continue;
+        }
+        if let Some(wp) = match_while_loop(f, b) {
+            out.push(wp);
+        }
+    }
+    out
+}
+
+fn match_while_loop(f: &Func, head: &Block) -> Option<WhileLoop> {
+    if !head.params.is_empty() {
+        return None;
+    }
+    let Term::Br {
+        cond,
+        then_e,
+        else_e,
+    } = &head.term
+    else {
+        return None;
+    };
+    if !then_e.args.is_empty() || !else_e.args.is_empty() {
+        return None;
+    }
+    if !jumps_back_to(f, then_e.to, head.id) {
+        return None;
+    }
+    // A real `while` has one entry from outside and latch edges from the
+    // body. A diamond that several blocks jump into is not a while — emitting
+    // one ate `map_hist`'s join label.
+    let mut ext = 0u32;
+    for b in &f.blocks {
+        if b.id == head.id {
+            continue;
+        }
+        for e in term_edges(&b.term) {
+            if e.to == head.id {
+                if reaches(f, then_e.to, b.id, head.id) {
+                    continue;
+                }
+                ext += 1;
+            }
+        }
+    }
+    if ext != 1 {
+        return None;
+    }
+    Some(WhileLoop {
+        head: head.id,
+        body: then_e.to,
+        exit: else_e.to,
+        cond: *cond,
+    })
+}
+
+fn term_edges(t: &Term) -> Vec<&Edge> {
+    match t {
+        Term::Jump(e) => vec![e],
+        Term::Br { then_e, else_e, .. } => vec![then_e, else_e],
+        Term::Switch { cases, default, .. } => {
+            let mut v: Vec<&Edge> = cases.iter().map(|(_, e)| e).collect();
+            v.push(default);
+            v
+        }
+        _ => vec![],
+    }
+}
+
+fn reaches(f: &Func, start: BlockId, target: BlockId, stop: BlockId) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![start];
+    while let Some(id) = stack.pop() {
+        if id == stop {
+            continue;
+        }
+        if id == target {
+            return true;
+        }
+        if !seen.insert(id) {
+            continue;
+        }
+        for e in term_edges(&f.block(id).term) {
+            stack.push(e.to);
+        }
+    }
+    false
+}
+
+fn jumps_back_to(f: &Func, start: BlockId, head: BlockId) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![start];
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let b = f.block(id);
+        match &b.term {
+            Term::Jump(e) if e.to == head && e.args.is_empty() => return true,
+            Term::Jump(e) => {
+                if e.to != head {
+                    stack.push(e.to);
+                }
+            }
+            Term::Br { then_e, else_e, .. } => {
+                stack.push(then_e.to);
+                stack.push(else_e.to);
+            }
+            Term::Switch { cases, default, .. } => {
+                for (_, e) in cases {
+                    stack.push(e.to);
+                }
+                stack.push(default.to);
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn while_skip_set(f: &Func, loops: &[WhileLoop]) -> std::collections::HashSet<BlockId> {
+    let mut skip = std::collections::HashSet::new();
+    for wp in loops {
+        skip.insert(wp.head);
+        for id in while_body_blocks(f, wp, &[], loops) {
+            skip.insert(id);
+        }
+    }
+    skip
+}
+
+fn while_body_blocks(
+    f: &Func,
+    wp: &WhileLoop,
+    counted: &[CountedLoop],
+    whiles: &[WhileLoop],
+) -> Vec<BlockId> {
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![wp.body];
+    let mut out = Vec::new();
+    while let Some(id) = stack.pop() {
+        if id == wp.head || id == wp.exit {
+            continue;
+        }
+        if let Some(nested) = counted.iter().find(|n| n.head == id) {
+            stack.push(nested.exit);
+            continue;
+        }
+        if let Some(nested) = whiles.iter().find(|n| n.head == id && n.head != wp.head) {
             stack.push(nested.exit);
             continue;
         }

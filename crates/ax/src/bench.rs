@@ -220,7 +220,6 @@ pub fn run(which: &str) -> Result<(), String> {
         "http" => bench_http(),
         "metrics" => bench_metrics(),
         "tokens" => bench_tokens(),
-        "usecases" => bench_usecases(),
         "software" => crate::software::run(),
         "gate" => bench_gate(),
         "gate-check" => bench_gate_check(),
@@ -237,21 +236,9 @@ pub fn run(which: &str) -> Result<(), String> {
             bench_gate()
         }
         other => Err(format!(
-            "unknown bench `{other}` (io|http|metrics|tokens|usecases|software|gate|gate-check|all)"
+            "unknown bench `{other}` (io|http|metrics|tokens|software|gate|gate-check|all)"
         )),
     }
-}
-
-fn bench_usecases() -> Result<(), String> {
-    use crate::usecases;
-    let path = workspace().join("docs/usecases.md");
-    if let Some(p) = path.parent() {
-        std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
-    }
-    usecases::write_doc(&path)?;
-    println!("{}", usecases::render_doc());
-    println!("wrote {}", path.display());
-    Ok(())
 }
 
 pub(crate) fn workspace() -> PathBuf {

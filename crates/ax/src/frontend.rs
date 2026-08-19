@@ -1,6 +1,6 @@
 //! Surfaces lower to one AST.
 //!
-//! Ax is `#name`, `:=`, `$if`, `+/`, type glyphs. There is no opt-in
+//! Ax is `#name`, `:=`, `c??t:e`, `+/`, type glyphs. There is no opt-in
 //! mode. A file that opens with `(` is the prefix tree.
 //! Rust-shaped conventional / terse / verbose remain as a corpus dialect so
 //! existing tests keep proving the IR; they rewrite into the same parser.
@@ -578,6 +578,7 @@ pub fn looks_like_dense(src: &str) -> bool {
     (t.starts_with('#') && t.len() > 1 && t.as_bytes()[1].is_ascii_alphabetic())
         || contains_outside_comments(src, ":=")
         || contains_outside_comments(src, "$")
+        || contains_outside_comments(src, "??")
         || dense_at_sugar(src)
         || dense_range_sugar(src)
         || dense_assign_sugar(src)
@@ -863,7 +864,11 @@ fn dense_put_sugar(src: &str) -> bool {
 ///   `xs<-e`                        → `xs.push(e)`
 ///   `m[k]?d`                       → `m.get(k)?d`
 pub fn rewrite_dense_to_terse(src: &str) -> String {
-    let mut s = expand_dense_mapnew(src);
+    let mut s = expand_dense_shared_signatures(src);
+    s = expand_dense_i32_defaults(&s);
+    s = expand_dense_effect_aliases(&s);
+    s = expand_dense_map_literals(&s);
+    s = expand_dense_mapnew(&s);
     s = expand_dense_lits(&s);
     s = expand_dense_len(&s);
     s = expand_dense_reduce(&s);
@@ -919,6 +924,349 @@ fn expand_dense_types(src: &str) -> String {
         }
         out.push(b[i] as char);
         i += 1;
+    }
+    out
+}
+
+/// Dense signatures default omitted parameter and result types to `I` (i32).
+///
+/// The default removes two BPE pieces per ordinary integer parameter and one
+/// for the result while preserving explicit annotations for every other type:
+/// `#add(a,b)=a+b` is exactly `#add(a I,b I) I=a+b`.
+fn expand_dense_i32_defaults(src: &str) -> String {
+    rewrite_dense_signatures(src, false)
+}
+
+/// Mechanical inverse used by `ax fmt`/`to_dense`: explicit i32 annotations in
+/// function signatures are omitted because the dense surface reconstructs them.
+fn pack_dense_i32_defaults(src: &str) -> String {
+    rewrite_dense_signatures(src, true)
+}
+
+fn rewrite_dense_signatures(src: &str, pack: bool) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + if pack { 0 } else { 16 });
+    let mut cursor = 0;
+    let mut search = 0;
+
+    while let Some(rel) = src[search..].find('#') {
+        let hash = search + rel;
+        let at_edge =
+            hash == 0 || b[hash - 1].is_ascii_whitespace() || matches!(b[hash - 1], b';' | b'}');
+        if !at_edge || hash + 1 >= b.len() || !b[hash + 1].is_ascii_alphabetic() {
+            search = hash + 1;
+            continue;
+        }
+        let mut name_end = hash + 1;
+        while name_end < b.len() && is_ident_char(b[name_end]) {
+            name_end += 1;
+        }
+        let mut open = name_end;
+        while open < b.len() && b[open].is_ascii_whitespace() {
+            open += 1;
+        }
+        if open >= b.len() || b[open] != b'(' {
+            search = hash + 1;
+            continue;
+        }
+        let Some(close) = find_matching_ascii(b, open, b'(', b')') else {
+            break;
+        };
+
+        out.push_str(&src[cursor..open + 1]);
+        out.push_str(&rewrite_dense_params(&src[open + 1..close], pack));
+        out.push(')');
+
+        let mut after_ws = close + 1;
+        while after_ws < b.len() && b[after_ws].is_ascii_whitespace() {
+            after_ws += 1;
+        }
+        if pack
+            && after_ws < b.len()
+            && b[after_ws] == b'I'
+            && (after_ws + 1 == b.len() || !is_ident_char(b[after_ws + 1]))
+        {
+            let mut next = after_ws + 1;
+            while next < b.len() && b[next].is_ascii_whitespace() {
+                next += 1;
+            }
+            if next < b.len() && matches!(b[next], b'=' | b'!') {
+                cursor = after_ws + 1;
+                search = cursor;
+                continue;
+            }
+        } else if !pack && after_ws < b.len() && matches!(b[after_ws], b'=' | b'!') {
+            out.push_str(" I");
+        }
+        cursor = close + 1;
+        search = cursor;
+    }
+    out.push_str(&src[cursor..]);
+    out
+}
+
+fn rewrite_dense_params(params: &str, pack: bool) -> String {
+    let b = params.as_bytes();
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    let mut square = 0i32;
+    let mut paren = 0i32;
+    for (i, &c) in b.iter().enumerate() {
+        match c {
+            b'[' => square += 1,
+            b']' => square -= 1,
+            b'(' => paren += 1,
+            b')' => paren -= 1,
+            b',' if square == 0 && paren == 0 => {
+                pieces.push(&params[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < params.len() || !params.trim().is_empty() {
+        pieces.push(&params[start..]);
+    }
+    pieces
+        .into_iter()
+        .map(|piece| {
+            let p = piece.trim();
+            if pack {
+                let mut words = p.split_whitespace();
+                match (words.next(), words.next(), words.next()) {
+                    (Some(name), Some("I"), None)
+                        if name.as_bytes().iter().all(|c| is_ident_char(*c)) =>
+                    {
+                        name.to_string()
+                    }
+                    _ => p.to_string(),
+                }
+            } else if !p.is_empty() && p.as_bytes().iter().all(|c| is_ident_char(*c)) {
+                format!("{p} I")
+            } else {
+                p.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn find_matching_ascii(b: &[u8], open_at: usize, open: u8, close: u8) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut i = open_at;
+    while i < b.len() {
+        if matches!(b[i], b'"' | b'`') {
+            let quote = b[i];
+            i += 1;
+            while i < b.len() && b[i] != quote {
+                if b[i] == b'\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+        } else if b[i] == open {
+            depth += 1;
+        } else if b[i] == close {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// `#f(a,b:T)=body` shares `T` across every parameter and the result.
+/// This is useful for non-i32 monomorphic helpers while the even shorter
+/// `#f(a,b)=body` remains the i32 default.
+fn expand_dense_shared_signatures(src: &str) -> String {
+    rewrite_shared_signatures(src, false)
+}
+
+fn pack_dense_shared_signatures(src: &str) -> String {
+    rewrite_shared_signatures(src, true)
+}
+
+fn rewrite_shared_signatures(src: &str, pack: bool) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut cursor = 0;
+    let mut search = 0;
+    while let Some(rel) = src[search..].find('#') {
+        let hash = search + rel;
+        if hash + 1 >= b.len() || !b[hash + 1].is_ascii_alphabetic() {
+            search = hash + 1;
+            continue;
+        }
+        let mut open = hash + 1;
+        while open < b.len() && is_ident_char(b[open]) {
+            open += 1;
+        }
+        while open < b.len() && b[open].is_ascii_whitespace() {
+            open += 1;
+        }
+        if open >= b.len() || b[open] != b'(' {
+            search = hash + 1;
+            continue;
+        }
+        let Some(close) = find_matching_ascii(b, open, b'(', b')') else {
+            break;
+        };
+        let params = &src[open + 1..close];
+        let mut after = close + 1;
+        while after < b.len() && b[after].is_ascii_whitespace() {
+            after += 1;
+        }
+
+        if pack {
+            let Some((names, ty)) = common_dense_param_type(params) else {
+                search = close + 1;
+                continue;
+            };
+            if !src[after..].starts_with(&ty)
+                || src
+                    .as_bytes()
+                    .get(after + ty.len())
+                    .is_some_and(|c| is_ident_char(*c))
+            {
+                search = close + 1;
+                continue;
+            }
+            let mut next = after + ty.len();
+            while next < b.len() && b[next].is_ascii_whitespace() {
+                next += 1;
+            }
+            if next >= b.len() || !matches!(b[next], b'=' | b'!') {
+                search = close + 1;
+                continue;
+            }
+            out.push_str(&src[cursor..open + 1]);
+            out.push_str(&names.join(","));
+            out.push(':');
+            out.push_str(&ty);
+            out.push(')');
+            cursor = after + ty.len();
+            search = cursor;
+        } else {
+            let Some(colon) = top_level_colon(params) else {
+                search = close + 1;
+                continue;
+            };
+            let names: Vec<&str> = params[..colon].split(',').map(str::trim).collect();
+            let ty = params[colon + 1..].trim();
+            if names.is_empty()
+                || ty.is_empty()
+                || names
+                    .iter()
+                    .any(|n| n.is_empty() || !n.as_bytes().iter().all(|c| is_ident_char(*c)))
+                || (after < b.len() && !matches!(b[after], b'=' | b'!'))
+            {
+                search = close + 1;
+                continue;
+            }
+            out.push_str(&src[cursor..open + 1]);
+            out.push_str(
+                &names
+                    .iter()
+                    .map(|name| format!("{name} {ty}"))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            out.push(')');
+            out.push(' ');
+            out.push_str(ty);
+            cursor = close + 1;
+            search = cursor;
+        }
+    }
+    out.push_str(&src[cursor..]);
+    out
+}
+
+fn top_level_colon(params: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, c) in params.bytes().enumerate() {
+        match c {
+            b'[' | b'(' => depth += 1,
+            b']' | b')' => depth -= 1,
+            b':' if depth == 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn common_dense_param_type(params: &str) -> Option<(Vec<&str>, String)> {
+    let mut names = Vec::new();
+    let mut common = None::<&str>;
+    for piece in params.split(',') {
+        let mut words = piece.split_whitespace();
+        let (Some(name), Some(ty), None) = (words.next(), words.next(), words.next()) else {
+            return None;
+        };
+        if !name.as_bytes().iter().all(|c| is_ident_char(*c)) {
+            return None;
+        }
+        if common.is_some_and(|c| c != ty) {
+            return None;
+        }
+        common = Some(ty);
+        names.push(name);
+    }
+    Some((names, common?.to_string()))
+}
+
+/// The test allocator is the overwhelmingly common allocator in generated Ax
+/// snippets. `!a` is a two-token spelling of `!alloc[a]` (four BPE tokens).
+fn expand_dense_effect_aliases(src: &str) -> String {
+    replace_dense_outside_strings(src, "!a", "!alloc[a]", true)
+}
+
+fn pack_dense_effect_aliases(src: &str) -> String {
+    replace_dense_outside_strings(src, "!alloc[a]", "!a", false)
+}
+
+fn replace_dense_outside_strings(
+    src: &str,
+    from: &str,
+    to: &str,
+    require_boundary: bool,
+) -> String {
+    let b = src.as_bytes();
+    let needle = from.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < b.len() {
+        if matches!(b[i], b'"' | b'`') {
+            let quote = b[i];
+            let start = i;
+            i += 1;
+            while i < b.len() {
+                if b[i] == b'\\' {
+                    i += 1;
+                } else if b[i] == quote {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            out.push_str(&src[start..i]);
+            continue;
+        }
+        if i + needle.len() <= b.len()
+            && &b[i..i + needle.len()] == needle
+            && (!require_boundary
+                || i + needle.len() == b.len()
+                || !is_ident_char(b[i + needle.len()]))
+        {
+            out.push_str(to);
+            i += needle.len();
+            continue;
+        }
+        let ch = src[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
     }
     out
 }
@@ -1499,7 +1847,11 @@ fn expand_dense_index_get(src: &str) -> String {
             }
             continue;
         }
-        if b[i] == b'?' && !out.is_empty() && out.as_bytes().last() == Some(&b']') {
+        if b[i] == b'?'
+            && b.get(i + 1) != Some(&b'?')
+            && !out.is_empty()
+            && out.as_bytes().last() == Some(&b']')
+        {
             let mut k = out.len() - 1;
             let mut d = 0i32;
             while k > 0 {
@@ -1727,6 +2079,242 @@ fn expand_dense_returns(src: &str) -> String {
     out
 }
 
+/// `%{"k":2L}` is an inferred `M[S,L]` literal allocated from `test.alloc`.
+/// It lowers to the existing map-new and insert operations, so effects, types,
+/// and backend behavior remain identical to the expanded spelling.
+fn expand_dense_map_literals(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 32);
+    let mut i = 0;
+    let mut serial = 0usize;
+    while i < b.len() {
+        if matches!(b[i], b'"' | b'`') {
+            let quote = b[i];
+            let start = i;
+            i += 1;
+            while i < b.len() {
+                if b[i] == b'\\' {
+                    i += 1;
+                } else if b[i] == quote {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            out.push_str(&src[start..i]);
+            continue;
+        }
+        if b[i] == b'%' && b.get(i + 1) == Some(&b'{') {
+            if let Some(close) = find_matching_ascii(b, i + 1, b'{', b'}') {
+                let inner = &src[i + 2..close];
+                if let Some(entries) = dense_map_entries(inner) {
+                    if !entries.is_empty() {
+                        let key_ty = dense_atom_type(&entries[0].0);
+                        let value_ty = dense_atom_type(&entries[0].1);
+                        if let (Some(key_ty), Some(value_ty)) = (key_ty, value_ty) {
+                            if entries.iter().all(|(k, v)| {
+                                dense_atom_type(k) == Some(key_ty)
+                                    && dense_atom_type(v) == Some(value_ty)
+                            }) {
+                                let mut name = format!("__axm{serial}");
+                                while src.contains(&name) {
+                                    serial += 1;
+                                    name = format!("__axm{serial}");
+                                }
+                                serial += 1;
+                                out.push_str("{ ");
+                                out.push_str(&name);
+                                out.push_str(" M[");
+                                out.push_str(key_ty);
+                                out.push(',');
+                                out.push_str(value_ty);
+                                out.push_str("]:= %; ");
+                                for (key, value) in &entries {
+                                    out.push_str(&name);
+                                    out.push('[');
+                                    out.push_str(key);
+                                    out.push_str("]<-");
+                                    out.push_str(value);
+                                    out.push_str("; ");
+                                }
+                                out.push_str(&name);
+                                out.push_str(" }");
+                                i = close + 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let ch = src[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+fn dense_map_entries(inner: &str) -> Option<Vec<(String, String)>> {
+    let mut entries = Vec::new();
+    for piece in split_dense_top_level(inner, b',') {
+        let colon = find_dense_top_level(piece, b':')?;
+        let key = piece[..colon].trim();
+        let value = piece[colon + 1..].trim();
+        if key.is_empty() || value.is_empty() {
+            return None;
+        }
+        entries.push((key.to_string(), value.to_string()));
+    }
+    Some(entries)
+}
+
+fn split_dense_top_level(src: &str, separator: u8) -> Vec<&str> {
+    let b = src.as_bytes();
+    let mut result = Vec::new();
+    let mut start = 0;
+    let mut depths = [0i32; 3];
+    let mut quote = None;
+    let mut i = 0;
+    while i < b.len() {
+        if let Some(q) = quote {
+            if b[i] == b'\\' {
+                i += 1;
+            } else if b[i] == q {
+                quote = None;
+            }
+        } else {
+            match b[i] {
+                b'"' | b'`' => quote = Some(b[i]),
+                b'(' => depths[0] += 1,
+                b')' => depths[0] -= 1,
+                b'[' => depths[1] += 1,
+                b']' => depths[1] -= 1,
+                b'{' => depths[2] += 1,
+                b'}' => depths[2] -= 1,
+                c if c == separator && depths == [0, 0, 0] => {
+                    result.push(&src[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    if start < src.len() || !src.trim().is_empty() {
+        result.push(&src[start..]);
+    }
+    result
+}
+
+fn find_dense_top_level(src: &str, needle: u8) -> Option<usize> {
+    let pieces = split_dense_top_level(src, needle);
+    if pieces.len() != 2 {
+        return None;
+    }
+    Some(pieces[0].len())
+}
+
+fn dense_atom_type(atom: &str) -> Option<&'static str> {
+    let atom = atom.trim().trim_start_matches('-');
+    if atom.starts_with('"') && atom.ends_with('"') {
+        return Some("S");
+    }
+    if !atom
+        .trim_end_matches(|c: char| c.is_ascii_alphabetic())
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == '_')
+    {
+        return None;
+    }
+    match atom.as_bytes().last().copied() {
+        Some(b'L') => Some("L"),
+        Some(b'Z') => Some("Z"),
+        Some(b'W') => Some("W"),
+        Some(b'I') | Some(b'0'..=b'9') => Some("I"),
+        _ => None,
+    }
+}
+
+/// Fuse a compact typed map construction produced by `to_dense` back into a
+/// literal. This runs after whitespace minimization so the pattern is stable.
+fn pack_dense_map_literals(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut cursor = 0;
+    let mut scan = 0;
+    while let Some(rel) = src[scan..].find(":=%;") {
+        let bind = scan + rel;
+        let stmt_start = src[..bind]
+            .rfind(|c| matches!(c, '{' | ';' | '\n'))
+            .map_or(0, |p| p + 1);
+        let binding = src[stmt_start..bind].trim();
+        let Some(space) = binding.find(' ') else {
+            scan = bind + 4;
+            continue;
+        };
+        let name = binding[..space].trim();
+        let map_ty = binding[space + 1..].trim();
+        if !map_ty.starts_with("M[") || !map_ty.ends_with(']') {
+            scan = bind + 4;
+            continue;
+        }
+        let mut at = bind + 4;
+        let mut entries = Vec::new();
+        loop {
+            if !src[at..].starts_with(name) || src.as_bytes().get(at + name.len()) != Some(&b'[') {
+                break;
+            }
+            let open = at + name.len();
+            let Some(close) = find_matching_ascii(src.as_bytes(), open, b'[', b']') else {
+                break;
+            };
+            if !src[close + 1..].starts_with("<-") {
+                break;
+            }
+            let value_start = close + 3;
+            let Some(value_len) = src[value_start..].find(';') else {
+                break;
+            };
+            let key = src[open + 1..close].to_string();
+            let value = src[value_start..value_start + value_len].to_string();
+            entries.push((key, value));
+            at = value_start + value_len + 1;
+        }
+        if entries.is_empty() {
+            scan = bind + 4;
+            continue;
+        }
+        let expected = format!(
+            "M[{},{}]",
+            dense_atom_type(&entries[0].0).unwrap_or("?"),
+            dense_atom_type(&entries[0].1).unwrap_or("?")
+        );
+        if map_ty != expected
+            || !entries.iter().all(|(k, v)| {
+                dense_atom_type(k) == dense_atom_type(&entries[0].0)
+                    && dense_atom_type(v) == dense_atom_type(&entries[0].1)
+            })
+        {
+            scan = bind + 4;
+            continue;
+        }
+        out.push_str(&src[cursor..stmt_start]);
+        out.push_str(name);
+        out.push_str(":=%{");
+        out.push_str(
+            &entries
+                .iter()
+                .map(|(k, v)| format!("{k}:{v}"))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        out.push_str("};");
+        cursor = at;
+        scan = at;
+    }
+    out.push_str(&src[cursor..]);
+    out
+}
+
 fn expand_dense_mapnew(src: &str) -> String {
     let b = src.as_bytes();
     let mut out = String::with_capacity(src.len() + 16);
@@ -1898,7 +2486,8 @@ fn expand_dense_while(src: &str) -> String {
     out
 }
 
-/// `e|d` after `)` / ident → `match e { Ok(v) => v; Err(_) => d }`
+/// `e|d` after `)` / ident → `match attempt e { Ok(v) => v; Err(_) => d }`.
+/// The `attempt` is what removes the handled error from the outward effect row.
 fn expand_dense_result_or(src: &str) -> String {
     let b = src.as_bytes();
     let mut out = String::with_capacity(src.len() + 32);
@@ -1975,7 +2564,7 @@ fn expand_dense_result_or(src: &str) -> String {
             }
             let scrut = out[k..].to_string();
             out.truncate(k);
-            out.push_str("match ");
+            out.push_str("match attempt ");
             out.push_str(&scrut);
             out.push_str(" { Ok(v) => v; Err(_) => ");
             out.push_str(def);
@@ -2100,6 +2689,9 @@ pub fn to_dense(src: &str) -> String {
     s = pack_dense_result_or(&s);
     s = pack_dense_mapnew(&s);
     s = pack_dense_types(&s);
+    s = pack_dense_i32_defaults(&s);
+    s = pack_dense_shared_signatures(&s);
+    s = pack_dense_effect_aliases(&s);
     s = pack_dense_lits(&s);
     s = pack_dense_assign(&s);
     s = pack_dense_inc(&s);
@@ -2108,30 +2700,137 @@ pub fn to_dense(src: &str) -> String {
     s = pack_dense_vec_reduce(&s);
     s = pack_dense_put(&s);
     s = pack_dense_semis(&s);
-    minify_dense(&s)
+    let s = minify_dense(&s);
+    pack_dense_map_literals(&s)
 }
 
-/// Spaces are free in the proxy tokenizer; newlines are not. Collapse
-/// layout so a dense file is one token cheaper per dropped line.
+/// Collapse layout, then remove every space or newline that is not a lexical
+/// separator. Real BPE vocabularies charge for both.
 fn minify_dense(src: &str) -> String {
-    let mut out = String::with_capacity(src.len());
-    for (i, line) in src.lines().enumerate() {
+    let mut laid_out = String::with_capacity(src.len());
+    for line in src.lines() {
         let t = line.trim();
         if t.is_empty() {
             continue;
         }
-        if !out.is_empty() {
+        if !laid_out.is_empty() {
             // Keep a line break before the next `#fn` so two decls stay separate.
             if t.starts_with('#') {
-                out.push('\n');
+                laid_out.push('\n');
             } else {
-                out.push(' ');
+                laid_out.push(' ');
             }
         }
-        let _ = i;
-        out.push_str(t);
+        laid_out.push_str(t);
+    }
+    let compact = remove_optional_dense_space(&laid_out);
+    compact
+        .replace(";\n#", "\n#")
+        .trim_end_matches(';')
+        .to_string()
+}
+
+/// Strip whitespace that is not a lexical separator. BPE vocabularies charge
+/// for many spaces/newlines even though the old in-repo proxy did not, so this
+/// is part of the language pack rather than a cosmetic formatter pass.
+fn remove_optional_dense_space(src: &str) -> String {
+    let chars: Vec<char> = src.chars().collect();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if matches!(chars[i], '"' | '`') {
+            let quote = chars[i];
+            out.push(quote);
+            i += 1;
+            while i < chars.len() {
+                out.push(chars[i]);
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    i += 1;
+                    out.push(chars[i]);
+                } else if chars[i] == quote {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if chars[i] == '/' && chars.get(i + 1) == Some(&'/') {
+            while i < chars.len() {
+                out.push(chars[i]);
+                let end = chars[i] == '\n';
+                i += 1;
+                if end {
+                    break;
+                }
+            }
+            continue;
+        }
+        if chars[i] == '/' && chars.get(i + 1) == Some(&'*') {
+            while i < chars.len() {
+                out.push(chars[i]);
+                if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+                    i += 1;
+                    out.push('/');
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if chars[i].is_whitespace() {
+            let start = i;
+            while i < chars.len() && chars[i].is_whitespace() {
+                i += 1;
+            }
+            let prev = out.chars().next_back();
+            let next = chars.get(i).copied();
+            let had_newline = chars[start..i].contains(&'\n');
+            if had_newline && next == Some('#') {
+                out.push('\n');
+            } else if whitespace_is_separator(prev, next) {
+                out.push(' ');
+            }
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
     }
     out
+}
+
+fn whitespace_is_separator(prev: Option<char>, next: Option<char>) -> bool {
+    let (Some(a), Some(b)) = (prev, next) else {
+        return false;
+    };
+    let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    if ident(a) && ident(b) {
+        return true;
+    }
+    matches!(
+        (a, b),
+        ('/', '/')
+            | ('/', '*')
+            | ('*', '/')
+            | ('+', '+')
+            | ('-', '-')
+            | ('-', '>')
+            | ('=', '=')
+            | ('=', '>')
+            | ('!', '=')
+            | ('<', '=')
+            | ('>', '=')
+            | ('&', '&')
+            | ('|', '|')
+            | (':', ':')
+            | (':', '=')
+            | ('<', '<')
+            | ('>', '>')
+            | ('<', '-')
+            | ('?', '?')
+            | ('.', '.')
+    )
 }
 
 fn pack_dense_types(src: &str) -> String {
@@ -2390,16 +3089,22 @@ fn pack_dense_if(src: &str) -> String {
                     i = j;
                     else_b = take_brace(b, &mut i);
                 }
-                out.push('$');
-                out.push_str(cond);
-                out.push('{');
-                if let Some(t) = then_b {
-                    out.push_str(t.trim());
-                }
-                out.push('}');
                 if let Some(e) = else_b {
+                    // `??` is one BPE token in both target vocabularies and a
+                    // simple branch needs no braces: `b??1:0` versus `$b{1}{0}`.
+                    out.push_str(cond);
+                    out.push_str("??");
+                    out.push_str(&pack_dense_if_branch(then_b.unwrap_or("")));
+                    out.push(':');
+                    out.push_str(&pack_dense_if_branch(e));
+                } else {
+                    // A one-armed conditional still uses the established form.
+                    out.push('$');
+                    out.push_str(cond);
                     out.push('{');
-                    out.push_str(e.trim());
+                    if let Some(t) = then_b {
+                        out.push_str(t.trim());
+                    }
                     out.push('}');
                 }
                 continue;
@@ -2409,6 +3114,42 @@ fn pack_dense_if(src: &str) -> String {
         i += 1;
     }
     out
+}
+
+fn pack_dense_if_branch(branch: &str) -> String {
+    let packed = pack_dense_if(branch);
+    let t = packed.trim();
+    let mut braces = 0i32;
+    let mut brackets = 0i32;
+    let mut parens = 0i32;
+    let mut quote = None;
+    let mut has_top_level_semi = false;
+    for c in t.chars() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '"' | '`' => quote = Some(c),
+            '{' => braces += 1,
+            '}' => braces -= 1,
+            '[' => brackets += 1,
+            ']' => brackets -= 1,
+            '(' => parens += 1,
+            ')' => parens -= 1,
+            ';' if braces == 0 && brackets == 0 && parens == 0 => {
+                has_top_level_semi = true;
+            }
+            _ => {}
+        }
+    }
+    if !t.is_empty() && !has_top_level_semi {
+        t.to_string()
+    } else {
+        format!("{{{t}}}")
+    }
 }
 
 /// `match e { Some(v) => v; None => d }` → `e?d`
@@ -2430,7 +3171,7 @@ fn pack_dense_option_or(src: &str) -> String {
                 {
                     let d = d.trim().trim_end_matches(';');
                     if !scrut.is_empty() && !d.is_empty() && !d.contains("match ") {
-                        out.push_str(scrut);
+                        out.push_str(scrut.strip_prefix("attempt ").unwrap_or(scrut));
                         out.push('?');
                         out.push_str(d);
                         rest = &after[i..];
@@ -2466,6 +3207,7 @@ fn expand_dense_option_or_real(src: &str) -> String {
         }
         if b[i] == b'?'
             && i > 0
+            && b.get(i + 1) != Some(&b'?')
             && (is_ident_char(b[i - 1]) || b[i - 1] == b')')
             && i + 1 < b.len()
             && !matches!(b[i + 1], b';' | b'}' | b')' | b',' | b' ' | b'\n')
@@ -2648,7 +3390,7 @@ fn pack_dense_result_or(src: &str) -> String {
                 {
                     let d = d.trim().trim_end_matches(';');
                     if !scrut.is_empty() && !d.is_empty() && !d.contains("match ") {
-                        out.push_str(scrut);
+                        out.push_str(scrut.strip_prefix("attempt ").unwrap_or(scrut));
                         out.push('|');
                         out.push_str(d);
                         rest = &after[i..];

@@ -1,7 +1,7 @@
 # Ax
 
 A compiled systems language whose primary consumer is a program, not a person.
-You write `#add(a I, b I) I = a + b`. A file that opens with `(` is the
+You write `#add(a,b)=a+b`. A file that opens with `(` is the
 same language as a prefix tree. The bet under that is a compiler which
 answers questions in microseconds, classifies its own fixes by safety,
 and ships a normative interpreter to check itself against.
@@ -39,16 +39,16 @@ optional (one benchmark column).
 ## Language
 
 ```ax
-#add(a I, b I) I = a + b
-#sum(n Z) Z = +/n
-#parse(s S) I !err[ParseError] = parse_i32(s)|0
+#add(a,b)=a+b
+#sum(n:Z)=+/n
+#parse(s S)=parse_i32(s)|0
 ```
 
 That is Ax. Language reference: `spec/dense.md`. Card: `ax card` /
 `spec/card.md`. A file that opens with `(` is the prefix tree
 (`spec/tree.md`).
 
-- Effects in the signature: `!err[E]`, `!io[c]`, `!alloc[a]`, `diverge`, `abort`.
+- Effects in the signature: `!err[E]`, `!io[c]`, `!alloc[a]` (`!a`), `diverge`, `abort`.
 - Errors: `raise` / `catch` / `attempt` plus declared single-step `from`
   injections. No unwinding: a raise is a branch on a returned tag. `e|d`
   is ok-or.
@@ -60,7 +60,8 @@ That is Ax. Language reference: `spec/dense.md`. Card: `ax card` /
 - The Rust-shaped dialect still parses so the corpus keeps proving the IR.
   An agent does not write it. See `DECISIONS.md` R-14 / R-16.
 
-Side-by-side Rust / C / Go / Ax: `docs/usecases.md` (`ax bench usecases`).
+Side-by-side TypeScript / Python / C / Rust / Ax: `docs/usecases.md`
+(`cargo run -p ax-density -- --write`, development workspace only).
 The corpus grammar (`spec/grammar.ebnf`) is not what you write.
 
 **v0.3:** `e?` is result propagation; `f"…"` interpolates; `own T` is
@@ -185,35 +186,27 @@ Go actually give you.
 
 ## Token cost
 
-Two questions hide behind "optimised for LLMs", and only one favours Ax.
+The development-only `ax-density` workspace tool counts exact source with the
+real `o200k_base` and `cl100k_base` BPE vocabularies. It compares compact
+implementations of eight common methods in the five requested languages; every
+generated Ax snippet is then compiled. Its tokenizer dependency is not part of
+the shipped `ax` package or default workspace build.
 
-**Tokens per source file** (`ax bench tokens`, proxy tokenizer applied identically
-to each language; the terse form is derived mechanically and verified by compiling
-and running it):
+| encoding | TypeScript | Python | C | Rust | **Ax** | Ax vs best mainstream |
+|---|---:|---:|---:|---:|---:|---:|
+| `o200k_base` | 156 | 116 | 193 | 179 | **111** | **4% fewer** |
+| `cl100k_base` | 153 | 115 | 192 | 174 | **111** | **3% fewer** |
 
-| language | tokens | vs ax-terse |
-|---|---:|---:|
-| **ax-terse** | **532** | 1.00× |
-| go | 632 | 1.19× |
-| ax (conventional) | 633 | 1.19× |
-| rust | 685 | 1.29× |
-| c | 766 | 1.44× |
+Ax is the smallest overall corpus in both vocabularies and wins or ties six of
+eight individual cases. The [full side-by-side source](docs/usecases.md) also
+shows the two losses; a controlled corpus is evidence, not proof for every
+possible program.
 
-The terse surface is the one an agent writes, and it is the most compact of the
-five. Two things got it there, and neither is cosmetic:
-
-- **the header is inferable** — `module x; export { .. };` is about twelve tokens
-  per file that the toolchain already knows, so terse sources may omit both and
-  the module name comes from the file stem. Only the terse surface allows this;
-  the conventional one still requires the declaration;
-- **effect rows say only what is true** — `%` no longer forces `err[DivError]`
-  into a signature when the divisor is provably non-zero, and an omitted `!{…}`
-  reconstructs `diverge` from `while`/`loop`. An explicit empty row is still a
-  termination claim. Precision in the checker is a token optimisation as well
-  as an interface one.
-
-Shortening keywords would *not* have helped: `fn` and `f` are both one token. What
-costs tokens is syntax that exists, so the wins came from removing it.
+The measured changes are structural: omitted `i32` signatures, shared non-i32
+signatures (`#sum(n:Z)=+/n`), the one-token `??` conditional, `!a` for the common
+allocator effect, inferred typed map literals, and a formatter that removes
+BPE-costing whitespace and terminators. Shortening `fn` to `f` would not help—both
+are already one token. Removing syntax does.
 
 **Cost to reach a working program.** An earlier version of this section compared
 Ax-with-its-protocol against bare `rustc` and reported ~600× less wall time,
@@ -275,7 +268,7 @@ ax conform               # the conformance corpus alone
 ax testharness           # Test Spec v1.0 tree under tests/
 ```
 
-The conformance corpus (`conformance/`) is 120 cases ported by scenario from Go's
+The conformance corpus (`conformance/`) is 128 cases ported by scenario from Go's
 `test/` and Rust's suites: integer wrapping and shift semantics, truncating
 division, IEEE comparison and NaN canonicalisation, bitwise ops, casts, control
 flow, records and variants, error propagation and injection, regions, the

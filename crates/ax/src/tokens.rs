@@ -1,11 +1,8 @@
 //! Token accounting for source text.
 //!
-//! The goal this serves is "cost less to emit and to read back", and the unit an
-//! LLM is billed in is tokens, not bytes. There is no way to count a specific
-//! model's tokens without that model's vocabulary, so this counts a documented
-//! **proxy** and reports bytes alongside it. The proxy is applied identically to
-//! every language, which is what makes a comparison meaningful even though the
-//! absolute numbers are not any particular tokenizer's.
+//! This is the historical proxy used by protocol experiments. Exact model-BPE
+//! measurement is development tooling and lives in `tools/ax-density`, keeping
+//! model tokenizer dependencies out of the shipped compiler.
 //!
 //! Proxy rules, chosen to mirror what byte-level BPE vocabularies actually do
 //! with source code:
@@ -99,6 +96,7 @@ pub fn count(src: &str) -> Count {
                     | "&/"
                     | "++"
                     | "--"
+                    | "??"
                     | "<-"
             ) {
                 tokens += 1;

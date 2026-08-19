@@ -1,6 +1,6 @@
 # Ax card (v0.3 / research-v1)
 
-**This is Ax.** `#name`, `:=`, `$c{t}{e}`, `i~n`, `+/n`, type glyphs.
+**This is Ax.** `#name`, `:=`, `c??t:e`, `i~n`, `+/n`, type glyphs.
 Default parse and `ax fmt`. See `spec/dense.md`.
 
 A file that opens with `(` is the prefix tree (`spec/tree.md`).
@@ -13,7 +13,8 @@ proving the IR. An agent does not write it.
 Compiled systems language for LLM agents. Extension `.ax`. Text is
 authoritative.
 
-Side-by-side Rust / C / Go / Ax: `docs/usecases.md` (`ax bench usecases`).
+Side-by-side TypeScript / Python / C / Rust / Ax: `docs/usecases.md`
+(`cargo run -p ax-density -- --write`, development workspace only).
 
 ## Axioms
 Minimize attempts-to-green. One spelling per construct. Interfaces
@@ -23,17 +24,18 @@ boundary is explicit.
 
 ## File
 ```
-#add(a I, b I) I = a + b
-#sum(n Z) Z = +/n
-#sumv(xs V[Z]) Z = +/xs#
-#maxv(xs V[Z]) Z = |/xs#
-#pick(b B) I = $b{1}{0}
-#get(m M[S, L], k S) L = m[k]?0
-#main() Z = { s Z:= 1; i~n { s = s * 6364136223846793005 + i }; s }
+#add(a,b)=a+b
+#sum(n:Z)=+/n
+#sumv(xs V[Z])Z=+/xs#
+#maxv(xs V[Z])Z=|/xs#
+#pick(b B)=b??1:0
+#get(m M[S,L],k S)L=m[k]?0
+#main()Z={s Z:=1;i~n{s=s*6364136223846793005+i};s}
 ```
 
-`#name(a T) R = body` is a function. `name T:= e` binds. `i~n` loops
-`i` from 0 to `n`. `$c{t}{e}` is if/else. `@c{body}` is while. `^e`
+`#name(a T)R=body` is a function. Omitted signature types are `I`;
+`a,b:T` shares `T` across parameters and result. `name T:=e` binds.
+`i~n` loops from 0 to `n`. `c??t:e` is if/else. `@c{body}` is while. `^e`
 returns. `e?d` is option-or. `e|d` is result-or.
 
 Type atoms: `I` i32 · `L` i64 · `Y` isz · `U` u32 · `W` u64 · `Z` usz ·
@@ -41,7 +43,8 @@ Type atoms: `I` i32 · `L` i64 · `Y` isz · `U` u32 · `W` u64 · `Z` usz ·
 `M` map · `V` vec.
 
 `7L` is 7 as `L`. `s += e` / `s++` assign. `xs#` is length. `xs[i]`
-is the element (check drops inside `i~xs#`). `+/n` / `*/n` sum /
+is the element (check drops inside `i~xs#`). `%{"k":2L}` is an inferred
+homogeneous map literal. `+/n` / `*/n` sum /
 product of a range as `Z`. `+/xs#` / `*/xs#` / `|/xs#` / `&/xs#`
 sum / product / max / min of a `Z`-vec. `[]` empty vec. `%` empty
 map. `xs<-e` append. `xs[i]<-v` store. `m[k]<-v` insert. `m[k]?d`
@@ -61,7 +64,7 @@ mask to width. `/` and `%` raise `err[DivError]` only when the
 divisor may be zero. `xs[i]` aborts out of range unless proven.
 
 ## Control
-`$c{t}{e}`  `match s { p => e; … }`  `i~n { … }`  `i~xs# { … }`
+`c??t:e`  `$c{t}`  `match s { p => e; … }`  `i~n { … }`  `i~xs# { … }`
 `@c{body}`  `loop` `break` `continue` `^e`  `s += e`  `s++`.
 `i~n` is bounded. `@` / `loop` add `diverge`.
 
@@ -69,6 +72,7 @@ divisor may be zero. `xs[i]` aborts out of range unless proven.
 Inferred in body, checked against declaration. Omitted row reconstructs
 `diverge`. Explicit empty row = effect-free, including termination.
 `--strict-det` rejects `io`/`race`/`nondet`, not `diverge`.
+`!a` is `!alloc[a]`.
 
 ## Errors
 `raise` / `catch` / `attempt` → result. At most one `err[E]`.

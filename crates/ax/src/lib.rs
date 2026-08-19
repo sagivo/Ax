@@ -45,7 +45,6 @@ pub mod tokens;
 pub mod translate;
 pub mod tree;
 pub mod types;
-pub mod usecases;
 pub mod workspace;
 
 pub use driver::{check_report, render_diags, Session};

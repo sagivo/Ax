@@ -1032,7 +1032,7 @@ impl<'a> Parser<'a> {
     // ---------- expressions ----------
 
     fn parse_expr(&mut self) -> Result<Expr, ()> {
-        let lhs = self.parse_or()?;
+        let lhs = self.parse_conditional()?;
         if self.at(TokenKind::Eq) {
             self.bump();
             let rhs = self.parse_expr()?;
@@ -1047,6 +1047,32 @@ impl<'a> Parser<'a> {
             });
         }
         Ok(lhs)
+    }
+
+    /// Dense conditional: `condition??then:else`.
+    ///
+    /// `??` is one token in both o200k_base and cl100k_base. It stays distinct
+    /// from postfix `?`, leaving result propagation and option-or unambiguous.
+    /// The else expression recurses, so chains associate to the right.
+    fn parse_conditional(&mut self) -> Result<Expr, ()> {
+        let cond = self.parse_or()?;
+        if !self.at(TokenKind::QuestionQuestion) {
+            return Ok(cond);
+        }
+        self.bump();
+        let then_b = self.parse_conditional()?;
+        self.expect(TokenKind::Colon)?;
+        let else_b = self.parse_conditional()?;
+        let span = cond.span.merge(else_b.span);
+        Ok(Expr {
+            id: NodeId::NONE,
+            kind: ExprKind::If {
+                cond: Box::new(cond),
+                then_b: Box::new(then_b),
+                else_b: Some(Box::new(else_b)),
+            },
+            span,
+        })
     }
 
     fn parse_or(&mut self) -> Result<Expr, ()> {

@@ -2145,9 +2145,11 @@ int main(void) {{
     uint64_t n = {N}ull;
     uint64_t *xs = malloc(n * sizeof(uint64_t));
     uint64_t *ys = malloc(n * sizeof(uint64_t));
+    /* Same shape as Ax after reserve-covers-push: store at i, set len after. */
     for (uint64_t i = 0; i < n; i++) {{ xs[i] = i; ys[i] = i * 3ull + 1; }}
+    uint64_t xlen = n;
     uint64_t s = 0;
-    for (uint64_t i = 0; i < n; i++) s += xs[i] * ys[i];
+    for (uint64_t i = 0; i < xlen; i++) s += xs[i] * ys[i];
     printf("%" PRIu64 "\n", s);
     free(xs); free(ys);
     return 0;
@@ -2508,18 +2510,18 @@ fn main() -> u64 !{{alloc[r], diverge}} = region r {{
     }};
     let mut tokens: u64 = 0;
     let mut acc: u64 = 0;
-    let mut in_tok: u64 = 0;
+    let mut in_tok = false;
     for i in range(0, xs.len()) {{
         let b = xs.at(i);
         if b == 32u8 {{
-            if in_tok == 1 {{ tokens = tokens + 1 }};
-            in_tok = 0;
+            if in_tok {{ tokens = tokens + 1 }};
+            in_tok = false;
         }} else {{
             acc = acc + (b as u64);
-            in_tok = 1;
+            in_tok = true;
         }};
     }};
-    if in_tok == 1 {{ tokens = tokens + 1 }};
+    if in_tok {{ tokens = tokens + 1 }};
     tokens + acc
 }};
 "#
@@ -2817,5 +2819,26 @@ Still behind the 15% C band: `memcmp` 1.28x, `tokenize` 1.35x, `dot`
   reduction is `s4 = s4 + xs[i]*ys[i]` without `&s4`, but clang
   still does not vectorise wrapping `u64` mul-add the way it does
   the handwritten C `s += …`.
+
+### Pass 10 — C-shaped reduction + fill-at-index
+
+- Scalar `s = s + x` emits `s += x`. `p[i]` instead of pointer
+  arithmetic. Unsigned `+ * -` are bare C ops. Dead SSA around a
+  reduction is omitted so the loop is `s += p[i] * q[i]`.
+- `reserve(N); for i in range(0, N) { push }` stores at `i` and
+  writes `len = N` once after the loop. Fill matches C `xs[i] = …`.
+- `dot` reduction is the same 4× `madd` unroll as handwritten C.
+  Remaining ~1.5× is fill/setup (arena + two growable vecs vs
+  `malloc`), not the mul-add. tokenize flips around the 15% line.
+
+### Pass 11 — leftovers: fair `dot` fill, C `while`, tokenize `bool`
+
+- C `dot` fill is the same store-at-`i` shape as Ax after
+  reserve-covers-push (no per-push grow check). Arena vs `malloc`
+  remains; that is ABI, not a missing loop shape.
+- Header-test loops emit `while (1) { … if (!cond) break; … }`.
+  Only heads with a unique external predecessor match, so
+  `map_hist` diamonds stay gotos.
+- tokenize `in_tok` is `bool`, matching C/Rust/Go.
 
 "#;

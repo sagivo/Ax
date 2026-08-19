@@ -1,0 +1,11 @@
+[package]
+name = "ax-density"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Development-only exact-token benchmarks for Ax"
+
+[dependencies]
+ax = { path = "../../crates/ax" }
+tiktoken-rs = "0.12"

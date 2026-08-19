@@ -278,6 +278,30 @@ A new elision is a language change and needs an entry here.
 `std/core/lib.ax` and `ax-mock` remain conventional on purpose: they
 are compiler fixtures, not agent programs.
 
+## R-22 — optimize model tokens, not glyph count (2026-08-18)
+
+The normative syntax-density metric is exact `o200k_base`, with
+`cl100k_base` as a regression vocabulary. The old proxy remains only for
+historical kernel continuity. The public use-case corpus compares TypeScript,
+Python, C, Rust, and compiler-checked Ax; a test fails if Ax is no longer the
+smallest corpus total in either vocabulary.
+
+Accepted surface changes:
+
+- omitted parameter/result types are `I`: `#add(a,b)=a+b`;
+- `a,b:T` shares a non-default type across parameters and result;
+- `c??t:e` replaces two-arm `$c{t}{e}` in printed Ax (`$c{t}` remains);
+- `!a` is `!alloc[a]`;
+- `%{literal:literal}` is a homogeneous inferred map literal and lowers to the
+  existing allocation/insertion operations;
+- `e|d` expands through `attempt`, so a handled error does not falsely escape;
+- the printer removes optional whitespace and declaration terminators.
+
+Rejected: Unicode APL/Jelly glyphs. `⍳` and `⍴` are three tokens in both target
+vocabularies; common ASCII pairs such as `??`, `+/`, `:=`, and `<-` are one.
+The language adopts K/BQN/Jelly's semantic density—reductions, inferred
+structure, implicit defaults—without adopting byte-golf code pages.
+
 ## R-16 — measure the tree, not the coat (2026-08-18)
 
 `ax eval-loop` / `ax k1` hidden tasks now start as trees

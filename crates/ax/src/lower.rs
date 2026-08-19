@@ -695,6 +695,8 @@ impl<'a> Lowerer<'a> {
             reserved_cap: HashMap::new(),
             known_len: HashMap::new(),
             no_grow: HashSet::new(),
+            fill_index: None,
+            defer_len: HashSet::new(),
             test_fail: None,
         };
 
@@ -796,6 +798,8 @@ impl<'a> Lowerer<'a> {
             reserved_cap: HashMap::new(),
             known_len: HashMap::new(),
             no_grow: HashSet::new(),
+            fill_index: None,
+            defer_len: HashSet::new(),
             test_fail: None,
         };
         // A test that raises without catching fails, exactly as in the oracle.
@@ -1043,6 +1047,11 @@ struct FnLower<'l, 'a> {
     /// Vecs whose remaining `push`es in the current counted `for` are
     /// already covered by `reserve`. The grow check can stay off.
     no_grow: HashSet<Symbol>,
+    /// Index of the counted `for` being lowered. A reserve-covered
+    /// `push` stores at this instead of reloading `len`.
+    fill_index: Option<ValId>,
+    /// Vecs whose `len` is written once after the current fill loop.
+    defer_len: HashSet<Symbol>,
     /// In a `test`, where an uncaught raise goes: the block that reports the
     /// test as failed. The oracle treats an uncaught raise the same way, so the
     /// two agree on which tests pass.
@@ -1538,6 +1547,8 @@ impl<'l, 'a> FnLower<'l, 'a> {
             reserved_cap: HashMap::new(),
             known_len: HashMap::new(),
             no_grow: HashSet::new(),
+            fill_index: None,
+            defer_len: HashSet::new(),
             test_fail: None,
         };
         for (p, pty) in params.iter().zip(&ptys) {
@@ -2857,13 +2868,27 @@ impl<'l, 'a> FnLower<'l, 'a> {
         // pushes so the body sees `len < cap` on every iteration.
         let saved_no_grow = self.no_grow.clone();
         if let Some(n) = const_range_iters(iter, self.l.intern) {
-            mark_covered_pushes(body, n, &self.reserved_cap, &self.known_len, &mut self.no_grow, self.l.intern);
+            mark_covered_pushes(
+                body,
+                n,
+                &self.reserved_cap,
+                &self.known_len,
+                &mut self.no_grow,
+                self.l.intern,
+            );
         }
         let out = self.for_expr_inner(pat, iter, body);
         self.no_grow = saved_no_grow;
         if let Some(n) = const_range_iters(iter, self.l.intern) {
-            apply_covered_pushes(body, n, &self.reserved_cap, &mut self.known_len, self.l.intern);
+            apply_covered_pushes(
+                body,
+                n,
+                &self.reserved_cap,
+                &mut self.known_len,
+                self.l.intern,
+            );
         }
+        self.commit_deferred_lens()?;
         if fact.is_some() {
             self.index_facts.pop();
         }
@@ -2977,6 +3002,29 @@ impl<'l, 'a> FnLower<'l, 'a> {
         }
     }
 
+    /// Write `len = known` for vecs that stored at the loop index.
+    fn commit_deferred_lens(&mut self) -> Result<(), String> {
+        let names: Vec<Symbol> = self.defer_len.drain().collect();
+        for name in names {
+            let Some(n) = self.known_len.get(&name).copied() else {
+                continue;
+            };
+            let Some(loc) = self.lookup(name) else {
+                continue;
+            };
+            let Some(agg) = loc.agg else {
+                continue;
+            };
+            let Some(len_i) = self.l.prog.agg(agg).field_index("len") else {
+                continue;
+            };
+            let lp = self.fb.field_ptr(agg, len_i, loc.addr);
+            let v = self.fb.const_int(n, IrTy::U64);
+            self.fb.store(IrTy::U64, lp, v);
+        }
+        Ok(())
+    }
+
     fn hoisted_data(&self, recv: &Expr) -> Option<ValId> {
         let ExprKind::Path(p) = &recv.kind else {
             return None;
@@ -3070,6 +3118,15 @@ impl<'l, 'a> FnLower<'l, 'a> {
             });
             self.fb.switch_to(body_bb);
             self.loops.push(LoopTargets { head: step, exit });
+            let saved_fill = self.fill_index;
+            // `range(0, N)` + empty vec → store at `i`, write `len` once
+            // after the loop. Matches C `xs[i] = …; xs.len = N`.
+            self.fill_index = if range_lo_is_zero(iter) {
+                Some(i)
+            } else {
+                None
+            };
+            self.defer_len.clear();
             self.push_scope();
             if let PatKind::Bind(v) = &pat.kind {
                 self.bind(
@@ -3104,6 +3161,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 args: vec![next],
             }));
             self.fb.switch_to(exit);
+            // `known_len` is charged by the caller after this returns;
+            // keep `defer_len` so it can write `xs.len = N`.
+            self.fill_index = saved_fill;
             self.data_ptrs = saved_data;
             self.len_vals = saved_lens;
             self.drop_recips(&hoisted);
@@ -4224,7 +4284,26 @@ impl<'l, 'a> FnLower<'l, 'a> {
                             _ => false,
                         }
                 });
-                let (data, len2) = if covered {
+                let fill_at = recv_name.and_then(|n| {
+                    if covered && self.no_grow.contains(&n) {
+                        self.fill_index
+                    } else {
+                        None
+                    }
+                });
+                let (data, len2) = if let Some(idx) = fill_at {
+                    let data = match self.hoisted_data(base) {
+                        Some(p) => p,
+                        None => {
+                            let dp = self.fb.field_ptr(agg, data_i, recv.v);
+                            self.fb.load(IrTy::Ptr, dp)
+                        }
+                    };
+                    if let Some(n) = recv_name {
+                        self.defer_len.insert(n);
+                    }
+                    (data, idx)
+                } else if covered {
                     // Data cannot move, but `len` changes each push — never
                     // reuse a hoisted length as the store index.
                     let data = match self.hoisted_data(base) {
@@ -4305,10 +4384,12 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     }),
                     None => self.fb.store(elem_ir, ep, val.v),
                 }
-                let one = self.fb.const_int(1, IrTy::U64);
-                let next = self.fb.bin(BinKind::Add, len2, one);
-                let lp3 = self.fb.field_ptr(agg, len_i, recv.v);
-                self.fb.store(IrTy::U64, lp3, next);
+                if fill_at.is_none() {
+                    let one = self.fb.const_int(1, IrTy::U64);
+                    let next = self.fb.bin(BinKind::Add, len2, one);
+                    let lp3 = self.fb.field_ptr(agg, len_i, recv.v);
+                    self.fb.store(IrTy::U64, lp3, next);
+                }
                 Ok(Some(LVal::scalar(self.fb.unit(), IrTy::Unit)))
             }
             "set" => {
@@ -5749,6 +5830,16 @@ fn const_int_of(e: &Expr) -> Option<i128> {
     }
 }
 
+fn range_lo_is_zero(iter: &Expr) -> bool {
+    let ExprKind::Call { args, .. } = &iter.kind else {
+        return false;
+    };
+    matches!(
+        args.first().map(|a| &a.kind),
+        Some(ExprKind::Lit(Lit::Int { value: 0, .. }))
+    )
+}
+
 fn const_range_iters(iter: &Expr, intern: &Interner) -> Option<i128> {
     let ExprKind::Call { callee, args } = &iter.kind else {
         return None;
@@ -5799,7 +5890,9 @@ fn apply_covered_pushes(
     match &e.kind {
         ExprKind::Call { callee, args } => {
             if let Some(recv) = push_receiver(callee, intern) {
-                if let (Some(len), Some(cap)) = (known.get(&recv).copied(), reserved.get(&recv).copied()) {
+                if let (Some(len), Some(cap)) =
+                    (known.get(&recv).copied(), reserved.get(&recv).copied())
+                {
                     if len + n <= cap {
                         known.insert(recv, len + n);
                     }
