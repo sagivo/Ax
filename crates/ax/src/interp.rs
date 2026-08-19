@@ -1694,12 +1694,14 @@ impl<'a> Interpreter<'a> {
                 Ok(Value::Str(Rc::from(json.to_string())))
             }
             "db.open" => self.db_open(&args),
+            "db.open_timeout" => self.db_open(&args),
+            "db.set_timeout" => Ok(Value::Unit),
             "db.close" => Ok(Value::Unit),
-            "db.exec0" | "db.exec" => self.db_exec(name, &args),
-            "db.query0" | "db.query" => self.db_query(name, &args),
+            "db.exec0" | "db.exec" | "db.exec_values" => self.db_exec(name, &args),
+            "db.query0" | "db.query" | "db.query_values" => self.db_query(name, &args),
             "db.begin" => self.db_begin(&args),
-            "db.tx_exec0" | "db.tx_exec" => self.db_tx_exec(name, &args),
-            "db.tx_query0" | "db.tx_query" => self.db_tx_query(name, &args),
+            "db.tx_exec0" | "db.tx_exec" | "db.tx_exec_values" => self.db_tx_exec(name, &args),
+            "db.tx_query0" | "db.tx_query" | "db.tx_query_values" => self.db_tx_query(name, &args),
             "db.commit" => self.db_finish(&args, true),
             "db.rollback" => Ok(Value::Unit),
             "env.get_or" => {
@@ -1930,7 +1932,7 @@ impl<'a> Interpreter<'a> {
         } else {
             args.get(2)
         };
-        let sql = db_sql(args.get(1), params)?;
+        let sql = db_sql(args.get(1), params, name.ends_with("_values"))?;
         let output = db_sqlite(&path, &format!("{sql}; SELECT changes();"), false)?;
         let changes = output
             .trim()
@@ -1952,7 +1954,7 @@ impl<'a> Interpreter<'a> {
         } else {
             args.get(3)
         };
-        let sql = db_sql(args.get(2), params)?;
+        let sql = db_sql(args.get(2), params, name.ends_with("_values"))?;
         let output = db_sqlite(&path, &sql, true)?;
         self.json_decode_recs(&[Value::Alloc, Value::Str(Rc::from(output))])
     }
@@ -1972,7 +1974,7 @@ impl<'a> Interpreter<'a> {
         } else {
             args.get(2)
         };
-        let sql = db_sql(args.get(1), params)?;
+        let sql = db_sql(args.get(1), params, name.ends_with("_values"))?;
         tx.borrow_mut().statements.push(sql);
         Ok(Value::Int {
             bits: 0,
@@ -1987,7 +1989,7 @@ impl<'a> Interpreter<'a> {
         } else {
             args.get(3)
         };
-        let query = db_sql(args.get(2), params)?;
+        let query = db_sql(args.get(2), params, name.ends_with("_values"))?;
         let transaction = tx.borrow();
         let mut sql = String::from("BEGIN IMMEDIATE;");
         for statement in &transaction.statements {
@@ -2261,6 +2263,8 @@ fn value_json(value: &Value) -> Option<serde_json::Value> {
                 .map(value_json)
                 .collect::<Option<Vec<_>>>()?,
         ),
+        Value::Variant { name, fields: _ } if name == "None" => serde_json::Value::Null,
+        Value::Variant { name, fields } if name == "Some" => value_json(fields.get("value")?)?,
         Value::Own(inner) => return value_json(inner),
         _ => return None,
     })
@@ -2282,7 +2286,7 @@ fn db_transaction(value: Option<&Value>) -> Option<Rc<RefCell<DbTransaction>>> {
     }
 }
 
-fn db_sql(sql: Option<&Value>, params: Option<&Value>) -> Result<String, Flow> {
+fn db_sql(sql: Option<&Value>, params: Option<&Value>, typed: bool) -> Result<String, Flow> {
     let source = match sql {
         Some(Value::Str(value)) => value.to_string(),
         _ => return Err(db_error()),
@@ -2292,8 +2296,35 @@ fn db_sql(sql: Option<&Value>, params: Option<&Value>) -> Result<String, Flow> {
         Some(Value::Vec(values)) => values
             .borrow()
             .iter()
-            .map(|value| match value {
-                Value::Str(text) => Ok(format!("'{}'", text.replace('\'', "''"))),
+            .map(|value| match (typed, value) {
+                (false, Value::Str(text)) => Ok(format!("'{}'", text.replace('\'', "''"))),
+                (true, Value::Variant { name, fields }) => match name.as_str() {
+                    "Null" => Ok("NULL".into()),
+                    "Text" => match fields.get("value") {
+                        Some(Value::Str(text)) => Ok(format!("'{}'", text.replace('\'', "''"))),
+                        _ => Err(db_error()),
+                    },
+                    "I64" | "U64" => match fields.get("value") {
+                        Some(Value::Int { bits, .. }) => Ok(bits.to_string()),
+                        _ => Err(db_error()),
+                    },
+                    "F64" => match fields.get("value") {
+                        Some(Value::Float { bits, prim }) => {
+                            let value = if *prim == Prim::F32 {
+                                f32::from_bits(*bits as u32) as f64
+                            } else {
+                                f64::from_bits(*bits)
+                            };
+                            Ok(value.to_string())
+                        }
+                        _ => Err(db_error()),
+                    },
+                    "Bool" => match fields.get("value") {
+                        Some(Value::Bool(value)) => Ok(if *value { "1" } else { "0" }.into()),
+                        _ => Err(db_error()),
+                    },
+                    _ => Err(db_error()),
+                },
                 _ => Err(db_error()),
             })
             .collect::<Result<Vec<_>, _>>()?,
@@ -2628,7 +2659,7 @@ fn json_to_rec(j: Json) -> Result<Value, ()> {
 
 fn json_to_val(j: Json) -> Value {
     match j {
-        Json::Null => Value::Unit,
+        Json::Null => none_val(),
         Json::Bool(b) => Value::Bool(b),
         Json::Num(n) => {
             if n.fract() == 0.0 && n.abs() < (1i64 << 53) as f64 {

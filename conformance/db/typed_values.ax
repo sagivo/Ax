@@ -1,0 +1,20 @@
+//! expect: 1u64
+module conf.db.typed_values;
+
+type Item = {id: i64, name: String};
+
+fn main() -> u64 !{alloc[a], err[db.Error], io[db]} = {
+    let pool: db.Pool = db.open(":memory:");
+    db.exec0(pool, "CREATE TABLE items (id INTEGER, name TEXT)");
+    let mut params: Vec[db.Value] = vec.new(test.alloc);
+    params.push(I64(1));
+    params.push(Text("first"));
+    db.exec_values(pool, "INSERT INTO items(id, name) VALUES (?, ?)", params);
+    let rows: Vec[Item] = db.query_values(
+        pool,
+        test.alloc,
+        "SELECT id, name FROM items WHERE id = ? AND name = ?",
+        params
+    );
+    rows.at(0).id as u64
+};

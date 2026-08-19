@@ -5290,6 +5290,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
             "json.decode" => Ok(Some(self.lower_json_decode(args, e, true)?)),
             "json.encode" => Ok(Some(self.lower_json_encode(args)?)),
             "db.open" => Ok(Some(self.lower_db_open(args)?)),
+            "db.open_timeout" => Ok(Some(self.lower_db_open_timeout(args)?)),
             "db.close" => {
                 let pool = self.expr(&args[0])?;
                 self.fb.push_void(Op::CallExt {
@@ -5300,12 +5301,25 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 });
                 Ok(Some(unit(self)))
             }
-            "db.exec0" | "db.exec" | "db.tx_exec0" | "db.tx_exec" => {
-                Ok(Some(self.lower_db_exec(name, args)?))
+            "db.set_timeout" => {
+                let pool = self.expr(&args[0])?;
+                let timeout = self.expr(&args[1])?;
+                let ok = self.fb.push(
+                    Op::CallExt {
+                        name: "ax_db_set_timeout".into(),
+                        args: vec![pool.v, timeout.v],
+                        ret: IrTy::Bool,
+                        fallible: false,
+                    },
+                    IrTy::Bool,
+                );
+                self.branch_db_result(ok)?;
+                Ok(Some(unit(self)))
             }
-            "db.query0" | "db.query" | "db.tx_query0" | "db.tx_query" => {
-                Ok(Some(self.lower_db_query(name, args, e)?))
-            }
+            "db.exec0" | "db.exec" | "db.exec_values" | "db.tx_exec0" | "db.tx_exec"
+            | "db.tx_exec_values" => Ok(Some(self.lower_db_exec(name, args)?)),
+            "db.query0" | "db.query" | "db.query_values" | "db.tx_query0" | "db.tx_query"
+            | "db.tx_query_values" => Ok(Some(self.lower_db_query(name, args, e)?)),
             "db.begin" => Ok(Some(self.lower_db_begin(args)?)),
             "db.commit" | "db.rollback" => Ok(Some(self.lower_db_finish(name, args)?)),
             "parse_i32" => {
@@ -5835,11 +5849,23 @@ impl<'l, 'a> FnLower<'l, 'a> {
     }
 
     fn lower_db_open(&mut self, args: &[Expr]) -> Result<LVal, String> {
+        self.lower_db_open_with("ax_db_open", args)
+    }
+
+    fn lower_db_open_timeout(&mut self, args: &[Expr]) -> Result<LVal, String> {
+        self.lower_db_open_with("ax_db_open_timeout", args)
+    }
+
+    fn lower_db_open_with(&mut self, runtime: &str, args: &[Expr]) -> Result<LVal, String> {
         let path = self.expr(&args[0])?;
+        let mut call_args = vec![path.v];
+        if runtime == "ax_db_open_timeout" {
+            call_args.push(self.expr(&args[1])?.v);
+        }
         let pool = self.fb.push(
             Op::CallExt {
-                name: "ax_db_open".into(),
-                args: vec![path.v],
+                name: runtime.into(),
+                args: call_args,
                 ret: IrTy::Ptr,
                 fallible: false,
             },
@@ -5911,7 +5937,13 @@ impl<'l, 'a> FnLower<'l, 'a> {
         };
         let changes = self.fb.alloc_slot(SlotKind::Scalar(IrTy::U64), "changes");
         let runtime = if name.starts_with("db.tx_") {
-            "ax_db_tx_exec"
+            if name.ends_with("_values") {
+                "ax_db_tx_exec_values"
+            } else {
+                "ax_db_tx_exec"
+            }
+        } else if name.ends_with("_values") {
+            "ax_db_exec_values"
         } else {
             "ax_db_exec"
         };
@@ -5948,7 +5980,13 @@ impl<'l, 'a> FnLower<'l, 'a> {
         let desc = self.fb.push(Op::TypeDescriptor(elem_agg), IrTy::Ptr);
         let out = self.fb.alloc_slot(SlotKind::Agg(vec_agg), "rows");
         let runtime = if name.starts_with("db.tx_") {
-            "ax_db_tx_query"
+            if name.ends_with("_values") {
+                "ax_db_tx_query_values"
+            } else {
+                "ax_db_tx_query"
+            }
+        } else if name.ends_with("_values") {
+            "ax_db_query_values"
         } else {
             "ax_db_query"
         };

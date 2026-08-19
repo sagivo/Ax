@@ -1,0 +1,15 @@
+//! expect: 1u64
+module conf.db.nullable_rows;
+
+type Item = {id: i64, note: Option[String]};
+
+fn main() -> u64 !{alloc[a], err[db.Error], io[db]} = {
+    let pool: db.Pool = db.open(":memory:");
+    db.exec0(pool, "CREATE TABLE items (id INTEGER, note TEXT)");
+    db.exec0(pool, "INSERT INTO items(id, note) VALUES (1, NULL)");
+    let rows: Vec[Item] = db.query0(pool, test.alloc, "SELECT id, note FROM items");
+    match rows.at(0).note {
+        None => 1u64;
+        Some(_) => 0u64;
+    }
+};

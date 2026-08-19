@@ -5,14 +5,28 @@
 #include <sqlite3.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef struct AxDbTx AxDbTx;
+
+typedef struct {
+    int32_t tag;
+    union {
+        AxStr text;
+        int64_t i64;
+        uint64_t u64;
+        double f64;
+        bool boolean;
+    } value;
+} AxDbValue;
 
 typedef struct AxDbPool {
     sqlite3 *database;
     pthread_mutex_t mutex;
     char *path;
     AxDbTx *active_tx;
+    uint32_t timeout_ms;
+    uint64_t deadline_ms;
     struct AxDbPool *next;
 } AxDbPool;
 
@@ -26,6 +40,29 @@ static pthread_mutex_t ax_db_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
 static AxDbPool *ax_db_registry;
 static pthread_mutex_t ax_db_tx_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
 static AxDbTx *ax_db_tx_registry;
+
+static uint64_t ax_db_now_ms(void) {
+    struct timespec value;
+    clock_gettime(CLOCK_MONOTONIC, &value);
+    return (uint64_t)value.tv_sec * 1000 + (uint64_t)value.tv_nsec / 1000000;
+}
+
+static int ax_db_progress(void *context) {
+    AxDbPool *pool = (AxDbPool *)context;
+    return pool->deadline_ms && ax_db_now_ms() >= pool->deadline_ms;
+}
+
+static void ax_db_start_op(AxDbPool *pool) {
+    pool->deadline_ms = pool->timeout_ms
+        ? ax_db_now_ms() + pool->timeout_ms
+        : 0;
+    sqlite3_progress_handler(pool->database, 1000, ax_db_progress, pool);
+}
+
+static void ax_db_end_op(AxDbPool *pool) {
+    pool->deadline_ms = 0;
+    sqlite3_progress_handler(pool->database, 0, NULL, NULL);
+}
 
 static AxDbTx *ax_db_find_tx(void *handle) {
     for (AxDbTx *tx = ax_db_tx_registry; tx; tx = tx->next) {
@@ -42,8 +79,30 @@ static char *ax_db_cstring(const AxStr *value) {
     return text;
 }
 
+static bool ax_db_bind_value(sqlite3_stmt *statement, int index,
+                             const AxDbValue *value) {
+    switch (value->tag) {
+        case 0:
+            return sqlite3_bind_null(statement, index) == SQLITE_OK;
+        case 1:
+            return sqlite3_bind_text64(statement, index, value->value.text.ptr,
+                                       value->value.text.len, SQLITE_TRANSIENT,
+                                       SQLITE_UTF8) == SQLITE_OK;
+        case 2:
+            return sqlite3_bind_int64(statement, index, value->value.i64) == SQLITE_OK;
+        case 3:
+            return sqlite3_bind_int64(statement, index, (sqlite3_int64)value->value.u64) == SQLITE_OK;
+        case 4:
+            return sqlite3_bind_double(statement, index, value->value.f64) == SQLITE_OK;
+        case 5:
+            return sqlite3_bind_int(statement, index, value->value.boolean ? 1 : 0) == SQLITE_OK;
+        default:
+            return false;
+    }
+}
+
 static sqlite3_stmt *ax_db_prepare(sqlite3 *database, const AxStr *sql,
-                                   const AxVec *params) {
+                                   const AxVec *params, bool values) {
     sqlite3_stmt *statement = NULL;
     if (sqlite3_prepare_v2(database, sql->ptr, (int)sql->len, &statement, NULL) != SQLITE_OK)
         return NULL;
@@ -52,10 +111,14 @@ static sqlite3_stmt *ax_db_prepare(sqlite3 *database, const AxStr *sql,
         sqlite3_finalize(statement);
         return NULL;
     }
-    const AxStr *values = params ? (const AxStr *)params->data : NULL;
+    const AxStr *text_values = params ? (const AxStr *)params->data : NULL;
+    const AxDbValue *typed_values = params ? (const AxDbValue *)params->data : NULL;
     for (uint64_t index = 0; index < count; index++) {
-        if (sqlite3_bind_text64(statement, (int)index + 1, values[index].ptr,
-                                values[index].len, SQLITE_TRANSIENT, SQLITE_UTF8) != SQLITE_OK) {
+        bool ok = values
+            ? ax_db_bind_value(statement, (int)index + 1, &typed_values[index])
+            : sqlite3_bind_text64(statement, (int)index + 1, text_values[index].ptr,
+                                  text_values[index].len, SQLITE_TRANSIENT, SQLITE_UTF8) == SQLITE_OK;
+        if (!ok) {
             sqlite3_finalize(statement);
             return NULL;
         }
@@ -73,9 +136,23 @@ static const AxFieldDesc *ax_db_field(const AxTypeDesc *desc, const char *name) 
 static bool ax_db_store_field(const AxAlloc *alloc, sqlite3_stmt *statement,
                               int column, const AxFieldDesc *field,
                               unsigned char *record) {
-    if (sqlite3_column_type(statement, column) == SQLITE_NULL) return false;
     unsigned char *slot = record + field->offset;
-    if (field->kind == AX_FLD_STR) {
+    AxFieldKind kind = field->kind;
+    bool optional = kind >= AX_FLD_OPT_I8;
+    if (optional) {
+        kind = (AxFieldKind)(kind - AX_FLD_OPT_I8);
+        if (sqlite3_column_type(statement, column) == SQLITE_NULL) {
+            int32_t tag = 0;
+            memcpy(slot, &tag, sizeof(tag));
+            return true;
+        }
+        int32_t tag = 1;
+        memcpy(slot, &tag, sizeof(tag));
+        slot += 8;
+    } else if (sqlite3_column_type(statement, column) == SQLITE_NULL) {
+        return false;
+    }
+    if (kind == AX_FLD_STR) {
         if (sqlite3_column_type(statement, column) != SQLITE_TEXT) return false;
         const unsigned char *value = sqlite3_column_text(statement, column);
         int length = sqlite3_column_bytes(statement, column);
@@ -87,9 +164,9 @@ static bool ax_db_store_field(const AxAlloc *alloc, sqlite3_stmt *statement,
         memcpy(slot, &string, sizeof(string));
         return true;
     }
-    if (field->kind == AX_FLD_F32 || field->kind == AX_FLD_F64) {
+    if (kind == AX_FLD_F32 || kind == AX_FLD_F64) {
         double value = sqlite3_column_double(statement, column);
-        if (field->kind == AX_FLD_F32) {
+        if (kind == AX_FLD_F32) {
             float narrowed = (float)value;
             memcpy(slot, &narrowed, sizeof(narrowed));
         } else {
@@ -98,7 +175,7 @@ static bool ax_db_store_field(const AxAlloc *alloc, sqlite3_stmt *statement,
         return true;
     }
     sqlite3_int64 value = sqlite3_column_int64(statement, column);
-    switch (field->kind) {
+    switch (kind) {
         case AX_FLD_I8: if (value < INT8_MIN || value > INT8_MAX) return false; else { int8_t v = (int8_t)value; memcpy(slot, &v, 1); } break;
         case AX_FLD_I16: if (value < INT16_MIN || value > INT16_MAX) return false; else { int16_t v = (int16_t)value; memcpy(slot, &v, 2); } break;
         case AX_FLD_I32: if (value < INT32_MIN || value > INT32_MAX) return false; else { int32_t v = (int32_t)value; memcpy(slot, &v, 4); } break;
@@ -114,8 +191,8 @@ static bool ax_db_store_field(const AxAlloc *alloc, sqlite3_stmt *statement,
 }
 
 static bool ax_db_run_exec(sqlite3 *database, const AxStr *sql,
-                           const AxVec *params, uint64_t *changes) {
-    sqlite3_stmt *statement = ax_db_prepare(database, sql, params);
+                           const AxVec *params, uint64_t *changes, bool values) {
+    sqlite3_stmt *statement = ax_db_prepare(database, sql, params, values);
     if (!statement) return false;
     int result;
     do {
@@ -129,8 +206,8 @@ static bool ax_db_run_exec(sqlite3 *database, const AxStr *sql,
 
 static bool ax_db_run_query(sqlite3 *database, const AxAlloc *alloc,
                             const AxStr *sql, const AxVec *params,
-                            const AxTypeDesc *desc, AxVec *out) {
-    sqlite3_stmt *statement = ax_db_prepare(database, sql, params);
+                            const AxTypeDesc *desc, AxVec *out, bool values) {
+    sqlite3_stmt *statement = ax_db_prepare(database, sql, params, values);
     if (!statement) return false;
     int columns = sqlite3_column_count(statement);
     if (columns != (int)desc->n_fields) {
@@ -178,7 +255,7 @@ static bool ax_db_run_query(sqlite3 *database, const AxAlloc *alloc,
     return ok;
 }
 
-void *ax_db_open(const AxStr *path) {
+void *ax_db_open_timeout(const AxStr *path, uint32_t timeout_ms) {
     char *name = ax_db_cstring(path);
     if (!name) return NULL;
     AxDbPool *pool = (AxDbPool *)calloc(1, sizeof(*pool));
@@ -193,7 +270,8 @@ void *ax_db_open(const AxStr *path) {
         free(pool);
         return NULL;
     }
-    sqlite3_busy_timeout(pool->database, 5000);
+    pool->timeout_ms = timeout_ms;
+    sqlite3_busy_timeout(pool->database, (int)timeout_ms);
     sqlite3_exec(pool->database, "PRAGMA foreign_keys = ON", NULL, NULL, NULL);
     pthread_mutex_init(&pool->mutex, NULL);
     pool->path = name;
@@ -202,6 +280,19 @@ void *ax_db_open(const AxStr *path) {
     ax_db_registry = pool;
     pthread_mutex_unlock(&ax_db_registry_mutex);
     return pool;
+}
+
+void *ax_db_open(const AxStr *path) { return ax_db_open_timeout(path, 5000); }
+
+bool ax_db_set_timeout(void *handle, uint32_t timeout_ms) {
+    AxDbPool *pool = (AxDbPool *)handle;
+    if (!pool) return false;
+    pthread_mutex_lock(&pool->mutex);
+    pool->timeout_ms = timeout_ms;
+    sqlite3_busy_timeout(pool->database, (int)timeout_ms);
+    bool ok = true;
+    pthread_mutex_unlock(&pool->mutex);
+    return ok;
 }
 
 void ax_db_close(void *handle) {
@@ -224,25 +315,54 @@ void ax_db_close(void *handle) {
     free(pool);
 }
 
-bool ax_db_exec(void *handle, const AxStr *sql, const AxVec *params, uint64_t *changes) {
+static bool ax_db_exec_impl(void *handle, const AxStr *sql, const AxVec *params,
+                            uint64_t *changes, bool values) {
     AxDbPool *pool = (AxDbPool *)handle;
     if (!pool) return false;
     pthread_mutex_lock(&pool->mutex);
-    bool ok = !pool->active_tx &&
-              ax_db_run_exec(pool->database, sql, params, changes);
+    bool ok = false;
+    if (!pool->active_tx) {
+        ax_db_start_op(pool);
+        ok = ax_db_run_exec(pool->database, sql, params, changes, values);
+        ax_db_end_op(pool);
+    }
+    pthread_mutex_unlock(&pool->mutex);
+    return ok;
+}
+
+bool ax_db_exec(void *handle, const AxStr *sql, const AxVec *params, uint64_t *changes) {
+    return ax_db_exec_impl(handle, sql, params, changes, false);
+}
+
+bool ax_db_exec_values(void *handle, const AxStr *sql, const AxVec *params,
+                       uint64_t *changes) {
+    return ax_db_exec_impl(handle, sql, params, changes, true);
+}
+
+static bool ax_db_query_impl(void *handle, const AxAlloc *alloc, const AxStr *sql,
+                             const AxVec *params, const AxTypeDesc *desc,
+                             AxVec *out, bool values) {
+    AxDbPool *pool = (AxDbPool *)handle;
+    if (!pool) return false;
+    pthread_mutex_lock(&pool->mutex);
+    bool ok = false;
+    if (!pool->active_tx) {
+        ax_db_start_op(pool);
+        ok = ax_db_run_query(pool->database, alloc, sql, params, desc, out, values);
+        ax_db_end_op(pool);
+    }
     pthread_mutex_unlock(&pool->mutex);
     return ok;
 }
 
 bool ax_db_query(void *handle, const AxAlloc *alloc, const AxStr *sql,
                  const AxVec *params, const AxTypeDesc *desc, AxVec *out) {
-    AxDbPool *pool = (AxDbPool *)handle;
-    if (!pool) return false;
-    pthread_mutex_lock(&pool->mutex);
-    bool ok = !pool->active_tx &&
-              ax_db_run_query(pool->database, alloc, sql, params, desc, out);
-    pthread_mutex_unlock(&pool->mutex);
-    return ok;
+    return ax_db_query_impl(handle, alloc, sql, params, desc, out, false);
+}
+
+bool ax_db_query_values(void *handle, const AxAlloc *alloc, const AxStr *sql,
+                        const AxVec *params, const AxTypeDesc *desc, AxVec *out) {
+    return ax_db_query_impl(handle, alloc, sql, params, desc, out, true);
 }
 
 void *ax_db_begin(void *handle) {
@@ -252,13 +372,16 @@ void *ax_db_begin(void *handle) {
     if (!tx) return NULL;
     pthread_mutex_lock(&ax_db_tx_registry_mutex);
     pthread_mutex_lock(&pool->mutex);
+    ax_db_start_op(pool);
     if (pool->active_tx ||
         sqlite3_exec(pool->database, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK) {
+        ax_db_end_op(pool);
         pthread_mutex_unlock(&pool->mutex);
         pthread_mutex_unlock(&ax_db_tx_registry_mutex);
         free(tx);
         return NULL;
     }
+    ax_db_end_op(pool);
     tx->database = pool->database;
     tx->pool = pool;
     pool->active_tx = tx;
@@ -269,7 +392,8 @@ void *ax_db_begin(void *handle) {
     return tx;
 }
 
-bool ax_db_tx_exec(void *handle, const AxStr *sql, const AxVec *params, uint64_t *changes) {
+static bool ax_db_tx_exec_impl(void *handle, const AxStr *sql, const AxVec *params,
+                               uint64_t *changes, bool values) {
     pthread_mutex_lock(&ax_db_tx_registry_mutex);
     AxDbTx *tx = ax_db_find_tx(handle);
     if (!tx) {
@@ -277,27 +401,56 @@ bool ax_db_tx_exec(void *handle, const AxStr *sql, const AxVec *params, uint64_t
         return false;
     }
     pthread_mutex_lock(&tx->pool->mutex);
-    bool ok = tx->pool->active_tx == tx &&
-              ax_db_run_exec(tx->database, sql, params, changes);
+    bool ok = false;
+    if (tx->pool->active_tx == tx) {
+        ax_db_start_op(tx->pool);
+        ok = ax_db_run_exec(tx->database, sql, params, changes, values);
+        ax_db_end_op(tx->pool);
+    }
+    pthread_mutex_unlock(&tx->pool->mutex);
+    pthread_mutex_unlock(&ax_db_tx_registry_mutex);
+    return ok;
+}
+
+bool ax_db_tx_exec(void *handle, const AxStr *sql, const AxVec *params,
+                   uint64_t *changes) {
+    return ax_db_tx_exec_impl(handle, sql, params, changes, false);
+}
+
+bool ax_db_tx_exec_values(void *handle, const AxStr *sql, const AxVec *params,
+                          uint64_t *changes) {
+    return ax_db_tx_exec_impl(handle, sql, params, changes, true);
+}
+
+static bool ax_db_tx_query_impl(void *handle, const AxAlloc *alloc, const AxStr *sql,
+                                const AxVec *params, const AxTypeDesc *desc,
+                                AxVec *out, bool values) {
+    pthread_mutex_lock(&ax_db_tx_registry_mutex);
+    AxDbTx *tx = ax_db_find_tx(handle);
+    if (!tx) {
+        pthread_mutex_unlock(&ax_db_tx_registry_mutex);
+        return false;
+    }
+    pthread_mutex_lock(&tx->pool->mutex);
+    bool ok = false;
+    if (tx->pool->active_tx == tx) {
+        ax_db_start_op(tx->pool);
+        ok = ax_db_run_query(tx->database, alloc, sql, params, desc, out, values);
+        ax_db_end_op(tx->pool);
+    }
     pthread_mutex_unlock(&tx->pool->mutex);
     pthread_mutex_unlock(&ax_db_tx_registry_mutex);
     return ok;
 }
 
 bool ax_db_tx_query(void *handle, const AxAlloc *alloc, const AxStr *sql,
-    const AxVec *params, const AxTypeDesc *desc, AxVec *out) {
-    pthread_mutex_lock(&ax_db_tx_registry_mutex);
-    AxDbTx *tx = ax_db_find_tx(handle);
-    if (!tx) {
-        pthread_mutex_unlock(&ax_db_tx_registry_mutex);
-        return false;
-    }
-    pthread_mutex_lock(&tx->pool->mutex);
-    bool ok = tx->pool->active_tx == tx &&
-              ax_db_run_query(tx->database, alloc, sql, params, desc, out);
-    pthread_mutex_unlock(&tx->pool->mutex);
-    pthread_mutex_unlock(&ax_db_tx_registry_mutex);
-    return ok;
+                    const AxVec *params, const AxTypeDesc *desc, AxVec *out) {
+    return ax_db_tx_query_impl(handle, alloc, sql, params, desc, out, false);
+}
+
+bool ax_db_tx_query_values(void *handle, const AxAlloc *alloc, const AxStr *sql,
+                           const AxVec *params, const AxTypeDesc *desc, AxVec *out) {
+    return ax_db_tx_query_impl(handle, alloc, sql, params, desc, out, true);
 }
 
 static bool ax_db_finish(void *handle, const char *sql) {
@@ -312,8 +465,12 @@ static bool ax_db_finish(void *handle, const char *sql) {
     *link = tx->next;
     AxDbPool *pool = tx->pool;
     pthread_mutex_lock(&pool->mutex);
-    bool ok = pool->active_tx == tx &&
-              sqlite3_exec(tx->database, sql, NULL, NULL, NULL) == SQLITE_OK;
+    bool ok = false;
+    if (pool->active_tx == tx) {
+        ax_db_start_op(pool);
+        ok = sqlite3_exec(tx->database, sql, NULL, NULL, NULL) == SQLITE_OK;
+        ax_db_end_op(pool);
+    }
     if (!ok && pool->active_tx == tx)
         sqlite3_exec(tx->database, "ROLLBACK", NULL, NULL, NULL);
     if (pool->active_tx == tx) pool->active_tx = NULL;

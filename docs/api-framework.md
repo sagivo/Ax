@@ -146,6 +146,7 @@ SQLite pool with a directive:
 
 ```ax
 // ax-api database app.sqlite
+// ax-api database_timeout 2500
 // ax-api GET /items -> list_items
 
 type Item = {id: i64, name: String};
@@ -178,6 +179,10 @@ capability and retain a local fallback:
 This expands to `env.get_or("AX_DATABASE_PATH", "app.sqlite")`, and the
 generated main function declares `io[env]` in addition to its database and
 network effects.
+
+`// ax-api database_timeout N` configures the SQLite statement and lock-wait
+deadline in milliseconds. It must be used with `database` or `database_env`;
+`0` disables the statement progress deadline.
 
 ## Defining routes
 

@@ -481,6 +481,7 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
     let sym_db_error = intern.intern("db.Error");
     let sym_db_pool = intern.intern("db.Pool");
     let sym_db_tx = intern.intern("db.Tx");
+    let sym_db_value = intern.intern("db.Value");
     let sym_fs_read_cap = intern.intern("fs.ReadCap");
     let sym_rec = intern.intern("Rec");
     let sym_files = intern.intern("files");
@@ -841,6 +842,10 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
         def: sym_db_tx,
         args: vec![],
     };
+    let db_value_type = Type::Named {
+        def: sym_db_value,
+        args: vec![],
+    };
     let db_error_type = Type::Named {
         def: sym_db_error,
         args: vec![],
@@ -854,7 +859,9 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
     let params = intern.intern("params");
     let pool = intern.intern("pool");
     let tx = intern.intern("tx");
+    let timeout_ms = intern.intern("timeout_ms");
     let string_vec = vec_type(b, string_type(b));
+    let value_vec = vec_type(b, db_value_type.clone());
     out.push((
         "db.open".into(),
         sig(
@@ -863,6 +870,34 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
             "open",
             vec![(path, fs_path_ty.clone(), false)],
             db_pool_type.clone(),
+            db_effects.clone(),
+        ),
+    ));
+    out.push((
+        "db.open_timeout".into(),
+        sig(
+            intern,
+            "std.db::fn:open_timeout",
+            "open_timeout",
+            vec![
+                (path, fs_path_ty.clone(), false),
+                (timeout_ms, Type::Prim(Prim::U32), false),
+            ],
+            db_pool_type.clone(),
+            db_effects.clone(),
+        ),
+    ));
+    out.push((
+        "db.set_timeout".into(),
+        sig(
+            intern,
+            "std.db::fn:set_timeout",
+            "set_timeout",
+            vec![
+                (pool, db_pool_type.clone(), false),
+                (timeout_ms, Type::Prim(Prim::U32), false),
+            ],
+            Type::unit(),
             db_effects.clone(),
         ),
     ));
@@ -923,6 +958,36 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
         out.push((qualified.into(), query_sig));
     }
     out.push((
+        "db.exec_values".into(),
+        sig(
+            intern,
+            "std.db::fn:exec_values",
+            "exec_values",
+            vec![
+                (pool, db_pool_type.clone(), false),
+                (sql, string_type(b), false),
+                (params, value_vec.clone(), false),
+            ],
+            Type::u64(),
+            db_effects.clone(),
+        ),
+    ));
+    let mut db_values_query = sig(
+        intern,
+        "std.db::fn:query_values",
+        "query_values",
+        vec![
+            (pool, db_pool_type.clone(), false),
+            (alloc, alloc_type(b), false),
+            (sql, string_type(b), false),
+            (params, value_vec.clone(), false),
+        ],
+        vec_type(b, Type::Param(sym_t)),
+        db_query_effects.clone(),
+    );
+    db_values_query.generics = vec![sym_t];
+    out.push(("db.query_values".into(), db_values_query));
+    out.push((
         "db.begin".into(),
         sig(
             intern,
@@ -977,6 +1042,36 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
         query_sig.generics = vec![sym_t];
         out.push((qualified.into(), query_sig));
     }
+    out.push((
+        "db.tx_exec_values".into(),
+        sig(
+            intern,
+            "std.db::fn:tx_exec_values",
+            "tx_exec_values",
+            vec![
+                (tx, tx_ref.clone(), false),
+                (sql, string_type(b), false),
+                (params, value_vec.clone(), false),
+            ],
+            Type::u64(),
+            db_effects.clone(),
+        ),
+    ));
+    let mut db_tx_values_query = sig(
+        intern,
+        "std.db::fn:tx_query_values",
+        "tx_query_values",
+        vec![
+            (tx, tx_ref, false),
+            (alloc, alloc_type(b), false),
+            (sql, string_type(b), false),
+            (params, value_vec, false),
+        ],
+        vec_type(b, Type::Param(sym_t)),
+        db_query_effects,
+    );
+    db_tx_values_query.generics = vec![sym_t];
+    out.push(("db.tx_query_values".into(), db_tx_values_query));
     for name in ["commit", "rollback"] {
         out.push((
             format!("db.{name}"),
@@ -1546,6 +1641,42 @@ pub fn extra_type_defs(intern: &mut Interner) -> Vec<TypeDef> {
             injections: vec![],
             span: Span::DUMMY,
             def_id: "std.db::type:Tx".into(),
+        },
+        TypeDef {
+            name: intern.intern("db.Value"),
+            generics: vec![],
+            kind: TypeDefKind::Variants(vec![
+                (intern.intern("Null"), vec![]),
+                (
+                    intern.intern("Text"),
+                    vec![(
+                        intern.intern("value"),
+                        Type::Named {
+                            def: intern.intern("String"),
+                            args: vec![],
+                        },
+                    )],
+                ),
+                (
+                    intern.intern("I64"),
+                    vec![(intern.intern("value"), Type::Prim(Prim::I64))],
+                ),
+                (
+                    intern.intern("U64"),
+                    vec![(intern.intern("value"), Type::Prim(Prim::U64))],
+                ),
+                (
+                    intern.intern("F64"),
+                    vec![(intern.intern("value"), Type::Prim(Prim::F64))],
+                ),
+                (
+                    intern.intern("Bool"),
+                    vec![(intern.intern("value"), Type::Prim(Prim::Bool))],
+                ),
+            ]),
+            injections: vec![],
+            span: Span::DUMMY,
+            def_id: "std.db::type:Value".into(),
         },
         TypeDef {
             name: intern.intern("fs.ReadCap"),

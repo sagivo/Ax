@@ -234,21 +234,52 @@ impl<'a> Emit<'a> {
                 }
             }
         }
+        let mut index = 0;
+        while index < needed.len() {
+            let aggregate = self.p.agg(needed[index]);
+            for field in &aggregate.fields {
+                if option_field_kind(&field.src).is_some() {
+                    if let Some(nested) = field.agg {
+                        if !needed.contains(&nested) {
+                            needed.push(nested);
+                        }
+                    }
+                }
+            }
+            index += 1;
+        }
+        for t in &needed {
+            let _ = writeln!(self.out, "static const AxTypeDesc axdesc{t};");
+        }
+        if !needed.is_empty() {
+            self.out.push('\n');
+        }
         for t in needed {
             let a = self.p.agg(t);
             let n = agg_name(t);
             let _ = writeln!(self.out, "static const AxFieldDesc axdesc_f{t}[] = {{");
-            for f in &a.fields {
+            let fields = match &a.kind {
+                AggKind::Variant { .. } => Vec::new(),
+                AggKind::Record => a.fields.iter().collect(),
+            };
+            for f in fields.iter().copied() {
                 let Some(kind) = field_kind(f) else { continue };
+                let nested = if option_field_kind(&f.src).is_some() {
+                    f.agg
+                        .map(|nested| format!("&axdesc{nested}"))
+                        .unwrap_or_else(|| "NULL".into())
+                } else {
+                    "NULL".into()
+                };
                 let _ = writeln!(
                     self.out,
-                    "    {{ {}, (uint32_t)offsetof({n}, {}), {kind} }},",
+                    "    {{ {}, (uint32_t)offsetof({n}, {}), {kind}, {nested} }},",
                     c_string(&f.name),
                     f.name
                 );
             }
             self.out.push_str("};\n");
-            let count = a.fields.iter().filter(|f| field_kind(f).is_some()).count();
+            let count = fields.iter().filter(|f| field_kind(f).is_some()).count();
             let _ = writeln!(
                 self.out,
                 "static const AxTypeDesc axdesc{t} = {{ {}, (uint32_t)sizeof({n}), {count}, axdesc_f{t} }};\n",
@@ -1340,6 +1371,9 @@ fn render_scalar(expr: &str, ty: IrTy, src: &str) -> String {
 /// Runtime field-kind code for a descriptor entry, or `None` for a field the
 /// data-driven runtime cannot fill (a nested aggregate other than `str`).
 fn field_kind(f: &FieldDef) -> Option<&'static str> {
+    if let Some(kind) = option_field_kind(&f.src) {
+        return Some(kind);
+    }
     if let Some(_) = f.agg {
         // `String` and `&str` are the str aggregate, which the runtime knows.
         return if f.src == "String" || f.src == "str" || f.src.ends_with(" str") {
@@ -1361,6 +1395,25 @@ fn field_kind(f: &FieldDef) -> Option<&'static str> {
         IrTy::F64 => "AX_FLD_F64",
         IrTy::Bool => "AX_FLD_BOOL",
         IrTy::Unit | IrTy::Ptr => return None,
+    })
+}
+
+fn option_field_kind(src: &str) -> Option<&'static str> {
+    let inner = src.strip_prefix("Option[")?.strip_suffix(']')?;
+    Some(match inner {
+        "i8" => "AX_FLD_OPT_I8",
+        "i16" => "AX_FLD_OPT_I16",
+        "i32" => "AX_FLD_OPT_I32",
+        "i64" => "AX_FLD_OPT_I64",
+        "u8" => "AX_FLD_OPT_U8",
+        "u16" => "AX_FLD_OPT_U16",
+        "u32" => "AX_FLD_OPT_U32",
+        "u64" => "AX_FLD_OPT_U64",
+        "f32" => "AX_FLD_OPT_F32",
+        "f64" => "AX_FLD_OPT_F64",
+        "bool" => "AX_FLD_OPT_BOOL",
+        "String" | "str" => "AX_FLD_OPT_STR",
+        _ => return None,
     })
 }
 

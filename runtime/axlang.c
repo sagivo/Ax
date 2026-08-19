@@ -902,7 +902,15 @@ static bool js_store(unsigned char *rec, const AxFieldDesc *f, double num,
                      const char *str, size_t str_len, bool is_str,
                      bool is_bool, const AxAlloc *a) {
     unsigned char *slot = rec + f->offset;
-    if (f->kind == AX_FLD_STR) {
+    AxFieldKind kind = f->kind;
+    bool optional = kind >= AX_FLD_OPT_I8;
+    if (optional) {
+        kind = (AxFieldKind)(kind - AX_FLD_OPT_I8);
+        int32_t tag = 1;
+        memcpy(slot, &tag, sizeof(tag));
+        slot += 8;
+    }
+    if (kind == AX_FLD_STR) {
         if (!is_str || is_bool) return false;
         /* Copy into the caller's allocator: the raw buffer may be reused. */
         char *p = (char *)ax_alloc_raw(a, str_len + 1, 1);
@@ -912,10 +920,10 @@ static bool js_store(unsigned char *rec, const AxFieldDesc *f, double num,
         memcpy(slot, &v, sizeof(v));
         return true;
     }
-    if (is_str || (f->kind == AX_FLD_BOOL) != is_bool) return false;
-    if (f->kind != AX_FLD_BOOL && !isfinite(num)) return false;
-    if ((f->kind <= AX_FLD_U64) && num != trunc(num)) return false;
-    switch (f->kind) {
+    if (is_str || (kind == AX_FLD_BOOL) != is_bool) return false;
+    if (kind != AX_FLD_BOOL && !isfinite(num)) return false;
+    if ((kind <= AX_FLD_U64) && num != trunc(num)) return false;
+    switch (kind) {
         case AX_FLD_I8: if (num < INT8_MIN || num > INT8_MAX) return false; else { int8_t v = (int8_t)num; memcpy(slot, &v, 1); break; }
         case AX_FLD_I16: if (num < INT16_MIN || num > INT16_MAX) return false; else { int16_t v = (int16_t)num; memcpy(slot, &v, 2); break; }
         case AX_FLD_I32: if (num < INT32_MIN || num > INT32_MAX) return false; else { int32_t v = (int32_t)num; memcpy(slot, &v, 4); break; }
@@ -929,6 +937,13 @@ static bool js_store(unsigned char *rec, const AxFieldDesc *f, double num,
         case AX_FLD_BOOL: { bool v = num != 0.0; memcpy(slot, &v, 1); break; }
         default: return false;
     }
+    return true;
+}
+
+static bool js_store_null(unsigned char *rec, const AxFieldDesc *f) {
+    if (f->kind < AX_FLD_OPT_I8) return false;
+    int32_t tag = 0;
+    memcpy(rec + f->offset, &tag, sizeof(tag));
     return true;
 }
 
@@ -985,7 +1000,15 @@ bool ax_rt_json_decode_recs(const AxAlloc *a, const AxStr *raw,
                     seen[field_index] = true;
                     bool stored = false;
                     js_ws(&j);
-                    if (j.p < j.end && *j.p == '"') {
+                    if (j.p < j.end && *j.p == 'n' &&
+                        j.p + 4 <= j.end && memcmp(j.p, "null", 4) == 0) {
+                        if (!js_skip(&j)) {
+                            free(seen);
+                            free(rec);
+                            return false;
+                        }
+                        stored = js_store_null(rec, f);
+                    } else if (j.p < j.end && *j.p == '"') {
                         const char *sv;
                         size_t sl;
                         if (!js_string(&j, &sv, &sl)) {
@@ -1115,6 +1138,19 @@ static void jo_string(AxJsonOut *out, const char *data, size_t len) {
 
 static void jo_field(AxJsonOut *out, const AxFieldDesc *field,
                      const unsigned char *record) {
+    if (field->kind >= AX_FLD_OPT_I8) {
+        int32_t tag;
+        memcpy(&tag, record + field->offset, sizeof(tag));
+        if (tag == 0) {
+            jo_bytes(out, "null", 4);
+            return;
+        }
+        AxFieldDesc payload = *field;
+        payload.kind = (AxFieldKind)(field->kind - AX_FLD_OPT_I8);
+        payload.offset = field->offset + 8;
+        jo_field(out, &payload, record);
+        return;
+    }
     const unsigned char *slot = record + field->offset;
     char number[64];
     int length = 0;
@@ -1131,6 +1167,7 @@ static void jo_field(AxJsonOut *out, const AxFieldDesc *field,
         case AX_FLD_F64: { double v; memcpy(&v, slot, 8); length = snprintf(number, sizeof(number), "%.17g", v); } break;
         case AX_FLD_BOOL: { bool v; memcpy(&v, slot, 1); jo_bytes(out, v ? "true" : "false", v ? 4 : 5); return; }
         case AX_FLD_STR: { AxStr v; memcpy(&v, slot, sizeof(v)); jo_string(out, v.ptr, v.len); return; }
+        default: return;
     }
     if (length > 0) jo_bytes(out, number, (size_t)length);
 }

@@ -326,21 +326,36 @@ typedef enum {
     AX_FLD_F32,
     AX_FLD_F64,
     AX_FLD_BOOL,
-    AX_FLD_STR
+    AX_FLD_STR,
+    AX_FLD_OPT_I8,
+    AX_FLD_OPT_I16,
+    AX_FLD_OPT_I32,
+    AX_FLD_OPT_I64,
+    AX_FLD_OPT_U8,
+    AX_FLD_OPT_U16,
+    AX_FLD_OPT_U32,
+    AX_FLD_OPT_U64,
+    AX_FLD_OPT_F32,
+    AX_FLD_OPT_F64,
+    AX_FLD_OPT_BOOL,
+    AX_FLD_OPT_STR
 } AxFieldKind;
+
+typedef struct AxTypeDesc AxTypeDesc;
 
 typedef struct {
     const char *name;
     uint32_t offset;
     AxFieldKind kind;
+    const AxTypeDesc *nested;
 } AxFieldDesc;
 
-typedef struct {
+struct AxTypeDesc {
     const char *name;
     uint32_t size;
     uint32_t n_fields;
     const AxFieldDesc *fields;
-} AxTypeDesc;
+};
 
 /* Request/response server primitives. The descriptor is emitted by the
    compiler for the typed `http.Request` aggregate, so this ABI remains valid

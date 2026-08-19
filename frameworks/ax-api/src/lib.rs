@@ -34,6 +34,7 @@ pub struct App {
     pub session_cookie: Option<String>,
     pub database: Option<String>,
     pub database_env: Option<(String, String)>,
+    pub database_timeout_ms: Option<u32>,
 }
 
 pub fn compile(source: &str) -> Result<(App, String), String> {
@@ -60,6 +61,7 @@ fn parse_directives(source: &str) -> Result<App, String> {
     let mut session_cookie = None;
     let mut database = None;
     let mut database_env = None;
+    let mut database_timeout_ms = None;
     let mut routes = Vec::new();
     let mut seen = HashSet::new();
     for (line_index, line) in source.lines().enumerate() {
@@ -163,6 +165,16 @@ fn parse_directives(source: &str) -> Result<App, String> {
                 ));
             }
             database_env = Some((name.into(), fallback.into()));
+            continue;
+        }
+        if let Some(value) = directive.strip_prefix("database_timeout ") {
+            let timeout = value.trim().parse::<u32>().map_err(|_| {
+                format!(
+                    "line {}: database_timeout requires milliseconds as u32",
+                    line_index + 1
+                )
+            })?;
+            database_timeout_ms = Some(timeout);
             continue;
         }
         if let Some(value) = directive.strip_prefix("middleware ") {
@@ -275,6 +287,9 @@ fn parse_directives(source: &str) -> Result<App, String> {
     if database.is_some() && database_env.is_some() {
         return Err("configure only one of database or database_env".into());
     }
+    if database_timeout_ms.is_some() && database.is_none() && database_env.is_none() {
+        return Err("database_timeout requires database or database_env".into());
+    }
     Ok(App {
         port,
         routes,
@@ -286,6 +301,7 @@ fn parse_directives(source: &str) -> Result<App, String> {
         session_cookie,
         database,
         database_env,
+        database_timeout_ms,
     })
 }
 
@@ -569,16 +585,16 @@ fn generate_dispatch(app: &App) -> String {
         .collect::<Vec<_>>()
         .join(" || ");
     let server = if has_database(app) {
-        let database = database_expression(app);
+        let database = database_open_expression(app);
         if app.body_limit == DEFAULT_BODY_LIMIT && app.timeout_ms == 0 && app.cors_origin.is_none()
         {
             format!(
-                "http.serve_handler_state({}u16, db.open({}), __ax_api_dispatch)",
+                "http.serve_handler_state({}u16, {}, __ax_api_dispatch)",
                 app.port, database
             )
         } else {
             format!(
-                "http.serve_handler_state_config({}u16, db.open({}), __ax_api_dispatch, {}u32, {}u32, {})",
+                "http.serve_handler_state_config({}u16, {}, __ax_api_dispatch, {}u32, {}u32, {})",
                 app.port,
                 database,
                 app.body_limit,
@@ -623,6 +639,14 @@ fn database_expression(app: &App) -> String {
     }
     let (name, fallback) = app.database_env.as_ref().expect("database configured");
     format!("env.get_or({}, {})", ax_string(name), ax_string(fallback))
+}
+
+fn database_open_expression(app: &App) -> String {
+    let path = database_expression(app);
+    match app.database_timeout_ms {
+        Some(timeout) => format!("db.open_timeout({}, {}u32)", path, timeout),
+        None => format!("db.open({})", path),
+    }
 }
 
 fn docs_html() -> String {
@@ -1204,6 +1228,7 @@ mod tests {
         let source = r#"
 module app;
 // ax-api database :memory:
+// ax-api database_timeout 250
 // ax-api GET /items -> items
 type Item = {id: i64, name: String};
 fn items(database: db.Pool, request: http.Request) -> http.Response !{alloc[a], err[db.Error], io[db]} = {
@@ -1213,9 +1238,11 @@ fn items(database: db.Pool, request: http.Request) -> http.Response !{alloc[a], 
 "#;
         let (app, generated) = compile(source).unwrap();
         assert_eq!(app.database.as_deref(), Some(":memory:"));
+        assert_eq!(app.database_timeout_ms, Some(250));
         assert!(generated.contains("__ax_api_db_items(database, request)"));
         assert!(generated.contains("match attempt items(database, request)"));
-        assert!(generated.contains("http.serve_handler_state(8080u16, db.open(\":memory:\")"));
+        assert!(generated
+            .contains("http.serve_handler_state(8080u16, db.open_timeout(\":memory:\", 250u32)"));
         let mut session = ax::driver::Session::new();
         let file = session.parse("generated.ax", &generated).unwrap();
         let checked = session.check(&file);

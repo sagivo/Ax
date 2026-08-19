@@ -424,6 +424,9 @@ fn build_descriptors(p: &Program, rt: &Runtime) -> Result<HashMap<TypeId, usize>
 
 /// Runtime field-kind code, matching `AxFieldKind` and `backend_c::field_kind`.
 fn field_kind(f: &FieldDef) -> Option<i32> {
+    if let Some(kind) = option_field_kind(&f.src) {
+        return Some(kind);
+    }
     if f.agg.is_some() {
         return if f.src == "String" || f.src == "str" || f.src.ends_with(" str") {
             Some(11) // AX_FLD_STR
@@ -444,6 +447,25 @@ fn field_kind(f: &FieldDef) -> Option<i32> {
         IrTy::F64 => 9,
         IrTy::Bool => 10,
         IrTy::Unit | IrTy::Ptr => return None,
+    })
+}
+
+fn option_field_kind(src: &str) -> Option<i32> {
+    let inner = src.strip_prefix("Option[")?.strip_suffix(']')?;
+    Some(match inner {
+        "i8" => 12,
+        "i16" => 13,
+        "i32" => 14,
+        "i64" => 15,
+        "u8" => 16,
+        "u16" => 17,
+        "u32" => 18,
+        "u64" => 19,
+        "f32" => 20,
+        "f64" => 21,
+        "bool" => 22,
+        "String" | "str" => 23,
+        _ => return None,
     })
 }
 
