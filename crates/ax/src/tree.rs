@@ -15,9 +15,8 @@
 //!   of one parser, so `fmt` is a bijection and patches are tree edits.
 //! - Constrained decoding (GBNF) is trivial over a single list grammar.
 //!
-//! The Rust-shaped conventional / terse / verbose surfaces remain as a
-//! *legacy corpus dialect* so the four backends keep proving the same IR.
-//! They are not the language.
+//! Rust-shaped text exists only as an internal expanded representation for
+//! generated code and legacy fixtures.
 //!
 //! Grammar (informal):
 //!
@@ -376,23 +375,18 @@ fn first_word(src: &str) -> Option<String> {
     }
 }
 
-/// Pick the surface for this source. Tree if the file opens with `(`.
-/// Short syntax is the language (session default). Conventional-looking
-/// files (`fn` / `module` / `let`) still parse as the corpus dialect so
-/// existing tests keep working — they are not a mode an agent selects.
+/// Pick the parser path for this source. Tree is an optional machine format,
+/// Ax is the language, and expanded source is an internal compatibility form.
 pub fn detect_surface(src: &str, preferred: crate::frontend::Surface) -> crate::frontend::Surface {
     use crate::frontend::Surface;
     if looks_like_tree(src) {
         return Surface::Tree;
     }
-    if matches!(preferred, Surface::Verbose | Surface::Terse) {
-        return preferred;
-    }
     if crate::frontend::looks_like_dense(src) {
-        return Surface::Dense;
+        return Surface::Ax;
     }
     if looks_like_conventional(src) {
-        return Surface::Conventional;
+        return Surface::Ax;
     }
     preferred
 }

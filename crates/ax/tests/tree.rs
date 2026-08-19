@@ -231,13 +231,13 @@ fn tree_gbnf_is_a_list_grammar() {
 }
 
 #[test]
-fn session_default_is_short() {
+fn session_default_is_ax() {
     let s = Session::new();
-    assert_eq!(s.surface, Surface::Dense);
+    assert_eq!(s.surface, Surface::Ax);
 }
 
 #[test]
-fn conventional_files_still_parse_under_tree_default() {
+fn expanded_fixtures_still_parse_internally() {
     let src = "module t;\nfn main() -> i32 = 1 + 2;\n";
     let (s, out) = compile_conv(src);
     let v = run_main(&s.intern, &out, 0).unwrap();

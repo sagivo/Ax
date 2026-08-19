@@ -15,7 +15,7 @@ module t;
 type Vec2 = { x: f32, y: f32 };
 fn distance(v: Vec2) -> f32 = ?;
 "#;
-    let holes = ax::agent::hole_fills("t.ax", src, ax::frontend::Surface::Conventional, 32);
+    let holes = ax::agent::hole_fills("t.ax", src, ax::frontend::Surface::Ax, 32);
     let h = holes.first().expect("one hole");
     assert!(
         h.fills.iter().any(|f| f.compiles),
@@ -228,7 +228,7 @@ fn only_value_preserving_fixes_are_auto_applied() {
     use ax::frontend::Surface;
 
     let widen = "module t;\nfn main() -> u64 = 3usz;\n";
-    let r = ax::agent::apply_safe_fixes("t.ax", widen, Surface::Conventional);
+    let r = ax::agent::apply_safe_fixes("t.ax", widen, Surface::Ax);
     assert_eq!(r.applied.len(), 1, "widening should be applied: {r:?}");
     assert!(
         r.clean,
@@ -238,7 +238,7 @@ fn only_value_preserving_fixes_are_auto_applied() {
     assert!(r.source.contains("as u64"), "{}", r.source);
 
     let narrow = "module t;\nfn main() -> u8 = 300usz;\n";
-    let r = ax::agent::apply_safe_fixes("t.ax", narrow, Surface::Conventional);
+    let r = ax::agent::apply_safe_fixes("t.ax", narrow, Surface::Ax);
     assert!(
         r.applied.is_empty(),
         "a narrowing cast must not be applied silently: {r:?}"

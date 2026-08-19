@@ -214,6 +214,21 @@ so that is fixed and pinned.
 | two-arg recursion `C(30,14)` | 30 | **1.845 ms** | 172.847 ms | 168.463 ms | 258.398 ms | **0.01×** | **0.01×** | **0.01×** |
 | trial-division primes | 6e5 | 23.151 ms | 23.304 ms | 23.056 ms | **20.433 ms** | 0.99× | 1.00× | 1.13× |
 
+### Strict floating point without a check after every operation
+
+The C backend preserves separate IEEE-754 operations with
+`-ffp-contract=off`, but defers canonical-NaN payload normalization until the
+value is observable. Intermediate NaN payloads cannot affect comparisons or
+arithmetic results, and result/aggregate rendering still canonicalizes them.
+This removed redundant payload checks from floating-point recurrence loops:
+the full gate moved `nbody` from 2.32× to 1.19× C and `mandelbrot` from 2.02×
+to 1.01× C while keeping Ax/Rust parity and identical outputs.
+
+The ray gate now uses the exact integer circle predicate
+`dx² + dy² < n²` in every language. Its former floating boundary admitted four
+different pixels under C contraction, so that row was invalid rather than a
+performance result.
+
 `modmix` is the new compute row: the divisor comes from `argv`, so it is
 loop-invariant but not a compile-time constant. Ax hoists a Granlund–Montgomery
 reciprocal; rustc and gc leave a `udiv`. A constant divisor is deliberately

@@ -68,7 +68,7 @@ fn print_help() {
 ax — systems language for AI agents
 
 Usage:
-  ax check [--json] [--allow-holes] [--strict-det] [--surface ax|tree|conventional|terse|verbose] <file>
+  ax check [--json] [--allow-holes] [--strict-det] [--surface ax|tree] <file>
   ax hole [--fills] [--json] <file> [<def_id>]
   ax types <file> <def_id>
   ax effs <file> <def_id>
@@ -92,7 +92,7 @@ Usage:
   ax context [--limit=N] <file>
   ax repair [--apply] [--json] <file>
   ax caps [--json] <file>
-  ax gbnf [--conventional]
+  ax gbnf
   ax daemon
   ax pkg list | ax pkg write
 "
@@ -185,16 +185,28 @@ fn read_src(path: &Path) -> Result<String, ExitCode> {
     })
 }
 
-fn session(flags: &Flags) -> Session {
+fn session(flags: &Flags) -> Result<Session, ExitCode> {
     let mut s = Session::new();
     s.allow_holes = flags.allow_holes;
     s.strict_det = flags.strict_det;
     if let Some(surf) = flags.surface.as_deref() {
-        if let Some(sf) = ax::frontend::Surface::from_str(surf) {
-            s.surface = sf;
-        }
+        let Some(surface) = ax::frontend::Surface::from_str(surf) else {
+            eprintln!("unknown surface `{surf}`; expected `ax` or `tree`");
+            return Err(ExitCode::from(2));
+        };
+        s.surface = surface;
     }
-    s
+    Ok(s)
+}
+
+fn source_surface(flags: &Flags, src: &str) -> Result<ax::frontend::Surface, ExitCode> {
+    match flags.surface.as_deref() {
+        Some(name) => ax::frontend::Surface::from_str(name).ok_or_else(|| {
+            eprintln!("unknown surface `{name}`; expected `ax` or `tree`");
+            ExitCode::from(2)
+        }),
+        None => Ok(ax::tree::detect_surface(src, ax::frontend::Surface::Ax)),
+    }
 }
 
 fn fail_diags(s: &Session, diags: &[Diagnostic], json: bool) -> ExitCode {
@@ -223,7 +235,10 @@ fn cmd_check(args: &[String]) -> ExitCode {
         Ok(s) => s,
         Err(c) => return c,
     };
-    let mut s = session(&flags);
+    let mut s = match session(&flags) {
+        Ok(session) => session,
+        Err(code) => return code,
+    };
     match s.parse(path.to_str().unwrap_or("input.ax"), &src) {
         Err(d) => fail_diags(&s, &d, flags.json),
         Ok(file) => {
@@ -268,7 +283,7 @@ fn compile_file(flags: &Flags) -> Result<(Session, ax::check::CheckOutput), Exit
         return Err(ExitCode::from(2));
     };
     let src = read_src(path)?;
-    let mut s = session(flags);
+    let mut s = session(flags)?;
     match s.compile(path.to_str().unwrap_or("input.ax"), &src) {
         Ok(out) => Ok((s, out)),
         Err(d) => {
@@ -290,11 +305,10 @@ fn cmd_fix(args: &[String]) -> ExitCode {
         Ok(s) => s,
         Err(c) => return c,
     };
-    let surface = flags
-        .surface
-        .as_deref()
-        .and_then(ax::frontend::Surface::from_str)
-        .unwrap_or_else(|| ax::tree::detect_surface(&src, ax::frontend::Surface::Tree));
+    let surface = match source_surface(&flags, &src) {
+        Ok(surface) => surface,
+        Err(code) => return code,
+    };
     let r = ax::agent::apply_safe_fixes(path.to_str().unwrap_or("input.ax"), &src, surface);
     let write = args.iter().any(|a| a == "--apply");
     if flags.json {
@@ -376,11 +390,10 @@ fn cmd_hole(args: &[String]) -> ExitCode {
             Ok(s) => s,
             Err(c) => return c,
         };
-        let surface = flags
-            .surface
-            .as_deref()
-            .and_then(ax::frontend::Surface::from_str)
-            .unwrap_or_else(|| ax::tree::detect_surface(&src, ax::frontend::Surface::Tree));
+        let surface = match source_surface(&flags, &src) {
+            Ok(surface) => surface,
+            Err(code) => return code,
+        };
         let name = path.to_str().unwrap_or("input.ax");
         let holes = ax::agent::hole_fills(name, &src, surface, 64);
         if flags.json {
@@ -1131,15 +1144,12 @@ fn cmd_daemon(_args: &[String]) -> ExitCode {
 }
 
 fn cmd_gbnf(args: &[String]) -> ExitCode {
-    if args.iter().any(|a| a == "--conventional") {
-        print!("{}", ax::gbnf::file_gbnf());
-        ExitCode::SUCCESS
-    } else {
-        // Default GBNF is the prefix tree (constrained decoding). The
-        // Rust-shaped corpus grammar remains at `--conventional`.
-        print!("{}", ax::tree::file_gbnf());
-        ExitCode::SUCCESS
+    if !args.is_empty() {
+        eprintln!("usage: ax gbnf");
+        return ExitCode::from(2);
     }
+    print!("{}", ax::tree::file_gbnf());
+    ExitCode::SUCCESS
 }
 
 fn cmd_pkg(args: &[String]) -> ExitCode {

@@ -17,6 +17,7 @@ trap cleanup EXIT INT TERM
 
 echo "building benchmark servers"
 cargo run -q -p ax -- build --tier release -o "$TMP/ax_server" "$BENCH/ax_server.ax"
+cargo run -q -p ax-api -- build --tier release -o "$TMP/ax_framework_server" "$BENCH/ax_framework_server.ax"
 rustc -C opt-level=3 -o "$TMP/rust_server" "$BENCH/rust_server.rs"
 go build -trimpath -o "$TMP/go_server" "$BENCH/go_server.go"
 
@@ -62,6 +63,7 @@ run_one() {
 echo "workload: GET /, 11-byte JSON, HTTP/1.1 keep-alive, generator=$LOAD_GENERATOR"
 echo "machine: $(uname -s) $(uname -m), $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 run_one ax env AX_HTTP_THREADS="${AX_HTTP_THREADS:-1}" "$TMP/ax_server"
+run_one ax-framework env AX_HTTP_THREADS="${AX_HTTP_THREADS:-1}" "$TMP/ax_framework_server"
 run_one rust "$TMP/rust_server"
 run_one go "$TMP/go_server"
 run_one python python3 "$BENCH/python_server.py"

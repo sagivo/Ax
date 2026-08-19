@@ -551,7 +551,7 @@ pub fn repair(name: &str, src: &str) -> crate::agent::FixReport {
     crate::agent::apply_safe_fixes(
         name,
         src,
-        crate::tree::detect_surface(src, crate::frontend::Surface::Dense),
+        crate::tree::detect_surface(src, crate::frontend::Surface::Ax),
     )
 }
 

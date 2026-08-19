@@ -42,9 +42,9 @@ This is why Ax is ASCII-dense rather than APL-shaped.
   `M[K,V]`.
 - `c??t:e` is right-associative and uses a tokenizer-native operator.
 - `!a` is the common allocation effect `!alloc[a]`.
-- Dense map bodies infer allocation effects, so `#f={m%{e:2,o:3};...}` does
+- Dense map bodies infer allocation effects, so `#f={m:={e:2,o:3};...}` does
   not repeat `!a`.
-- `%{"e":2L,"o":3L}` infers a homogeneous `M[S,L]` and lowers to ordinary
+- `{"e":2L,"o":3L}` infers a homogeneous `M[S,L]` and lowers to ordinary
   checked allocation plus inserts.
 - Bare interpolation quotes (`"hello {name}"`) expand to checked `f"..."`.
   A bare postfix map `?` means `?0`; simple identifier map keys may omit quotes.
@@ -56,19 +56,21 @@ This is why Ax is ASCII-dense rather than APL-shaped.
   kept only when removing one would merge lexical tokens or create an operator.
 - High-frequency loops are semantic primitives (`+/n`) so the compiler still
   sees and optimizes the loop rather than calling an opaque library helper.
+- Corresponding-vector multiply-and-sum loops compact to `+/a*b`, preserving
+  the loop's native integer semantics and compiler visibility.
 
 ## Result
 
-The eight-case public corpus is compiler-checked and counted with the real
+The nine-case public corpus is compiler-checked and counted with the real
 vocabularies:
 
 | encoding | TypeScript | Python | C | Rust | **Ax** |
 |---|---:|---:|---:|---:|---:|
-| `o200k_base` | 156 | 116 | 193 | 179 | **90** |
-| `cl100k_base` | 153 | 115 | 192 | 174 | **90** |
+| `o200k_base` | 185 | 133 | 237 | 226 | **107** |
+| `cl100k_base` | 180 | 132 | 236 | 219 | **105** |
 
-Ax is 22% smaller than the best mainstream total on `o200k_base` and 22% smaller
-on `cl100k_base`. It wins or ties all eight cases in this corpus. This remains
+Ax is 20% smaller than the best mainstream total on `o200k_base` and 20% smaller
+on `cl100k_base`. It wins or ties all nine cases in this corpus. This remains
 controlled-corpus evidence, not proof for every possible program.
 
 This establishes “smallest on the checked public corpus,” not “smallest for

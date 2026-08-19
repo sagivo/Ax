@@ -2,8 +2,8 @@
 //!
 //! Ax is `#name`, `:=`, `c??t:e`, `+/`, type glyphs. There is no opt-in
 //! mode. A file that opens with `(` is the prefix tree.
-//! Rust-shaped conventional / terse / verbose remain as a corpus dialect so
-//! existing tests keep proving the IR; they rewrite into the same parser.
+//! Rust-shaped source remains an internal expanded form for generated code and
+//! legacy fixtures; it is not a user-selectable language mode.
 
 use crate::ast::File;
 use crate::diag::Diagnostic;
@@ -16,21 +16,14 @@ pub enum Surface {
     /// Prefix tree. Detected automatically when a file starts with `(`.
     /// Also selected by `--surface tree`.
     Tree,
-    Conventional,
-    Terse,
-    /// Token-minimal pack of terse. Same AST; fewer BPE pieces.
-    Dense,
-    Verbose,
+    Ax,
 }
 
 impl Surface {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "tree" | "s-tree" | "canonical" => Some(Surface::Tree),
-            "ax" | "dense" | "s-dense" | "mini" | "short" => Some(Surface::Dense),
-            "conventional" | "s-conventional" | "conv" => Some(Surface::Conventional),
-            "terse" | "s-terse" => Some(Surface::Terse),
-            "verbose" | "s-verbose" => Some(Surface::Verbose),
+            "tree" => Some(Surface::Tree),
+            "ax" => Some(Surface::Ax),
             _ => None,
         }
     }
@@ -38,15 +31,12 @@ impl Surface {
     pub fn as_str(self) -> &'static str {
         match self {
             Surface::Tree => "tree",
-            Surface::Conventional => "conventional",
-            Surface::Terse => "terse",
-            Surface::Dense => "dense",
-            Surface::Verbose => "verbose",
+            Surface::Ax => "ax",
         }
     }
 }
 
-/// Rewrite S-terse source into S-conventional, then parse with the one parser.
+/// Expand compact generated text into the parser's internal representation.
 ///
 /// Terse rules (v0.1):
 ///   `fn name(a T, b U) R !err[E]+io = body`
@@ -59,12 +49,8 @@ pub fn rewrite_terse(src: &str) -> String {
 /// As [`rewrite_terse`], supplying the module name to use when the source omits
 /// the `module` declaration.
 ///
-/// The terse surface exists for a program that is generating and re-reading code,
-/// and a header it can always reconstruct is pure cost: `module x; export { .. };`
-/// is about twelve tokens per file that say nothing the toolchain does not
-/// already know. Omitting them is allowed here and only here — the conventional
-/// surface still requires the declaration, because a human reader benefits from
-/// it.
+/// Generated text may omit a module header when the file path already supplies
+/// its identity. The internal parser representation reinstates that header.
 pub fn rewrite_terse_named(src: &str, module: &str) -> String {
     let body = rewrite_terse_inner(src);
     // Reinstate the header if the source left it out.
@@ -374,12 +360,7 @@ pub fn parse_surface_named(
     // id space regardless of which entry point produced the AST.
     match surface {
         Surface::Tree => crate::tree::parse_file(src, file, intern, module),
-        Surface::Conventional | Surface::Verbose => Parser::parse_file(src, file, intern),
-        Surface::Terse => {
-            let rewritten = rewrite_terse_named(src, module);
-            Parser::parse_file(&rewritten, file, intern)
-        }
-        Surface::Dense => {
+        Surface::Ax => {
             let terse = rewrite_dense_to_terse(src);
             let rewritten = rewrite_terse_named(&terse, module);
             Parser::parse_file(&rewritten, file, intern)
@@ -387,15 +368,12 @@ pub fn parse_surface_named(
     }
 }
 
-/// Rewrite S-conventional source into S-terse: the inverse of [`rewrite_terse`].
+/// Compact the internal parser representation for development measurements.
 ///
-/// Mechanical and syntax-only — it removes the punctuation the terse surface
-/// makes optional (`:` in parameter lists, `->` before a result type) and
-/// contracts effect rows from `!{a, b}` to `!a+b`. Nothing about the program's
-/// meaning changes, which is the point: the two surfaces are the same AST, so a
-/// token count can be compared without comparing programs.
+/// Mechanical and syntax-only: it removes reconstructible punctuation and
+/// contracts effect rows. It is not a user-selectable language mode.
 pub fn to_terse(src: &str) -> String {
-    // Drop the header: the terse surface reconstructs it.
+    // Drop the header: expansion reconstructs it.
     let stripped: String = src
         .lines()
         .filter(|l| {
@@ -998,9 +976,7 @@ fn expand_dense_default_map_alias(src: &str) -> String {
     out
 }
 
-/// Dense functions may omit an effect row when the body makes allocation
-/// obvious.  The conventional surface keeps explicit rows mandatory, but an
-/// agent-facing spelling should not pay for metadata the compiler can derive.
+/// Ax functions may omit an effect row when the body makes allocation obvious.
 /// This pass runs after map literals have expanded to `map.new(test.alloc)` so
 /// the inferred row is still the ordinary checked `alloc[a]` capability.
 fn expand_dense_inferred_alloc_effects(src: &str) -> String {
@@ -2204,6 +2180,45 @@ fn expand_dense_reduce(src: &str) -> String {
             }
             if i > lo_s {
                 let first = &src[lo_s..i];
+                if op == '+' && i < b.len() && b[i] == b'*' {
+                    let second_start = i + 1;
+                    let mut second_end = second_start;
+                    while second_end < b.len() && is_ident_char(b[second_end]) {
+                        second_end += 1;
+                    }
+                    if second_end > second_start
+                        && b[second_start].is_ascii_alphabetic()
+                        && first.chars().all(|c| c.is_ascii_alphabetic() || c == '_')
+                    {
+                        let second = &src[second_start..second_end];
+                        let acc = format!("_r{gen}");
+                        let ix = format!("_i{gen}");
+                        gen += 1;
+                        out.push_str("{ let mut ");
+                        out.push_str(&acc);
+                        out.push_str(" = 0u64; for ");
+                        out.push_str(&ix);
+                        out.push_str(" in range(0, ");
+                        out.push_str(first);
+                        out.push_str(".len()) { ");
+                        out.push_str(&acc);
+                        out.push_str(" = ");
+                        out.push_str(&acc);
+                        out.push_str(" + ");
+                        out.push_str(first);
+                        out.push_str(".at(");
+                        out.push_str(&ix);
+                        out.push_str(") * ");
+                        out.push_str(second);
+                        out.push_str(".at(");
+                        out.push_str(&ix);
+                        out.push_str("); }; ");
+                        out.push_str(&acc);
+                        out.push_str(" }");
+                        i = second_end;
+                        continue;
+                    }
+                }
                 // `+/xs#` / `+/xs.len()` is a vec walk, not `range(0, xs)`.
                 // `#` may already have become `.len()` if expand_dense_len ran first.
                 let mut is_vec = false;
@@ -2350,7 +2365,7 @@ fn expand_dense_returns(src: &str) -> String {
     out
 }
 
-/// `%{"k":2L}` is an inferred `M[S,L]` literal allocated from `test.alloc`.
+/// `{"k":2L}` is an inferred `M[S,L]` literal allocated from `test.alloc`.
 /// It lowers to the existing map-new and insert operations, so effects, types,
 /// and backend behavior remain identical to the expanded spelling.
 fn expand_dense_map_literals(src: &str) -> String {
@@ -2358,6 +2373,7 @@ fn expand_dense_map_literals(src: &str) -> String {
     let mut out = String::with_capacity(src.len() + 32);
     let mut i = 0;
     let mut serial = 0usize;
+    let bare_literals = looks_like_dense(src);
     while i < b.len() {
         if matches!(b[i], b'"' | b'`') {
             let quote = b[i];
@@ -2375,16 +2391,33 @@ fn expand_dense_map_literals(src: &str) -> String {
             out.push_str(&src[start..i]);
             continue;
         }
-        if b[i] == b'%' && b.get(i + 1) == Some(&b'{') {
-            if let Some(close) = find_matching_ascii(b, i + 1, b'{', b'}') {
-                let inner = &src[i + 2..close];
+        let legacy_prefix = b[i] == b'%' && b.get(i + 1) == Some(&b'{');
+        let bare_prefix = bare_literals && b[i] == b'{' && !preceded_by_named_constructor(src, i);
+        if legacy_prefix || bare_prefix {
+            let open = i + usize::from(legacy_prefix);
+            if let Some(close) = find_matching_ascii(b, open, b'{', b'}') {
+                let inner = &src[open + 1..close];
                 if let Some(entries) = dense_map_entries(inner) {
+                    if bare_prefix && entries.is_empty() && out.ends_with(":=") {
+                        let bind = out.len() - 2;
+                        let statement_start = out[..bind]
+                            .rfind(|character| matches!(character, '{' | ';' | '\n'))
+                            .map_or(0, |position| position + 1);
+                        let binding = out[statement_start..bind].trim();
+                        if !binding.contains(char::is_whitespace) {
+                            out.truncate(bind);
+                            out.push_str(" M[S,I]:=");
+                        }
+                        out.push('%');
+                        i = close + 1;
+                        continue;
+                    }
                     if !entries.is_empty() {
-                        let key_ty = dense_atom_type(&entries[0].0);
+                        let key_ty = dense_map_key_type(&entries[0].0);
                         let value_ty = dense_atom_type(&entries[0].1);
                         if let (Some(key_ty), Some(value_ty)) = (key_ty, value_ty) {
                             if entries.iter().all(|(k, v)| {
-                                dense_atom_type(k) == Some(key_ty)
+                                dense_map_key_type(k) == Some(key_ty)
                                     && dense_atom_type(v) == Some(value_ty)
                             }) {
                                 let mut name = format!("__axm{serial}");
@@ -2442,6 +2475,17 @@ fn expand_dense_map_literals(src: &str) -> String {
         i += ch.len_utf8();
     }
     out
+}
+
+fn preceded_by_named_constructor(src: &str, open: usize) -> bool {
+    let before = src[..open].trim_end();
+    let word_start = before
+        .rfind(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .map_or(0, |position| position + 1);
+    before[word_start..]
+        .as_bytes()
+        .first()
+        .is_some_and(|first| first.is_ascii_uppercase())
 }
 
 fn dense_map_entries(inner: &str) -> Option<Vec<(String, String)>> {
@@ -2509,17 +2553,8 @@ fn dense_atom_type(atom: &str) -> Option<&'static str> {
     if atom.starts_with('"') && atom.ends_with('"') {
         return Some("S");
     }
-    if !atom.is_empty()
-        && atom.as_bytes().iter().all(|c| is_ident_char(*c))
-        && atom.as_bytes()[0].is_ascii_alphabetic()
-    {
-        return Some("S");
-    }
-    if !atom
-        .trim_end_matches(|c: char| c.is_ascii_alphabetic())
-        .chars()
-        .all(|c| c.is_ascii_digit() || c == '_')
-    {
+    let digits = atom.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+    if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit() || c == '_') {
         return None;
     }
     match atom.as_bytes().last().copied() {
@@ -2528,6 +2563,18 @@ fn dense_atom_type(atom: &str) -> Option<&'static str> {
         Some(b'W') => Some("W"),
         Some(b'I') | Some(b'0'..=b'9') => Some("I"),
         _ => None,
+    }
+}
+
+fn dense_map_key_type(atom: &str) -> Option<&'static str> {
+    let atom = atom.trim();
+    if !atom.is_empty()
+        && atom.as_bytes()[0].is_ascii_alphabetic()
+        && atom.as_bytes().iter().all(|byte| is_ident_char(*byte))
+    {
+        Some("S")
+    } else {
+        dense_atom_type(atom)
     }
 }
 
@@ -2558,6 +2605,21 @@ fn map_literal_bindings(src: &str) -> Vec<String> {
     let b = src.as_bytes();
     let mut names = Vec::new();
     let mut scan = 0;
+    while let Some(rel) = src[scan..].find(":={") {
+        let at = scan + rel;
+        let mut start = at;
+        while start > 0 && is_ident_char(b[start - 1]) {
+            start -= 1;
+        }
+        if start < at
+            && (start == 0 || matches!(b[start - 1], b'{' | b';' | b'\n'))
+            && !names.iter().any(|name| name == &src[start..at])
+        {
+            names.push(src[start..at].to_string());
+        }
+        scan = at + 3;
+    }
+    scan = 0;
     while let Some(rel) = src[scan..].find("%{") {
         let at = scan + rel;
         let mut start = at;
@@ -2693,7 +2755,10 @@ fn pack_dense_map_literals(src: &str) -> String {
             at = value_start + value_len + 1;
         }
         if entries.is_empty() {
-            scan = bind + 4;
+            out.push_str(&src[cursor..bind + 2]);
+            out.push_str("{};");
+            cursor = at;
+            scan = at;
             continue;
         }
         let expected = format!(
@@ -2712,7 +2777,7 @@ fn pack_dense_map_literals(src: &str) -> String {
         }
         out.push_str(&src[cursor..stmt_start]);
         out.push_str(name);
-        out.push_str("%{");
+        out.push_str(":={");
         out.push_str(
             &entries
                 .iter()
@@ -4349,7 +4414,26 @@ fn try_pack_vec_reduce_at(src: &str, start: usize) -> Option<(usize, String)> {
     r = r[hash + 1..].trim_start().strip_prefix('{')?.trim_start();
     let add = format!("{acc} += {vec}[{ix}]");
     let mul = format!("{acc} *= {vec}[{ix}]");
-    let op = if r.starts_with(&add) && init == "0" {
+    let dot = format!("{acc} += {vec}[{ix}] * ");
+    let mut packed_dot = None;
+    let op = if r.starts_with(&dot) && init == "0" {
+        let tail = &r[dot.len()..];
+        let other_end = tail
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .unwrap_or(tail.len());
+        if other_end == 0 {
+            return None;
+        }
+        let other = &tail[..other_end];
+        let suffix = format!("[{ix}]");
+        let after_other = &tail[other_end..];
+        if !after_other.starts_with(&suffix) {
+            return None;
+        }
+        r = after_other[suffix.len()..].trim_start();
+        packed_dot = Some(format!("+/{vec}*{other}"));
+        '+'
+    } else if r.starts_with(&add) && init == "0" {
         r = r[add.len()..].trim_start();
         '+'
     } else if r.starts_with(&mul) && init == "1" {
@@ -4376,7 +4460,10 @@ fn try_pack_vec_reduce_at(src: &str, start: usize) -> Option<(usize, String)> {
         r = r.strip_prefix('}')?;
     }
     let consumed = src.len() - start - r.len();
-    Some((consumed, format!("{op}/{vec}#")))
+    Some((
+        consumed,
+        packed_dot.unwrap_or_else(|| format!("{op}/{vec}#")),
+    ))
 }
 
 /// `recv.insert(k, v)` → `recv[k]<-v`; `recv.push(e)` → `recv<-e`;

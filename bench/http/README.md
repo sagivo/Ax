@@ -3,11 +3,13 @@
 For the architectural explanation, headline results, and scope of Ax's
 performance claim, see [`docs/http-performance.md`](../../docs/http-performance.md).
 
-This compares the same routed JSON `GET /` endpoint in Ax, Rust, Go, Python,
-and Node.js. Every implementation parses an HTTP/1.1 request, routes `/`, and
-returns the same 11-byte `{"ok":true}` body with keep-alive enabled. The Ax arm
-calls a compiled `fn(http.Request) -> http.Response` handler for every request;
-it is not a static-response shortcut.
+This compares the same routed JSON `GET /` endpoint in direct Ax, the Ax API
+framework, Rust, Go, Python, and Node.js. Every implementation parses an
+HTTP/1.1 request, routes `/`, and returns the same 11-byte `{"ok":true}` body
+with keep-alive enabled. Both Ax arms call a compiled
+`fn(http.Request) -> http.Response` handler for every request; neither is a
+static-response shortcut. Including both makes framework dispatch overhead
+visible instead of hiding it in the language result.
 
 Run it from the repository root with:
 
@@ -20,6 +22,12 @@ The harness builds the Ax, Rust, and Go servers and starts each on
 seconds), falls back to ApacheBench (100 connections, 100,000 requests), and
 finally to the bundled Python client. The selected generator and machine are
 printed with every run.
+
+The `ax-framework` arm is built by the separate `ax-api` package. Three
+alternating five-second samples on the reference machine produced medians of
+145,382 requests/sec for generated framework routing and 145,044 requests/sec
+for direct Ax routing. The 0.23% difference is noise-level evidence of parity,
+not a claim that either path is intrinsically faster.
 
 Results are machine- and OS-dependent. Record CPU, OS, toolchain versions, and
 the exact command. A loopback run measures both client and server on one

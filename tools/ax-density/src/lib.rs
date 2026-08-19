@@ -135,6 +135,18 @@ const CASES: &[Case] = &[
             ax: "fn greet(name: String) -> String = f\"hello {name}\";",
         },
     },
+    Case {
+        id: "dot",
+        title: "Dot product",
+        what: "Multiply corresponding vector elements and sum the products.",
+        src: LangSrc {
+            typescript: "const dot=(a:bigint[],b:bigint[])=>a.reduce((s,x,i)=>s+x*b[i],0n)",
+            python: "def dot(a,b):return sum(x*y for x,y in zip(a,b))",
+            c: "uint64_t dot(uint64_t*a,uint64_t*b,size_t n){uint64_t s=0;for(size_t i=0;i<n;i++)s+=a[i]*b[i];return s;}",
+            rust: "fn dot(a:&[u64],b:&[u64])->u64{a.iter().zip(b).fold(0,|s,(x,y)|s.wrapping_add(x.wrapping_mul(*y)))}",
+            ax: "fn dot(a: Vec[u64], b: Vec[u64]) -> u64 = { let mut s: u64 = 0; for i in range(0, a.len()) { s = s + a.at(i) * b.at(i); }; s };",
+        },
+    },
 ];
 
 const LANGUAGES: [&str; 5] = ["TypeScript", "Python", "C", "Rust", "Ax"];
@@ -208,10 +220,11 @@ fn html_escape(src: &str) -> String {
 
 /// Markdown report generated from the same corpus the conformance test compiles.
 pub fn render_doc() -> String {
-    let mut md = String::from(
+    let mut md = format!(
         "# Ax token efficiency — side-by-side\n\n\
-         Compact implementations of the same eight tasks in TypeScript, Python, C, Rust, and Ax. \
+         Compact implementations of the same {} tasks in TypeScript, Python, C, Rust, and Ax. \
          Counts are exact BPE counts, not character counts or a home-grown approximation.\n\n",
+        CASES.len()
     );
     for encoding in [BpeEncoding::O200kBase, BpeEncoding::Cl100kBase] {
         md.push_str(&format!(
@@ -313,7 +326,7 @@ mod tests {
                 format!("module t;\nexport {{ main }};\n{dense}\nfn main() -> i32 = 0;\n")
             };
             let mut packed = Session::new();
-            packed.surface = ax::frontend::Surface::Dense;
+            packed.surface = ax::frontend::Surface::Ax;
             packed
                 .compile(&format!("{}_dense.ax", case.id), &dense_src)
                 .unwrap_or_else(|d| panic!("{}:\n{dense_src}\n{d:?}", case.id));

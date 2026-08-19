@@ -50,7 +50,7 @@ type Vec2 = { x: f32, y: f32 };
 fn distance(v: Vec2) -> f32 = ?;
 test "3-4-5" = assert(distance(Vec2 { x: 3.0f32, y: 4.0f32 }) == 5.0f32);
 "#;
-    let result = evalloop::attempts_to_green("t.ax", src, ax_dev::frontend::Surface::Conventional);
+    let result = evalloop::attempts_to_green("t.ax", src, ax_dev::frontend::Surface::Ax);
     assert!(result.green, "the loop should reach green: {result:?}");
     assert_eq!(result.holes, 1);
     assert!(result.applied.iter().any(|fill| fill.contains("hypot")));

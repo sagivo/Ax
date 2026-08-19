@@ -100,12 +100,18 @@ pub fn build_tier(
             cmd.args([
                 "-O3",
                 "-flto",
+                "-ffp-contract=off",
                 "-fno-asynchronous-unwind-tables",
                 "-DNDEBUG",
             ]);
         }
         Tier::Portable => {
-            cmd.args(["-O2", "-DNDEBUG", "--target=wasm32-wasi"]);
+            cmd.args([
+                "-O2",
+                "-ffp-contract=off",
+                "-DNDEBUG",
+                "--target=wasm32-wasi",
+            ]);
         }
     }
     cmd.args(["-std=c11", "-pthread"])

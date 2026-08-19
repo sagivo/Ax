@@ -4,9 +4,8 @@ This is how you write Ax. Default parse. `ax fmt` prints this. One
 spelling per construct.
 
 A file that opens with `(` is the same language as a prefix tree
-(`spec/tree.md`). Rust-shaped `fn` / `module` / `let` still parses so
-the test corpus keeps proving the IR. That is not Ax. An agent does
-not write it.
+(`spec/tree.md`). Expanded Rust-shaped text is an internal compiler form,
+not another language mode.
 
 ## Program
 
@@ -14,6 +13,7 @@ not write it.
 #add(a,b)=a+b
 #sum(n:Z)=+/n
 #sumv(xs V[Z])Z=+/xs#
+#dot(a,b:V[W])W=+/a*b
 #pick(b B)=b??1:0
 #get(m M[S,L],k S)L=m[k]?0
 #main()Z={s Z:=1;i~n{s=s*6364136223846793005+i};s}
@@ -106,12 +106,14 @@ written; the compiler sees that loop.
 +/lo..hi            sum of lo..hi as Z
 */n                 product of 0..n as Z
 +/xs#               sum of a Z-vec
++/a*b               dot product of two W-vecs
 */xs#               product of a Z-vec
 |/xs#               max of a Z-vec   (empty aborts)
 &/xs#               min of a Z-vec   (empty aborts)
 ```
 
-`+/n` and `*/n` on an empty range are 0 and 1. `+/xs#` / `*/xs#` on
+`+/n` and `*/n` on an empty range are 0 and 1. `+/a*b` walks `a` and
+aborts if `b` is shorter. `+/xs#` / `*/xs#` on
 an empty vec are 0 and 1. `|/` / `&/` seed from `xs[0]`; an empty
 vec aborts.
 
@@ -122,10 +124,10 @@ by construction.
 
 ```
 []                  empty vec
-%                   empty map
-%{"k":2L}           inferred homogeneous map literal (`M[S,L]` here)
-%{k:2}               same literal with a bare identifier key
-name%{k:2}           bind a map literal to `name`
+name:={}            empty default map bound to `name`
+{"k":2L}            inferred homogeneous map literal (`M[S,L]` here)
+{k:2}                same literal with a bare identifier key
+name:={k:2}          bind a map literal to `name`
 M                    default `Map[String,i32]` in dense signatures
 xs#                 length of `xs`
 xs[i]               element `i` (aborts if out of range, unless proven)
@@ -137,13 +139,13 @@ m[k]?               get `k`, or zero if missing
 m[e]                bare string-key get after a map-literal binding
 ```
 
-`[]`, `%`, and `%{k:v}` allocate from the test allocator. Literal key
+`[]`, `name:={}`, and `{k:v}` allocate from the test allocator. Literal key
 and value types are inferred from homogeneous literals. `xs[i]` and
 `xs[i]<-v` use a numeric index. `m[k]<-v` / `m[k]?d` use a key
 (usually a string).
 
 Simple identifier keys may omit quotes in a literal. A bare `?` is the
-zero-default form; use `?d` for any other fallback. After `m%{...}` binds a
+zero-default form; use `?d` for any other fallback. After `m:={...}` binds a
 map, a simple bare key such as `m[e]` expands to `m["e"]` before checking.
 
 ## Errors
@@ -167,18 +169,17 @@ Inferred from the body, checked against the signature.
 #f() I !io[c] = …
 ```
 
-`!a` is the compact spelling of the common `!alloc[a]` row. Dense functions may
-omit allocation metadata when a map literal makes it inferable; conventional
-syntax remains explicit.
+`!a` is the compact spelling of the common `!alloc[a]` row. Ax functions may
+omit allocation metadata when a map literal makes it inferable.
 
 Omit the row and `diverge` is reconstructed from `@` / `loop`. An
 explicit empty row claims termination.
 
 ## What this is not
 
-- Not a mode. There is no `--surface dense` to opt into.
-- Not a coat over Rust. `fn` / `let mut` / `for i in range` are the
-  corpus dialect the tests still parse. `ax fmt` will not print them.
+- Not a mode. Ax is the language and `ax fmt` always prints it.
+- Not a coat over Rust. `fn` / `let mut` / `for i in range` belong only to
+  the compiler's internal expanded form.
 - Not Unicode APL. Glyphs are ASCII letters and punctuation a
   tokenizer already stores as whole tokens.
 

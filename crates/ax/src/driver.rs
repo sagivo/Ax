@@ -18,6 +18,7 @@ pub struct Session {
     pub allow_holes: bool,
     pub strict_det: bool,
     pub surface: Surface,
+    pub require_annotations: bool,
     pub indep_check: bool,
 }
 
@@ -28,7 +29,8 @@ impl Session {
             sm: SourceMap::new(),
             allow_holes: false,
             strict_det: false,
-            surface: Surface::Dense,
+            surface: Surface::Ax,
+            require_annotations: false,
             indep_check: true,
         }
     }
@@ -45,13 +47,20 @@ impl Session {
         // Tree if the file opens with `(`. Everything else is the short
         // syntax (legacy conventional is rewritten, not a separate mode).
         let surface = crate::tree::detect_surface(src, self.surface);
-        frontend::parse_surface_named(src, id, &mut self.intern, surface, &stem)
+        if surface == Surface::Ax
+            && crate::tree::looks_like_conventional(src)
+            && !frontend::looks_like_dense(src)
+        {
+            crate::parser::Parser::parse_file(src, id, &mut self.intern)
+        } else {
+            frontend::parse_surface_named(src, id, &mut self.intern, surface, &stem)
+        }
     }
 
     pub fn check(&mut self, file: &File) -> CheckOutput {
         let mut c = Checker::new(&mut self.intern, self.allow_holes, self.strict_det);
-        if self.surface == Surface::Verbose {
-            c.set_verbose(true);
+        if self.require_annotations {
+            c.set_require_annotations(true);
         }
         let mut out = c.check_file(file);
         if self.indep_check {

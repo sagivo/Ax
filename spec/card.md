@@ -27,10 +27,11 @@ boundary is explicit.
 #add(a,b)=a+b
 #sum(n:Z)=+/n
 #sumv(xs V[Z])Z=+/xs#
+#dot(a,b:V[W])W=+/a*b
 #maxv(xs V[Z])Z=|/xs#
 #pick(b B)=b??1:0
 #get(m M[S,L],k S)L=m[k]?0
-#f={m=%{e:2,o:3};m["e"]?+m["o"]?}
+#f={m:={e:2,o:3};m[e]?+m[o]?}
 #main()Z={s Z:=1;i~n{s=s*6364136223846793005+i};s}
 ```
 
@@ -44,11 +45,12 @@ Type atoms: `I` i32 · `L` i64 · `Y` isz · `U` u32 · `W` u64 · `Z` usz ·
 `M` map · `V` vec.
 
 `7L` is 7 as `L`. `s += e` / `s++` assign. `xs#` is length. `xs[i]`
-is the element (check drops inside `i~xs#`). `%{"k":2L}` is an inferred
+is the element (check drops inside `i~xs#`). `{"k":2L}` is an inferred
 homogeneous map literal. `+/n` / `*/n` sum /
-product of a range as `Z`. `+/xs#` / `*/xs#` / `|/xs#` / `&/xs#`
-sum / product / max / min of a `Z`-vec. `[]` empty vec. `%` empty
-map. `M` is the default string-to-`I` map shape. `xs<-e` append.
+product of a range as `Z`. `+/a*b` is a `W`-vec dot product. `+/xs#` /
+`*/xs#` / `|/xs#` / `&/xs#`
+sum / product / max / min of a `Z`-vec. `[]` empty vec. `m:={}` binds an
+empty default map. `M` is the default string-to-`I` map shape. `xs<-e` append.
 `xs[i]<-v` store. `m[k]<-v` insert. `m[k]?d` gets with fallback `d`;
 bare `m[k]?` defaults to zero. Simple literal keys may omit quotes.
 

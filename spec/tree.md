@@ -49,8 +49,8 @@ atom     ::= [A-Za-z0-9_+*/%<>=!&|.?~^-]+
 string   ::= '"' char* '"'
 ```
 
-A file that opens with `(` is this surface. Detection does not depend
-on `--surface`.
+A file that opens with `(` uses this machine-oriented representation and is
+detected automatically.
 
 ### Module
 
@@ -160,7 +160,7 @@ and print → parse → print is identity on the text.
 `ax hole --fills` on a tree source proposes tree expressions
 (`(field v x)`, `(math.hypot (field v x) (field v y))`), not
 `v.x` / `math.hypot(v.x, v.y)`. `ax gbnf` prints the tree list
-grammar; `--conventional` still prints the corpus dialect.
+grammar.
 
 ## What is not here
 

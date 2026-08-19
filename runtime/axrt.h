@@ -210,6 +210,9 @@ bool ax_rt_str_eq(const AxStr *a, const AxStr *b);
 bool ax_rt_str_eq_raw(const AxStr *a, const char *data, uint64_t len);
 bool ax_rt_mem_eq(const void *a, const void *b, uint64_t n);
 bool ax_rt_parse_i32(const AxStr *s, int32_t *out);
+bool ax_rt_str_starts_with(const AxStr *s, const AxStr *prefix);
+bool ax_rt_str_contains(const AxStr *s, const AxStr *needle);
+void ax_rt_str_drop(const AxStr *s, uint64_t count, AxStr *out);
 
 /* ---- output ------------------------------------------------------------ */
 
@@ -349,6 +352,17 @@ void ax_http_close(void);
 int ax_http_serve_handler(uint16_t port, void *handler,
                           const AxTypeDesc *request_desc,
                           const AxTypeDesc *response_desc);
+int ax_http_serve_handler_config(uint16_t port, void *handler,
+                                 const AxTypeDesc *request_desc,
+                                 const AxTypeDesc *response_desc,
+                                 uint32_t body_limit, uint32_t timeout_ms,
+                                 const AxStr *cors_origin);
+bool ax_http_path_match(const AxStr *path, const AxStr *pattern);
+void ax_http_path_param(const AxStr *path, const AxStr *pattern,
+                        uint16_t index, AxStr *out);
+void ax_http_query_param(const AxStr *query, const AxStr *name, AxStr *out);
+void ax_http_header(const AxStr *headers, const AxStr *name, AxStr *out);
+void ax_http_cookie(const AxStr *headers, const AxStr *name, AxStr *out);
 
 /* ---- json -------------------------------------------------------------- */
 
@@ -370,6 +384,9 @@ void *ax_rt_read_cap_files(const AxStr *names, const AxStr *contents, uint64_t n
 /* ---- strings ----------------------------------------------------------- */
 
 void ax_rt_str_concat(const AxAlloc *a, const AxStr *x, const AxStr *y, AxStr *out);
+void ax_rt_str_concat_cached(const AxAlloc *a, const AxStr *x, const AxStr *y,
+                             uint64_t *cache_capacity, uint64_t iterations,
+                             AxStr *out);
 /* Byte at `i`, bounds-checked. */
 uint8_t ax_rt_str_byte(const AxStr *s, uint64_t i);
 /* One-byte string. Used by the self-hosted tree frontend. */
@@ -397,6 +414,17 @@ void ax_rt_http_close(void);
 void ax_rt_http_serve_handler(uint16_t port, void *handler,
                               const AxTypeDesc *request_desc,
                               const AxTypeDesc *response_desc);
+void ax_rt_http_serve_handler_config(uint16_t port, void *handler,
+                                     const AxTypeDesc *request_desc,
+                                     const AxTypeDesc *response_desc,
+                                     uint32_t body_limit, uint32_t timeout_ms,
+                                     const AxStr *cors_origin);
+bool ax_rt_http_path_match(const AxStr *path, const AxStr *pattern);
+void ax_rt_http_path_param(const AxStr *path, const AxStr *pattern,
+                           uint16_t index, AxStr *out);
+void ax_rt_http_query_param(const AxStr *query, const AxStr *name, AxStr *out);
+void ax_rt_http_header(const AxStr *headers, const AxStr *name, AxStr *out);
+void ax_rt_http_cookie(const AxStr *headers, const AxStr *name, AxStr *out);
 void ax_rt_argv(int32_t i, AxStr *out);
 
 /* ---- division by a loop-invariant divisor ------------------------------ */

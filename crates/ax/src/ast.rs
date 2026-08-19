@@ -440,7 +440,7 @@ pub enum BinOp {
 
 /// Assign every `Expr` and `Pattern` in the file a unique [`NodeId`].
 ///
-/// Runs once per file after parsing (all three surfaces), before checking.
+/// Runs once per file after parsing, before checking.
 /// Returns the id count, which is the required width of the checker's type
 /// tables. Ids are dense and assigned in pre-order.
 pub fn renumber(file: &mut File) -> usize {

@@ -351,7 +351,8 @@ static int parse_url(const char *url, char *host, size_t host_n, uint16_t *port,
     return 0;
 }
 
-static int http_read_response(int fd, AxBuf *b) {
+static int http_read_response(int fd, AxBuf *b, size_t *body_offset,
+                              size_t *body_len) {
     b->len = 0;
     /* read until we have headers */
     for (;;) {
@@ -383,10 +384,8 @@ static int http_read_response(int fd, AxBuf *b) {
                     if (r == 0) break;
                     b->len += (size_t)r;
                 }
-                /* shift body to front for the caller */
-                size_t body = b->len > hdr_end ? b->len - hdr_end : 0;
-                memmove(b->data, b->data + hdr_end, body);
-                b->len = body;
+                *body_offset = hdr_end;
+                *body_len = b->len > hdr_end ? b->len - hdr_end : 0;
                 return 0;
             }
         }
@@ -418,12 +417,14 @@ int ax_http_get(const char *url, AxStr *out) {
             return -1;
         }
     }
-    if (http_read_response(fd, &g_http) != 0) {
+    size_t body_offset = 0;
+    size_t body_len = 0;
+    if (http_read_response(fd, &g_http, &body_offset, &body_len) != 0) {
         pool_drop(fd);
         return -1;
     }
-    out->ptr = g_http.data;
-    out->len = g_http.len;
+    out->ptr = g_http.data + body_offset;
+    out->len = body_len;
     return 0;
 }
 
@@ -445,9 +446,12 @@ static const AxTypeDesc *g_srv_response_desc = NULL;
 static uint32_t g_srv_req_method_off = 0;
 static uint32_t g_srv_req_path_off = 0;
 static uint32_t g_srv_req_body_off = 0;
+static uint32_t g_srv_req_query_off = 0;
+static uint32_t g_srv_req_headers_off = 0;
 static uint32_t g_srv_res_status_off = 0;
 static uint32_t g_srv_res_body_off = 0;
 static uint32_t g_srv_res_static_off = 0;
+static uint32_t g_srv_res_stream_off = 0;
 
 #define AX_SRV_MAX_WORKERS 64
 #define AX_SRV_MAX_EVENTS 256
@@ -479,10 +483,15 @@ typedef struct {
     uint16_t status;
     unsigned close_after : 1;
     unsigned live : 1;
+    unsigned stream : 1;
     char response[AX_SRV_INBUF];
 } AxSrvCachedResponse;
 
 static __thread AxSrvCachedResponse g_srv_response_cache[16];
+static uint32_t g_srv_body_limit = AX_SRV_INBUF - 256;
+static uint32_t g_srv_timeout_ms = 0;
+static char *g_srv_cors_origin = NULL;
+static size_t g_srv_cors_origin_len = 0;
 
 static const char *status_text(uint16_t status);
 
@@ -510,6 +519,35 @@ static int http_field_offset(const AxTypeDesc *desc, const char *name,
     return -1;
 }
 
+static int srv_set_descriptors(const AxTypeDesc *request_desc,
+                               const AxTypeDesc *response_desc) {
+    if (!request_desc || !response_desc ||
+        http_field_offset(request_desc, "method", AX_FLD_STR,
+                          &g_srv_req_method_off) != 0 ||
+        http_field_offset(request_desc, "path", AX_FLD_STR,
+                          &g_srv_req_path_off) != 0 ||
+        http_field_offset(request_desc, "body", AX_FLD_STR,
+                          &g_srv_req_body_off) != 0 ||
+        http_field_offset(request_desc, "query", AX_FLD_STR,
+                          &g_srv_req_query_off) != 0 ||
+        http_field_offset(response_desc, "status", AX_FLD_U16,
+                          &g_srv_res_status_off) != 0 ||
+        http_field_offset(response_desc, "body", AX_FLD_STR,
+                          &g_srv_res_body_off) != 0 ||
+        http_field_offset(response_desc, "static_body", AX_FLD_BOOL,
+                          &g_srv_res_static_off) != 0)
+        return -1;
+    if (http_field_offset(request_desc, "headers", AX_FLD_STR,
+                          &g_srv_req_headers_off) != 0)
+        g_srv_req_headers_off = UINT32_MAX;
+    if (http_field_offset(response_desc, "stream", AX_FLD_BOOL,
+                          &g_srv_res_stream_off) != 0)
+        g_srv_res_stream_off = UINT32_MAX;
+    g_srv_request_desc = request_desc;
+    g_srv_response_desc = response_desc;
+    return 0;
+}
+
 static int send_all(int fd, const void *data, size_t len) {
     const char *p = (const char *)data;
     while (len) {
@@ -534,6 +572,16 @@ static int srv_nonblocking(int fd) {
     setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
 #endif
     return 0;
+}
+
+static void srv_apply_timeout(int fd) {
+    if (!g_srv_timeout_ms) return;
+    struct timeval tv = {
+        (time_t)(g_srv_timeout_ms / 1000u),
+        (suseconds_t)((g_srv_timeout_ms % 1000u) * 1000u)
+    };
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 }
 
 static int srv_request_closes(const char *p, size_t n) {
@@ -575,6 +623,62 @@ static int srv_content_length(const char *p, size_t n, size_t *out) {
     return 0;
 }
 
+static int srv_is_chunked(const char *p, size_t n) {
+    for (size_t i = 0; i + 18 <= n; i++) {
+        if ((p[i] | 32) == 't' && (p[i + 1] | 32) == 'r' &&
+            (p[i + 2] | 32) == 'a' && (p[i + 3] | 32) == 'n' &&
+            (p[i + 4] | 32) == 's' && (p[i + 5] | 32) == 'f' &&
+            (p[i + 6] | 32) == 'e' && (p[i + 7] | 32) == 'r' &&
+            p[i + 8] == '-' && (p[i + 9] | 32) == 'e' &&
+            (p[i + 10] | 32) == 'n' && (p[i + 11] | 32) == 'c' &&
+            (p[i + 12] | 32) == 'o' && (p[i + 13] | 32) == 'd' &&
+            (p[i + 14] | 32) == 'i' && (p[i + 15] | 32) == 'n' &&
+            (p[i + 16] | 32) == 'g' && p[i + 17] == ':') {
+            const char *value = p + i + 18;
+            const char *end = p + n;
+            while (value < end && (*value == ' ' || *value == '\t')) value++;
+            return value + 7 <= end && strncasecmp(value, "chunked", 7) == 0;
+        }
+    }
+    return 0;
+}
+
+/* Decode a chunked request in place. Returns 1 when complete, 0 when more
+   bytes are needed, and -1 for malformed input or a body over the configured
+   limit. */
+static int srv_decode_chunked(AxSrvConn *c, size_t header_end,
+                              size_t *body_len, size_t *request_end) {
+    size_t read = header_end;
+    size_t write = header_end;
+    while (1) {
+        char *line = (char *)memmem(c->in + read, c->in_len - read, "\r\n", 2);
+        if (!line) return 0;
+        size_t line_len = (size_t)(line - (c->in + read));
+        if (line_len == 0 || line_len > 16) return -1;
+        char size_text[17];
+        memcpy(size_text, c->in + read, line_len);
+        size_text[line_len] = 0;
+        char *endptr = NULL;
+        unsigned long long parsed = strtoull(size_text, &endptr, 16);
+        if (!endptr || *endptr != 0 || parsed > SIZE_MAX) return -1;
+        read = (size_t)(line - c->in) + 2;
+        if (parsed == 0) {
+            if (c->in_len < read + 2) return 0;
+            if (c->in[read] != '\r' || c->in[read + 1] != '\n') return -1;
+            *body_len = write - header_end;
+            *request_end = read + 2;
+            return *body_len <= g_srv_body_limit;
+        }
+        if (parsed > g_srv_body_limit - (write - header_end)) return -1;
+        if (c->in_len < read + (size_t)parsed + 2) return 0;
+        memmove(c->in + write, c->in + read, (size_t)parsed);
+        write += (size_t)parsed;
+        read += (size_t)parsed;
+        if (c->in[read] != '\r' || c->in[read + 1] != '\n') return -1;
+        read += 2;
+    }
+}
+
 static inline char *srv_append_u64(char *out, uint64_t value) {
     char digits[20];
     char *p = digits + sizeof(digits);
@@ -589,7 +693,8 @@ static inline char *srv_append_u64(char *out, uint64_t value) {
 
 static int srv_build_handler_response(char *out, size_t capacity,
                                       int close_after, uint16_t status,
-                                      const AxStr *body, size_t *response_len) {
+                                      const AxStr *body, bool stream,
+                                      size_t *response_len) {
     char *p = out;
 #define AX_SRV_COPY(literal) do {                                              \
     static const char text[] = literal;                                        \
@@ -599,10 +704,16 @@ static int srv_build_handler_response(char *out, size_t capacity,
     switch (status) {
         case 200: AX_SRV_COPY("HTTP/1.1 200 OK\r\n"); break;
         case 201: AX_SRV_COPY("HTTP/1.1 201 Created\r\n"); break;
+        case 202: AX_SRV_COPY("HTTP/1.1 202 Accepted\r\n"); break;
         case 204: AX_SRV_COPY("HTTP/1.1 204 No Content\r\n"); break;
         case 400: AX_SRV_COPY("HTTP/1.1 400 Bad Request\r\n"); break;
+        case 401: AX_SRV_COPY("HTTP/1.1 401 Unauthorized\r\n"); break;
+        case 403: AX_SRV_COPY("HTTP/1.1 403 Forbidden\r\n"); break;
         case 404: AX_SRV_COPY("HTTP/1.1 404 Not Found\r\n"); break;
         case 405: AX_SRV_COPY("HTTP/1.1 405 Method Not Allowed\r\n"); break;
+        case 409: AX_SRV_COPY("HTTP/1.1 409 Conflict\r\n"); break;
+        case 422: AX_SRV_COPY("HTTP/1.1 422 Unprocessable Content\r\n"); break;
+        case 429: AX_SRV_COPY("HTTP/1.1 429 Too Many Requests\r\n"); break;
         case 500: AX_SRV_COPY("HTTP/1.1 500 Internal Server Error\r\n"); break;
         default:
             AX_SRV_COPY("HTTP/1.1 ");
@@ -610,21 +721,42 @@ static int srv_build_handler_response(char *out, size_t capacity,
             AX_SRV_COPY(" Response\r\n");
             break;
     }
-    AX_SRV_COPY("Content-Type: application/json\r\nContent-Length: ");
-    p = srv_append_u64(p, body->len);
-    if (close_after) AX_SRV_COPY("\r\nConnection: close\r\n\r\n");
-    else AX_SRV_COPY("\r\nConnection: keep-alive\r\n\r\n");
+    AX_SRV_COPY("Content-Type: application/json\r\n");
+    if (g_srv_cors_origin && g_srv_cors_origin_len) {
+        AX_SRV_COPY("Access-Control-Allow-Origin: ");
+        if ((size_t)(p - out) + g_srv_cors_origin_len + 2 > capacity)
+            return -1;
+        memcpy(p, g_srv_cors_origin, g_srv_cors_origin_len);
+        p += g_srv_cors_origin_len;
+        AX_SRV_COPY("\r\n");
+    }
+    if (stream) {
+        AX_SRV_COPY("Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n");
+    } else {
+        AX_SRV_COPY("Content-Length: ");
+        p = srv_append_u64(p, body->len);
+        if (close_after) AX_SRV_COPY("\r\nConnection: close\r\n\r\n");
+        else AX_SRV_COPY("\r\nConnection: keep-alive\r\n\r\n");
+    }
 #undef AX_SRV_COPY
     size_t header_len = (size_t)(p - out);
-    if (header_len + body->len > capacity) return -1;
-    memcpy(p, body->ptr, body->len);
-    *response_len = header_len + body->len;
+    if (header_len + body->len + (stream ? 32 : 0) > capacity) return -1;
+    if (stream) {
+        p = srv_append_u64(p, body->len);
+        *p++ = '\r'; *p++ = '\n';
+        memcpy(p, body->ptr, body->len); p += body->len;
+        memcpy(p, "\r\n0\r\n\r\n", 7); p += 7;
+        *response_len = (size_t)(p - out);
+    } else {
+        memcpy(p, body->ptr, body->len);
+        *response_len = header_len + body->len;
+    }
     return 0;
 }
 
 static AxSrvCachedResponse *srv_cached_response(uint16_t status,
                                                 const AxStr *body,
-                                                int close_after) {
+                                                int close_after, bool stream) {
     AxSrvCachedResponse *empty = NULL;
     for (size_t i = 0; i < 16; i++) {
         AxSrvCachedResponse *entry = &g_srv_response_cache[i];
@@ -634,18 +766,20 @@ static AxSrvCachedResponse *srv_cached_response(uint16_t status,
         }
         if (entry->status == status && entry->body == body->ptr &&
             entry->body_len == body->len &&
-            entry->close_after == (unsigned)close_after)
+            entry->close_after == (unsigned)close_after &&
+            entry->stream == (unsigned)stream)
             return entry;
     }
     if (!empty) return NULL;
     if (srv_build_handler_response(empty->response, sizeof(empty->response),
-                                   close_after, status, body,
+                                   close_after, status, body, stream,
                                    &empty->response_len) != 0)
         return NULL;
     empty->body = body->ptr;
     empty->body_len = body->len;
     empty->status = status;
     empty->close_after = (unsigned)close_after;
+    empty->stream = (unsigned)stream;
     empty->live = 1;
     return empty;
 }
@@ -662,18 +796,36 @@ static int srv_prepare_handler(AxSrvConn *c, const char *request,
     const char *sp2 = (const char *)memchr(sp1 + 1, ' ', after_method);
     if (!sp2) return -1;
 
+    const char *raw_path = sp1 + 1;
+    size_t raw_path_len = (size_t)(sp2 - sp1 - 1);
+    const char *question = (const char *)memchr(raw_path, '?', raw_path_len);
+    size_t path_len = question ? (size_t)(question - raw_path) : raw_path_len;
+    AxStr query = {"", 0};
+    if (question) {
+        query.ptr = question + 1;
+        query.len = raw_path_len - path_len - 1;
+    }
     union { max_align_t align; unsigned char bytes[512]; } request_store;
     union { max_align_t align; unsigned char bytes[512]; } response_store;
     memset(request_store.bytes, 0, g_srv_request_desc->size);
     memset(response_store.bytes, 0, g_srv_response_desc->size);
     AxStr field = {request, (size_t)(sp1 - request)};
     memcpy(request_store.bytes + g_srv_req_method_off, &field, sizeof(field));
-    field.ptr = sp1 + 1;
-    field.len = (size_t)(sp2 - sp1 - 1);
+    field.ptr = raw_path;
+    field.len = path_len;
     memcpy(request_store.bytes + g_srv_req_path_off, &field, sizeof(field));
     field.ptr = request_body;
     field.len = request_body_len;
     memcpy(request_store.bytes + g_srv_req_body_off, &field, sizeof(field));
+    memcpy(request_store.bytes + g_srv_req_query_off, &query, sizeof(query));
+    const char *line_end = (const char *)memmem(sp2, header_len - (size_t)(sp2 - request), "\r\n", 2);
+    if (!line_end) return -1;
+    const char *headers = line_end + 2;
+    size_t headers_len = header_len - (size_t)(headers - request) - 2;
+    field.ptr = headers;
+    field.len = headers_len;
+    if (g_srv_req_headers_off != UINT32_MAX)
+        memcpy(request_store.bytes + g_srv_req_headers_off, &field, sizeof(field));
 
     typedef void (*AxHttpHandler)(void *, void *);
     ((AxHttpHandler)g_srv_handler)(request_store.bytes, response_store.bytes);
@@ -681,21 +833,26 @@ static int srv_prepare_handler(AxSrvConn *c, const char *request,
     uint16_t status;
     AxStr body;
     bool static_body;
+    bool stream;
     memcpy(&status, response_store.bytes + g_srv_res_status_off, sizeof(status));
     memcpy(&body, response_store.bytes + g_srv_res_body_off, sizeof(body));
     memcpy(&static_body, response_store.bytes + g_srv_res_static_off,
            sizeof(static_body));
+    stream = g_srv_res_stream_off != UINT32_MAX
+        ? *(bool *)(response_store.bytes + g_srv_res_stream_off)
+        : false;
+    if (stream) c->close_after = 1;
     if (body.len > sizeof(c->out) - 256)
         return -1;
     AxSrvCachedResponse *cached = static_body
-        ? srv_cached_response(status, &body, c->close_after)
+        ? srv_cached_response(status, &body, c->close_after, stream)
         : NULL;
     if (cached) {
         c->out_data = cached->response;
         c->out_len = cached->response_len;
     } else {
         if (srv_build_handler_response(c->out, sizeof(c->out), c->close_after,
-                                       status, &body, &c->out_len) != 0)
+                                       status, &body, stream, &c->out_len) != 0)
             return -1;
         c->out_data = c->out;
     }
@@ -713,11 +870,19 @@ static int srv_parse(AxSrvConn *c) {
         size_t header_end = (size_t)(end - c->in) + 4;
         size_t header_len = header_end - consumed;
         size_t body_len = 0;
-        if (srv_content_length(c->in + consumed, header_len, &body_len) != 0 ||
-            body_len > sizeof(c->in) - header_end)
-            return -1;
-        size_t request_end = header_end + body_len;
-        if (c->in_len < request_end) break;
+        size_t request_end = header_end;
+        if (srv_is_chunked(c->in + consumed, header_len)) {
+            int decoded = srv_decode_chunked(c, header_end, &body_len, &request_end);
+            if (decoded < 0) return -1;
+            if (decoded == 0) break;
+        } else {
+            if (srv_content_length(c->in + consumed, header_len, &body_len) != 0 ||
+                body_len > sizeof(c->in) - header_end ||
+                body_len > g_srv_body_limit)
+                return -1;
+            request_end = header_end + body_len;
+            if (c->in_len < request_end) break;
+        }
         if (srv_request_closes(c->in + consumed, header_len))
             c->close_after = 1;
         if (g_srv_handler) {
@@ -788,6 +953,157 @@ static int srv_flush(AxSrvConn *c) {
     return c->close_after ? 2 : 0;
 }
 
+static int ax_http_segment(const AxStr *s, size_t *cursor,
+                           const char **start, size_t *len) {
+    size_t at = *cursor;
+    while (at < s->len && s->ptr[at] == '/') at++;
+    if (at >= s->len) {
+        *cursor = at;
+        *start = s->ptr + at;
+        *len = 0;
+        return 0;
+    }
+    size_t end = at;
+    while (end < s->len && s->ptr[end] != '/') end++;
+    *cursor = end;
+    *start = s->ptr + at;
+    *len = end - at;
+    return 1;
+}
+
+bool ax_http_path_match(const AxStr *path, const AxStr *pattern) {
+    size_t pi = 0, xi = 0;
+    while (pi < pattern->len) {
+        if (pattern->ptr[pi] == '*' &&
+            (pi + 1 == pattern->len || pattern->ptr[pi + 1] == '/'))
+            return pi + 1 == pattern->len;
+        if (pattern->ptr[pi] == '{' && pi + 1 < pattern->len &&
+            pattern->ptr[pi + 1] == '}') {
+            const char *seg;
+            size_t len;
+            if (!ax_http_segment(path, &xi, &seg, &len) || len == 0) return false;
+            pi += 2;
+            continue;
+        }
+        if (pi >= pattern->len || xi >= path->len ||
+            pattern->ptr[pi++] != path->ptr[xi++])
+            return false;
+    }
+    return xi == path->len;
+}
+
+void ax_http_path_param(const AxStr *path, const AxStr *pattern,
+                           uint16_t wanted, AxStr *out) {
+    size_t pi = 0, xi = 0, found = 0;
+    out->ptr = "";
+    out->len = 0;
+    while (pi < pattern->len) {
+        if (pattern->ptr[pi] == '*' && pi + 1 == pattern->len) {
+            if (found == wanted) {
+                out->ptr = path->ptr + xi;
+                out->len = path->len - xi;
+            }
+            return;
+        }
+        if (pattern->ptr[pi] == '{' && pi + 1 < pattern->len &&
+            pattern->ptr[pi + 1] == '}') {
+            const char *seg;
+            size_t len;
+            if (!ax_http_segment(path, &xi, &seg, &len)) return;
+            if (found++ == wanted) {
+                out->ptr = seg;
+                out->len = len;
+                return;
+            }
+            pi += 2;
+            continue;
+        }
+        pi++;
+        xi++;
+    }
+}
+
+static int ax_http_ascii_equal(const char *a, size_t an,
+                               const char *b, size_t bn) {
+    if (an != bn) return 0;
+    for (size_t i = 0; i < an; i++)
+        if ((a[i] | 32) != (b[i] | 32)) return 0;
+    return 1;
+}
+
+void ax_http_query_param(const AxStr *query, const AxStr *name, AxStr *out) {
+    out->ptr = "";
+    out->len = 0;
+    size_t at = 0;
+    while (at < query->len) {
+        size_t key = at;
+        while (at < query->len && query->ptr[at] != '=' && query->ptr[at] != '&') at++;
+        size_t key_len = at - key;
+        size_t value = at;
+        if (at < query->len && query->ptr[at] == '=') {
+            value = ++at;
+            while (at < query->len && query->ptr[at] != '&') at++;
+        }
+        if (ax_http_ascii_equal(query->ptr + key, key_len, name->ptr, name->len)) {
+            out->ptr = query->ptr + value;
+            out->len = at - value;
+            return;
+        }
+        if (at < query->len && query->ptr[at] == '&') at++;
+    }
+}
+
+void ax_http_header(const AxStr *headers, const AxStr *name, AxStr *out) {
+    out->ptr = "";
+    out->len = 0;
+    size_t at = 0;
+    while (at < headers->len) {
+        size_t line = at;
+        while (at + 1 < headers->len &&
+               !(headers->ptr[at] == '\r' && headers->ptr[at + 1] == '\n')) at++;
+        size_t colon = line;
+        while (colon < at && headers->ptr[colon] != ':') colon++;
+        if (colon < at && ax_http_ascii_equal(headers->ptr + line, colon - line,
+                                               name->ptr, name->len)) {
+            size_t value = colon + 1;
+            while (value < at && (headers->ptr[value] == ' ' || headers->ptr[value] == '\t')) value++;
+            while (at > value && (headers->ptr[at - 1] == ' ' || headers->ptr[at - 1] == '\t')) at--;
+            out->ptr = headers->ptr + value;
+            out->len = at - value;
+            return;
+        }
+        at += (at + 1 < headers->len) ? 2 : 1;
+    }
+}
+
+void ax_http_cookie(const AxStr *headers, const AxStr *name, AxStr *out) {
+    AxStr cookie_header = {"", 0};
+    ax_http_header(headers, &(AxStr){"Cookie", 6}, &cookie_header);
+    out->ptr = "";
+    out->len = 0;
+    size_t at = 0;
+    while (at < cookie_header.len) {
+        while (at < cookie_header.len &&
+               (cookie_header.ptr[at] == ' ' || cookie_header.ptr[at] == ';')) at++;
+        size_t key = at;
+        while (at < cookie_header.len && cookie_header.ptr[at] != '=' &&
+               cookie_header.ptr[at] != ';') at++;
+        size_t key_len = at - key;
+        if (at < cookie_header.len && cookie_header.ptr[at] == '=') {
+            size_t value = ++at;
+            while (at < cookie_header.len && cookie_header.ptr[at] != ';') at++;
+            if (ax_http_ascii_equal(cookie_header.ptr + key, key_len,
+                                    name->ptr, name->len)) {
+                out->ptr = cookie_header.ptr + value;
+                out->len = at - value;
+                return;
+            }
+        }
+        while (at < cookie_header.len && cookie_header.ptr[at] != ';') at++;
+        if (at < cookie_header.len) at++;
+    }
+}
+
 static int srv_listener(uint16_t port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;
@@ -852,6 +1168,7 @@ static int srv_reactor(int listener) {
                         close(fd);
                         continue;
                     }
+                    srv_apply_timeout(fd);
                     AxSrvConn *c = (AxSrvConn *)calloc(1, sizeof(*c));
                     if (!c) { close(fd); continue; }
                     c->fd = fd;
@@ -925,6 +1242,7 @@ static int srv_reactor(int listener) {
                         break;
                     }
                     if (srv_nonblocking(fd) != 0) { close(fd); continue; }
+                    srv_apply_timeout(fd);
                     AxSrvConn *c = (AxSrvConn *)calloc(1, sizeof(*c));
                     if (!c) { close(fd); continue; }
                     c->fd = fd;
@@ -1063,24 +1381,32 @@ int ax_http_serve_static(uint16_t port, const void *body, size_t len) {
 int ax_http_serve_handler(uint16_t port, void *handler,
                           const AxTypeDesc *request_desc,
                           const AxTypeDesc *response_desc) {
+    AxStr empty = {"", 0};
+    return ax_http_serve_handler_config(port, handler, request_desc,
+                                        response_desc, AX_SRV_INBUF - 256,
+                                        0, &empty);
+}
+
+int ax_http_serve_handler_config(uint16_t port, void *handler,
+                                 const AxTypeDesc *request_desc,
+                                 const AxTypeDesc *response_desc,
+                                 uint32_t body_limit, uint32_t timeout_ms,
+                                 const AxStr *cors_origin) {
     ax_http_stop_server();
-    if (!handler || !request_desc || !response_desc ||
-        http_field_offset(request_desc, "method", AX_FLD_STR,
-                          &g_srv_req_method_off) != 0 ||
-        http_field_offset(request_desc, "path", AX_FLD_STR,
-                          &g_srv_req_path_off) != 0 ||
-        http_field_offset(request_desc, "body", AX_FLD_STR,
-                          &g_srv_req_body_off) != 0 ||
-        http_field_offset(response_desc, "status", AX_FLD_U16,
-                          &g_srv_res_status_off) != 0 ||
-        http_field_offset(response_desc, "body", AX_FLD_STR,
-                          &g_srv_res_body_off) != 0 ||
-        http_field_offset(response_desc, "static_body", AX_FLD_BOOL,
-                          &g_srv_res_static_off) != 0)
+    g_srv_body_limit = body_limit ? body_limit : AX_SRV_INBUF - 256;
+    g_srv_timeout_ms = timeout_ms;
+    free(g_srv_cors_origin);
+    g_srv_cors_origin = NULL;
+    g_srv_cors_origin_len = 0;
+    if (cors_origin && cors_origin->len) {
+        g_srv_cors_origin = (char *)malloc(cors_origin->len);
+        if (!g_srv_cors_origin) return -1;
+        memcpy(g_srv_cors_origin, cors_origin->ptr, cors_origin->len);
+        g_srv_cors_origin_len = cors_origin->len;
+    }
+    if (!handler || srv_set_descriptors(request_desc, response_desc) != 0)
         return -1;
     g_srv_handler = handler;
-    g_srv_request_desc = request_desc;
-    g_srv_response_desc = response_desc;
     return srv_run(port);
 }
 
@@ -1173,7 +1499,26 @@ int ax_http_accept(const AxTypeDesc *desc, void *out) {
     *sp1 = 0;
     *sp2 = 0;
     http_set_str(desc, out, "method", line, (size_t)(sp1 - line));
-    http_set_str(desc, out, "path", sp1 + 1, (size_t)(sp2 - sp1 - 1));
+    char *path = sp1 + 1;
+    size_t path_len = (size_t)(sp2 - sp1 - 1);
+    char *question = (char *)memchr(path, '?', path_len);
+    if (question) {
+        http_set_str(desc, out, "path", path, (size_t)(question - path));
+        http_set_str(desc, out, "query", question + 1,
+                     path_len - (size_t)(question - path) - 1);
+    } else {
+        http_set_str(desc, out, "path", path, path_len);
+        http_set_str(desc, out, "query", "", 0);
+    }
+    char *header_start = strstr(sp2 + 1, "\r\n");
+    if (header_start) {
+        header_start += 2;
+        size_t header_len = (size_t)(g_api_req.data + hdr_end - header_start);
+        if (header_len >= 2) header_len -= 2;
+        http_set_str(desc, out, "headers", header_start, header_len);
+    } else {
+        http_set_str(desc, out, "headers", "", 0);
+    }
     http_set_str(desc, out, "body", g_api_req.data + hdr_end, body_len);
     return 0;
 }

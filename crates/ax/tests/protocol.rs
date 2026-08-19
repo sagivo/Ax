@@ -51,6 +51,16 @@ fn cli_check_json() {
 }
 
 #[test]
+fn cli_rejects_removed_language_modes() {
+    let (code, _, stderr) = run_ax(&["check", "--surface", "conventional", &example("hello.ax")]);
+    assert_eq!(code, 2, "{stderr}");
+    assert!(stderr.contains("expected `ax` or `tree`"), "{stderr}");
+
+    let (code, _, stderr) = run_ax(&["gbnf", "--conventional"]);
+    assert_eq!(code, 2, "{stderr}");
+}
+
+#[test]
 fn cli_run_hello() {
     let (c, stdout, stderr) = run_ax(&["run", &example("hello.ax")]);
     assert_eq!(c, 0, "{stderr}");

@@ -5019,7 +5019,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     agg: Some(agg),
                 }))
             }
-            "http.response" => {
+            "http.response" | "http.response_stream" => {
                 let (_, agg) = self.ir_of_node(e.id)?;
                 let agg = agg.ok_or("native backend: `http.Response` has no layout")?;
                 let status = self.expr(&args[0])?;
@@ -5043,6 +5043,12 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     .agg(agg)
                     .field_index("static_body")
                     .ok_or("native backend: `http.Response.static_body` missing")?;
+                let stream_field = self
+                    .l
+                    .prog
+                    .agg(agg)
+                    .field_index("stream")
+                    .ok_or("native backend: `http.Response.stream` missing")?;
                 self.store_field(out, agg, status_field, status)?;
                 self.store_field(out, agg, body_field, body)?;
                 let is_static = self
@@ -5050,6 +5056,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     .const_bool(matches!(&args[1].kind, ExprKind::Lit(Lit::Str(_))));
                 let static_ptr = self.fb.field_ptr(agg, static_field, out);
                 self.fb.store(IrTy::Bool, static_ptr, is_static);
+                let stream_ptr = self.fb.field_ptr(agg, stream_field, out);
+                let is_stream = self.fb.const_bool(name == "http.response_stream");
+                self.fb.store(IrTy::Bool, stream_ptr, is_stream);
                 Ok(Some(LVal {
                     v: out,
                     ty: IrTy::Ptr,
@@ -5084,6 +5093,91 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     fallible: false,
                 });
                 Ok(Some(unit(self)))
+            }
+            "http.serve_handler_config" => {
+                let port = self.expr(&args[0])?;
+                let handler = self.expr(&args[1])?;
+                let body_limit = self.expr(&args[2])?;
+                let timeout_ms = self.expr(&args[3])?;
+                let cors_origin = self.expr(&args[4])?;
+                let request_ty = Type::Named {
+                    def: self.l.intern_sym("http.Request"),
+                    args: vec![],
+                };
+                let response_ty = Type::Named {
+                    def: self.l.intern_sym("http.Response"),
+                    args: vec![],
+                };
+                let request_agg = self
+                    .l
+                    .agg_of(&request_ty)?
+                    .ok_or("native backend: `http.Request` has no layout")?;
+                let response_agg = self
+                    .l
+                    .agg_of(&response_ty)?
+                    .ok_or("native backend: `http.Response` has no layout")?;
+                let request_desc = self.fb.push(Op::TypeDescriptor(request_agg), IrTy::Ptr);
+                let response_desc = self.fb.push(Op::TypeDescriptor(response_agg), IrTy::Ptr);
+                self.fb.push_void(Op::CallExt {
+                    name: "ax_rt_http_serve_handler_config".into(),
+                    args: vec![
+                        port.v,
+                        handler.v,
+                        request_desc,
+                        response_desc,
+                        body_limit.v,
+                        timeout_ms.v,
+                        cors_origin.v,
+                    ],
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(unit(self)))
+            }
+            "http.path_match" => {
+                let path = self.expr(&args[0])?;
+                let pattern = self.expr(&args[1])?;
+                let result = self.fb.push(
+                    Op::CallExt {
+                        name: "ax_rt_http_path_match".into(),
+                        args: vec![path.v, pattern.v],
+                        ret: IrTy::Bool,
+                        fallible: false,
+                    },
+                    IrTy::Bool,
+                );
+                Ok(Some(LVal::scalar(result, IrTy::Bool)))
+            }
+            "http.path_param" | "http.query_param" | "http.header" | "http.cookie" => {
+                let (_, agg) = self.ir_of_node(e.id)?;
+                let agg = agg.ok_or("native backend: HTTP string helper has no layout")?;
+                let first = self.expr(&args[0])?;
+                let second = self.expr(&args[1])?;
+                let third = (name == "http.path_param")
+                    .then(|| self.expr(&args[2]))
+                    .transpose()?;
+                let slot = self.fb.alloc_slot(SlotKind::Agg(agg), "http-string");
+                let runtime = match name {
+                    "http.path_param" => "ax_rt_http_path_param",
+                    "http.query_param" => "ax_rt_http_query_param",
+                    "http.cookie" => "ax_rt_http_cookie",
+                    _ => "ax_rt_http_header",
+                };
+                self.fb.push_void(Op::CallExt {
+                    name: runtime.into(),
+                    args: if let Some(third) = third {
+                        vec![first.v, second.v, third.v, slot]
+                    } else {
+                        vec![first.v, second.v, slot]
+                    },
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(LVal {
+                    v: slot,
+                    ty: IrTy::Ptr,
+                    agg: Some(agg),
+                }))
             }
             "io.bytesum_file" | "io.read_file" | "io.write_file" | "http.get_bytesum"
             | "http.get" | "http.serve" | "http.listen" | "http.respond" | "http.close"
@@ -5208,6 +5302,43 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 self.fb.push_void(Op::CallExt {
                     name: "ax_rt_vec_new".into(),
                     args: vec![alloc.v, zero, slot],
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(LVal {
+                    v: slot,
+                    ty: IrTy::Ptr,
+                    agg: Some(agg),
+                }))
+            }
+            "str.starts_with" | "str.contains" => {
+                let value = self.expr(&args[0])?;
+                let part = self.expr(&args[1])?;
+                let runtime = if name == "str.starts_with" {
+                    "ax_rt_str_starts_with"
+                } else {
+                    "ax_rt_str_contains"
+                };
+                let result = self.fb.push(
+                    Op::CallExt {
+                        name: runtime.into(),
+                        args: vec![value.v, part.v],
+                        ret: IrTy::Bool,
+                        fallible: false,
+                    },
+                    IrTy::Bool,
+                );
+                Ok(Some(LVal::scalar(result, IrTy::Bool)))
+            }
+            "str.drop" => {
+                let (_, agg) = self.ir_of(e)?;
+                let agg = agg.ok_or("native backend: `str.drop` with no str layout")?;
+                let value = self.expr(&args[0])?;
+                let count = self.expr(&args[1])?;
+                let slot = self.fb.alloc_slot(SlotKind::Agg(agg), "");
+                self.fb.push_void(Op::CallExt {
+                    name: "ax_rt_str_drop".into(),
+                    args: vec![value.v, count.v, slot],
                     ret: IrTy::Unit,
                     fallible: false,
                 });

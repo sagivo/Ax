@@ -1,6 +1,6 @@
 # Ax token efficiency — side-by-side
 
-Compact implementations of the same eight tasks in TypeScript, Python, C, Rust, and Ax. Counts are exact BPE counts, not character counts or a home-grown approximation.
+Compact implementations of the same 9 tasks in TypeScript, Python, C, Rust, and Ax. Counts are exact BPE counts, not character counts or a home-grown approximation.
 
 ## o200k_base
 
@@ -14,7 +14,8 @@ Compact implementations of the same eight tasks in TypeScript, Python, C, Rust, 
 | Map insert + get | 42 | 28 | 46 | 49 | 19 | 32% |
 | Fallible parse | 13 | 16 | 30 | 17 | 12 | 8% |
 | String interpolation | 11 | 11 | 21 | 15 | 9 | 18% |
-| **total** | **156** | **116** | **193** | **179** | **90** | **22%** |
+| Dot product | 29 | 17 | 44 | 47 | 17 | 0% |
+| **total** | **185** | **133** | **237** | **226** | **107** | **20%** |
 
 ## cl100k_base
 
@@ -28,7 +29,8 @@ Compact implementations of the same eight tasks in TypeScript, Python, C, Rust, 
 | Map insert + get | 41 | 28 | 46 | 48 | 19 | 32% |
 | Fallible parse | 12 | 15 | 29 | 17 | 12 | 0% |
 | String interpolation | 11 | 11 | 21 | 15 | 9 | 18% |
-| **total** | **153** | **115** | **192** | **174** | **90** | **22%** |
+| Dot product | 27 | 17 | 44 | 45 | 15 | 12% |
+| **total** | **180** | **132** | **236** | **219** | **105** | **20%** |
 
 Lower is better. The percentage compares Ax with the smallest of the four mainstream implementations on that row. A negative percentage means Ax lost that case.
 
@@ -80,7 +82,7 @@ Allocate a map, insert two keys, and return their sum.
 
 | TypeScript | Python | C | Rust | Ax |
 |---|---|---|---|---|
-| <pre>function f(){const m=new Map&lt;string,number&gt;();m.set("e",2);m.set("o",3);return(m.get("e")??0)+(m.get("o")??0)}</pre><small>42 tokens</small> | <pre>def f():m={"e":2,"o":3};return m.get("e",0)+m.get("o",0)</pre><small>28 tokens</small> | <pre>long f(){AxMap*m=ax_map_new();ax_map_put(m,"e",2);ax_map_put(m,"o",3);return ax_map_get0(m,"e")+ax_map_get0(m,"o");}</pre><small>46 tokens</small> | <pre>fn f()-&gt;i64{let mut m=HashMap::new();m.insert("e",2);m.insert("o",3);m.get("e").unwrap_or(&amp;0)+m.get("o").unwrap_or(&amp;0)}</pre><small>49 tokens</small> | <pre>#f={m%{e:2,o:3};m[e]+m[o]}</pre><small>19 tokens</small> |
+| <pre>function f(){const m=new Map&lt;string,number&gt;();m.set("e",2);m.set("o",3);return(m.get("e")??0)+(m.get("o")??0)}</pre><small>42 tokens</small> | <pre>def f():m={"e":2,"o":3};return m.get("e",0)+m.get("o",0)</pre><small>28 tokens</small> | <pre>long f(){AxMap*m=ax_map_new();ax_map_put(m,"e",2);ax_map_put(m,"o",3);return ax_map_get0(m,"e")+ax_map_get0(m,"o");}</pre><small>46 tokens</small> | <pre>fn f()-&gt;i64{let mut m=HashMap::new();m.insert("e",2);m.insert("o",3);m.get("e").unwrap_or(&amp;0)+m.get("o").unwrap_or(&amp;0)}</pre><small>49 tokens</small> | <pre>#f={m:={e:2,o:3};m[e]+m[o]}</pre><small>19 tokens</small> |
 
 ### Fallible parse
 
@@ -99,6 +101,14 @@ Build `hello {name}` with the language's standard interpolation.
 | TypeScript | Python | C | Rust | Ax |
 |---|---|---|---|---|
 | <pre>const greet=(name:string)=&gt;`hello ${name}`</pre><small>11 tokens</small> | <pre>def greet(name):return f"hello {name}"</pre><small>11 tokens</small> | <pre>void greet(char*name,char*out,int n){snprintf(out,n,"hello %s",name);}</pre><small>21 tokens</small> | <pre>fn greet(name:&amp;str)-&gt;String{format!("hello {name}")}</pre><small>15 tokens</small> | <pre>#greet(name:S)="hello {name}"</pre><small>9 tokens</small> |
+
+### Dot product
+
+Multiply corresponding vector elements and sum the products.
+
+| TypeScript | Python | C | Rust | Ax |
+|---|---|---|---|---|
+| <pre>const dot=(a:bigint[],b:bigint[])=&gt;a.reduce((s,x,i)=&gt;s+x*b[i],0n)</pre><small>29 tokens</small> | <pre>def dot(a,b):return sum(x*y for x,y in zip(a,b))</pre><small>17 tokens</small> | <pre>uint64_t dot(uint64_t*a,uint64_t*b,size_t n){uint64_t s=0;for(size_t i=0;i&lt;n;i++)s+=a[i]*b[i];return s;}</pre><small>44 tokens</small> | <pre>fn dot(a:&amp;[u64],b:&amp;[u64])-&gt;u64{a.iter().zip(b).fold(0,&#124;s,(x,y)&#124;s.wrapping_add(x.wrapping_mul(*y)))}</pre><small>47 tokens</small> | <pre>#dot(a V[W],b V[W])W=+/a*b</pre><small>17 tokens</small> |
 
 ## Method
 

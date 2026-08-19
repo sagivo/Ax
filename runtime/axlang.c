@@ -571,14 +571,34 @@ bool ax_rt_str_eq_raw(const AxStr *a, const char *data, uint64_t len) {
     return memcmp(a->ptr, data, (size_t)len) == 0;
 }
 
+bool ax_rt_str_starts_with(const AxStr *s, const AxStr *prefix) {
+    return prefix->len <= s->len &&
+           (prefix->len == 0 ||
+            memcmp(s->ptr, prefix->ptr, prefix->len) == 0);
+}
+
+bool ax_rt_str_contains(const AxStr *s, const AxStr *needle) {
+    if (needle->len == 0) return true;
+    if (needle->len > s->len) return false;
+    size_t last = s->len - needle->len;
+    for (size_t i = 0; i <= last; i++) {
+        if (memcmp(s->ptr + i, needle->ptr, needle->len) == 0) return true;
+    }
+    return false;
+}
+
+void ax_rt_str_drop(const AxStr *s, uint64_t count, AxStr *out) {
+    size_t n = count > s->len ? s->len : (size_t)count;
+    out->ptr = s->ptr + n;
+    out->len = s->len - n;
+}
+
 bool ax_rt_mem_eq(const void *a, const void *b, uint64_t n) {
     return memcmp(a, b, (size_t)n) == 0;
 }
 
 void ax_rt_str_concat(const AxAlloc *a, const AxStr *x, const AxStr *y, AxStr *out) {
     uint64_t n = x->len + y->len;
-    /* Grow `x` in place when it is still the arena's newest allocation.
-       Repeated `s = concat(s, chunk)` then costs a bump, not a copy of `s`. */
     if (a && a->kind == AX_ALLOC_ARENA && a->arena && x && x->ptr &&
         (void *)x->ptr == a->arena->last_ptr &&
         a->arena->last_size == x->len + 1) {
@@ -594,6 +614,46 @@ void ax_rt_str_concat(const AxAlloc *a, const AxStr *x, const AxStr *y, AxStr *o
     if (y && y->ptr && y->len) memcpy(p + x->len, y->ptr, (size_t)y->len);
     p[n] = 0;
     out->ptr = p;
+    out->len = (size_t)n;
+}
+
+void ax_rt_str_concat_cached(const AxAlloc *a, const AxStr *x, const AxStr *y,
+                             uint64_t *cache_capacity, uint64_t iterations,
+                             AxStr *out) {
+    uint64_t n = x->len + y->len;
+    uint64_t needed = n;
+    char *p;
+    if (needed <= *cache_capacity) {
+        p = (char *)x->ptr;
+    } else {
+        uint64_t old_capacity = *cache_capacity;
+        uint64_t capacity = old_capacity ? old_capacity : 16;
+        if (!old_capacity && (!y->len || iterations <= (UINT64_MAX - x->len) / y->len)) {
+            uint64_t reserve = x->len + iterations * y->len;
+            if (reserve > capacity) capacity = reserve;
+        }
+        while (capacity < needed)
+            capacity = capacity > UINT64_MAX / 2 ? needed : capacity * 2;
+        if (old_capacity) {
+            p = (char *)ax_alloc_grow(a, (void *)x->ptr, old_capacity, capacity, 1);
+        } else {
+            p = (char *)ax_alloc_raw(a, capacity, 1);
+            if (x->len) memcpy(p, x->ptr, x->len);
+        }
+        if (a && a->kind == AX_ALLOC_ARENA && a->arena && p == a->arena->last_ptr) {
+            AxArena *arena = a->arena;
+            size_t start = (size_t)((unsigned char *)p - arena->base);
+            size_t available = arena->cap - start;
+            if (available > capacity) {
+                arena->used = arena->cap;
+                arena->last_size = available;
+                capacity = available;
+            }
+        }
+        *cache_capacity = capacity;
+        out->ptr = p;
+    }
+    if (y->len) memcpy(p + x->len, y->ptr, y->len);
     out->len = (size_t)n;
 }
 
@@ -1087,6 +1147,37 @@ void ax_rt_http_serve_handler(uint16_t port, void *handler,
                               const AxTypeDesc *response_desc) {
     if (ax_http_serve_handler(port, handler, request_desc, response_desc) != 0)
         ax_abort("http.serve_handler failed");
+}
+
+void ax_rt_http_serve_handler_config(uint16_t port, void *handler,
+                                     const AxTypeDesc *request_desc,
+                                     const AxTypeDesc *response_desc,
+                                     uint32_t body_limit, uint32_t timeout_ms,
+                                     const AxStr *cors_origin) {
+    if (ax_http_serve_handler_config(port, handler, request_desc, response_desc,
+                                     body_limit, timeout_ms, cors_origin) != 0)
+        ax_abort("http.serve_handler_config failed");
+}
+
+bool ax_rt_http_path_match(const AxStr *path, const AxStr *pattern) {
+    return ax_http_path_match(path, pattern);
+}
+
+void ax_rt_http_path_param(const AxStr *path, const AxStr *pattern,
+                           uint16_t index, AxStr *out) {
+    ax_http_path_param(path, pattern, index, out);
+}
+
+void ax_rt_http_query_param(const AxStr *query, const AxStr *name, AxStr *out) {
+    ax_http_query_param(query, name, out);
+}
+
+void ax_rt_http_header(const AxStr *headers, const AxStr *name, AxStr *out) {
+    ax_http_header(headers, name, out);
+}
+
+void ax_rt_http_cookie(const AxStr *headers, const AxStr *name, AxStr *out) {
+    ax_http_cookie(headers, name, out);
 }
 
 void ax_rt_argv(int32_t i, AxStr *out) {

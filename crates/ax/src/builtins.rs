@@ -908,6 +908,42 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
             alloc_eff,
         ),
     ));
+    let prefix = intern.intern("prefix");
+    let needle = intern.intern("needle");
+    let count = intern.intern("count");
+    out.push((
+        "str.starts_with".into(),
+        sig(
+            intern,
+            "core::fn:str.starts_with",
+            "starts_with",
+            vec![(x, string_type(b), false), (prefix, string_type(b), false)],
+            Type::bool(),
+            EffectSet::new(),
+        ),
+    ));
+    out.push((
+        "str.contains".into(),
+        sig(
+            intern,
+            "core::fn:str.contains",
+            "contains",
+            vec![(x, string_type(b), false), (needle, string_type(b), false)],
+            Type::bool(),
+            EffectSet::new(),
+        ),
+    ));
+    out.push((
+        "str.drop".into(),
+        sig(
+            intern,
+            "core::fn:str.drop",
+            "drop",
+            vec![(x, string_type(b), false), (count, Type::usz(), false)],
+            string_type(b),
+            EffectSet::new(),
+        ),
+    ));
 
     // ---- corelib IO / HTTP (native-backed) ----
     let path_s = intern.intern("path");
@@ -1003,6 +1039,12 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
         def: intern.intern("http.Response"),
         args: vec![],
     };
+    let mut serve_handler_effects = EffectSet::new();
+    serve_handler_effects.insert(EffectAtom::Alloc(alloc));
+    serve_handler_effects.insert(EffectAtom::Err(Type::Named {
+        def: sym_json_error,
+        args: vec![],
+    }));
     out.push((
         "http.listen".into(),
         sig(
@@ -1052,12 +1094,31 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
         ),
     ));
     let handler = intern.intern("handler");
+    let body_limit = intern.intern("body_limit");
+    let timeout_ms = intern.intern("timeout_ms");
+    let cors_origin = intern.intern("cors_origin");
+    let index = intern.intern("index");
+    let name = intern.intern("name");
     out.push((
         "http.response".into(),
         sig(
             intern,
             "core::fn:http.response",
             "response",
+            vec![
+                (status, Type::Prim(Prim::U16), false),
+                (body, string_type(b), false),
+            ],
+            response_ty.clone(),
+            EffectSet::new(),
+        ),
+    ));
+    out.push((
+        "http.response_stream".into(),
+        sig(
+            intern,
+            "core::fn:http.response_stream",
+            "response_stream",
             vec![
                 (status, Type::Prim(Prim::U16), false),
                 (body, string_type(b), false),
@@ -1077,9 +1138,9 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
                 (
                     handler,
                     Type::Fn {
-                        params: vec![request_ty],
-                        ret: Box::new(response_ty),
-                        effects: EffectSet::new(),
+                        params: vec![request_ty.clone()],
+                        ret: Box::new(response_ty.clone()),
+                        effects: serve_handler_effects.clone(),
                     },
                     false,
                 ),
@@ -1088,6 +1149,91 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
             net_abort.clone(),
         ),
     ));
+    out.push((
+        "http.serve_handler_config".into(),
+        sig(
+            intern,
+            "core::fn:http.serve_handler_config",
+            "serve_handler_config",
+            vec![
+                (port, Type::Prim(Prim::U16), false),
+                (
+                    handler,
+                    Type::Fn {
+                        params: vec![request_ty.clone()],
+                        ret: Box::new(response_ty.clone()),
+                        effects: serve_handler_effects,
+                    },
+                    false,
+                ),
+                (body_limit, Type::Prim(Prim::U32), false),
+                (timeout_ms, Type::Prim(Prim::U32), false),
+                (cors_origin, string_type(b), false),
+            ],
+            Type::unit(),
+            net_abort.clone(),
+        ),
+    ));
+    out.push((
+        "http.path_match".into(),
+        sig(
+            intern,
+            "core::fn:http.path_match",
+            "path_match",
+            vec![(path, string_type(b), false), (raw, string_type(b), false)],
+            Type::bool(),
+            EffectSet::new(),
+        ),
+    ));
+    out.push((
+        "http.path_param".into(),
+        sig(
+            intern,
+            "core::fn:http.path_param",
+            "path_param",
+            vec![
+                (path, string_type(b), false),
+                (raw, string_type(b), false),
+                (index, Type::Prim(Prim::U16), false),
+            ],
+            string_type(b),
+            EffectSet::new(),
+        ),
+    ));
+    out.push((
+        "http.query_param".into(),
+        sig(
+            intern,
+            "core::fn:http.query_param",
+            "query_param",
+            vec![(raw, string_type(b), false), (name, string_type(b), false)],
+            string_type(b),
+            EffectSet::new(),
+        ),
+    ));
+    out.push((
+        "http.header".into(),
+        sig(
+            intern,
+            "core::fn:http.header",
+            "header",
+            vec![(raw, string_type(b), false), (name, string_type(b), false)],
+            string_type(b),
+            EffectSet::new(),
+        ),
+    ));
+    out.push((
+        "http.cookie".into(),
+        sig(
+            intern,
+            "core::fn:http.cookie",
+            "cookie",
+            vec![(raw, string_type(b), false), (name, string_type(b), false)],
+            string_type(b),
+            EffectSet::new(),
+        ),
+    ));
+
     let mut argv_row = EffectSet::new();
     argv_row.insert(EffectAtom::Io(intern.intern("argv")));
     let argv_i = intern.intern("i");
@@ -1165,6 +1311,20 @@ pub fn extra_type_defs(intern: &mut Interner) -> Vec<TypeDef> {
                         args: vec![],
                     },
                 ),
+                (
+                    intern.intern("query"),
+                    Type::Named {
+                        def: intern.intern("String"),
+                        args: vec![],
+                    },
+                ),
+                (
+                    intern.intern("headers"),
+                    Type::Named {
+                        def: intern.intern("String"),
+                        args: vec![],
+                    },
+                ),
             ]),
             injections: vec![],
             span: Span::DUMMY,
@@ -1183,6 +1343,7 @@ pub fn extra_type_defs(intern: &mut Interner) -> Vec<TypeDef> {
                     },
                 ),
                 (intern.intern("static_body"), Type::Prim(Prim::Bool)),
+                (intern.intern("stream"), Type::Prim(Prim::Bool)),
             ]),
             injections: vec![],
             span: Span::DUMMY,

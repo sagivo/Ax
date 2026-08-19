@@ -7,7 +7,7 @@ answers questions in microseconds, classifies its own fixes by safety,
 and ships a normative interpreter to check itself against.
 
 ```
-.ax → Ax (`#fn`, `:=`, `$if`, `+/`)  |  tree if the file opens with `(`  |  Rust-shaped corpus (legacy, not Ax)
+.ax → Ax (`#fn`, `:=`, `$if`, `+/`)  |  tree if the file opens with `(`
     → check (types, effects, regions, Untrusted/Secret/own)
     → ownership ladder + ax perf --json
     → typed SSA IR
@@ -57,8 +57,6 @@ That is Ax. Language reference: `spec/dense.md`. Card: `ax card` /
 - Dictionaries: `dict` with `default` unique resolution, resolved
   statically and called directly — no vtable.
 - `as` is the only numeric conversion; there are no implicit ones.
-- The Rust-shaped dialect still parses so the corpus keeps proving the IR.
-  An agent does not write it. See `DECISIONS.md` R-14 / R-16.
 
 Side-by-side TypeScript / Python / C / Rust / Ax: `docs/usecases.md`
 (`cargo run -p ax-density -- --write`, development workspace only).
@@ -102,10 +100,30 @@ See [HTTP performance](docs/http-performance.md) for the complete results,
 methodology, architectural explanation, reproduction command, and precise
 scope of the performance claim.
 
+### Build a REST API quickly
+
+The standalone **Ax API** framework adds FastAPI-style verb routes and
+Rails-style resource paths without adding framework policy to the language:
+
+```ax
+// ax-api port 8080
+// ax-api GET /v1/items/{id} -> show
+
+fn show(request: http.Request, id: String) -> http.Response = api.ok(id);
+```
+
+Run it with `ax-api run app.ax`. The separate `frameworks/ax-api` package
+generates an ordinary `http.serve_handler` program; the compiler and core
+runtime contain no REST router or `api.*` framework builtins.
+
+See the [Ax API quick start](docs/api-framework.md) for REST routing, request
+fields, JSON responses, automatic errors, performance, and the complete MVP
+example.
+
 ## Protocol
 
 ```
-ax check [--json] [--allow-holes] [--strict-det] [--surface ax|tree|conventional|terse|verbose]
+ax check [--json] [--allow-holes] [--strict-det] [--surface ax|tree]
 ax hole [--fills] [--json]      ranked fills, each verified by compiling it
 ax fix [--apply]                applies only semantics_preserving fixes
 ax test                         run language-level tests
@@ -116,7 +134,7 @@ ax ir | types | effs | search | errs --into | fmt | patch --tx | deps --affected
 ax build [-o bin] [--tier dev|release|portable]
 ax merge --semantic | label | card | pkg list | pkg write
 ax perf [--json] [--diff baseline.json] | complete | context | repair
-ax caps | gbnf [--conventional] | daemon
+ax caps | gbnf | daemon
 ```
 
 Repository validation and experiments are deliberately separate from the
@@ -160,25 +178,30 @@ single outlier in Rust's `gcd` time moved that row's verdict by 8% between runs)
 Where Ax wins, a language guarantee is doing the work. Where the work is a plain
 loop, Ax lands on clang's output and clang's result is what you get.
 
+The broader [22-case software suite](docs/software_usecases.md) currently records
+14 Ax wins, 7 parity results, 0 scored losses, and 1 excluded scheduler-noise
+row. The enforced full-size §5.6 gate reports median Ax/C **0.93×**, worst Ax/C
+**1.19×**, and median Ax/Rust **0.84×**.
+
 | workload | ax | rust | go | ax/rust | why |
 |---|---:|---:|---:|---:|---|
-| `fib(40)` from argv | **2.23 ms** | 161.8 ms | 220.4 ms | **0.014×** | the row proves `fib` pure, so results are cached |
-| `C(30,14)` two-arg recursion | **1.85 ms** | 168.5 ms | 258.4 ms | **0.011×** | same cache, now for two integer arguments |
-| `fib(40)`, literal argument | **1.56 ms** | 165.5 ms | — | **0.009×** | same proof, applied during the build |
-| invariant-divisor `%` 8e7 | **36.5 ms** | 40.5 ms | 41.6 ms | **0.90×** | reciprocal hoisted; rustc/gc leave a `udiv` |
-| 1e6 short-lived buffers | **9.70 ms** | 16.72 ms | 21.80 ms | **0.58×** | region arena: no per-object free |
-| IO 64 MiB bytesum | **9.46 ms** | 15.14 ms | — | **0.62×** | `axrt` mmaps in place; idiomatic Rust copies |
-| 2e6 records pushed + summed | **5.57 ms** | 6.83 ms | 12.87 ms | **0.82×** | arena grows in place, `push` inlined, checks dropped |
-| Euclid gcd 3e6 | 105.4 ms | 106.0 ms | 107.2 ms | 0.99× | parity |
-| FNV nest 6000² | 35.2 ms | 34.6 ms | 44.0 ms | 1.02× | within 3% of C |
-| LCG mix 2e8 | 183.9 ms | 184.0 ms | 187.0 ms | 1.00× | **parity is provably optimal** |
-| primes < 6e5 | 23.2 ms | 23.1 ms | **20.4 ms** | 1.00× | **parity with Rust; a 13% loss to Go** |
-| check a module | **89 µs** | 1.10 s | — | ~10⁻⁴× | the checker is what an agent calls in a loop |
-| compile **and run** a module | **305 µs** | 1.10 s (compile only) | — | ~10⁻⁴× | Cranelift, in-process; `cc` alone is 68 ms |
+| `fib(40)` from argv | **1.88 ms** | 166.9 ms | 226.8 ms | **0.011×** | the row proves `fib` pure, so results are cached |
+| `C(30,14)` two-arg recursion | **1.99 ms** | 177.3 ms | 264.2 ms | **0.011×** | same cache, now for two integer arguments |
+| `fib(40)`, literal argument | **1.55 ms** | 173.0 ms | — | **0.009×** | same proof, applied during the build |
+| invariant-divisor `%` 8e7 | **37.1 ms** | 43.7 ms | 43.7 ms | **0.85×** | reciprocal hoisted; rustc/gc leave a `udiv` |
+| 1e6 short-lived buffers | **10.54 ms** | 21.28 ms | 22.97 ms | **0.50×** | region arena: no per-object free |
+| IO 64 MiB bytesum | **11.49 ms** | 16.92 ms | — | **0.68×** | `axrt` mmaps in place; idiomatic Rust copies |
+| 2e6 records pushed + summed | **6.13 ms** | 7.46 ms | 14.36 ms | **0.82×** | arena grows in place, `push` inlined, checks dropped |
+| Euclid gcd 3e6 | 115.5 ms | 114.6 ms | 114.6 ms | 1.01× | parity |
+| FNV nest 6000² | **37.1 ms** | 37.9 ms | 47.2 ms | 0.98× | parity with Rust; faster than Go |
+| LCG mix 2e8 | 205.6 ms | 201.3 ms | 205.5 ms | 1.02× | **parity is provably optimal** |
+| primes < 6e5 | 24.9 ms | 24.6 ms | **21.7 ms** | 1.01× | **within 1% of Rust; a 15% loss to Go** |
+| check a module | **176 µs** | 1.18 s | — | ~10⁻⁴× | the checker is what an agent calls in a loop |
+| compile **and run** a module | **417 µs** | 1.18 s (compile only) | — | ~10⁻⁴× | Cranelift, in-process; `cc` alone is 74 ms |
 
 **Stated plainly:** Ax is far faster than Rust where its type system licenses
 something Rust's cannot express (proven purity, region allocation, capability IO,
-loop-invariant division), at parity on plain compute, and 13% *slower than Go* on
+loop-invariant division), at parity on plain compute, and 15% *slower than Go* on
 `primes`. "Faster than Rust on identical machine-level work" is not a claim this
 table supports except where a language guarantee does the work.
 
@@ -230,23 +253,23 @@ Go actually give you.
 
 The development-only `ax-density` workspace tool counts exact source with the
 real `o200k_base` and `cl100k_base` BPE vocabularies. It compares compact
-implementations of eight common methods in the five requested languages; every
+implementations of nine common methods in the five requested languages; every
 generated Ax snippet is then compiled. Its tokenizer dependency is not part of
 the shipped `ax` package or default workspace build.
 
 | encoding | TypeScript | Python | C | Rust | **Ax** | Ax vs best mainstream |
 |---|---:|---:|---:|---:|---:|---:|
-| `o200k_base` | 156 | 116 | 193 | 179 | **90** | **22% fewer** |
-| `cl100k_base` | 153 | 115 | 192 | 174 | **90** | **22% fewer** |
+| `o200k_base` | 185 | 133 | 237 | 226 | **107** | **20% fewer** |
+| `cl100k_base` | 180 | 132 | 236 | 219 | **105** | **20% fewer** |
 
 Ax is the smallest overall corpus in both vocabularies and wins or ties all
-eight individual cases. A controlled corpus is evidence, not proof for every
+nine individual cases. A controlled corpus is evidence, not proof for every
 possible program.
 
 The measured changes are structural: omitted `i32` signatures, nullary `#f=...`
-declarations, default map type `M`, `name%{...}` map binding, inferred allocation effects, bare map keys,
+declarations, default map type `M`, `name:={...}` map binding, inferred allocation effects, bare map keys,
 implicit zero-default lookup, map-bound bare keys, marker-free interpolation, the one-token `??`
-conditional, and a formatter that removes BPE-costing whitespace and
+conditional, the compact `+/a*b` dot-product reduction, and a formatter that removes BPE-costing whitespace and
 terminators. Shortening `fn` to `f` would not help—both are already one token.
 
 **Cost to reach a working program.** An earlier version of this section compared

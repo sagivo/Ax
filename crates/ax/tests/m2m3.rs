@@ -1,4 +1,4 @@
-//! M2 soundness + M3 workspace: independent checkers, three surfaces,
+//! M2 soundness + M3 workspace: independent checkers, Ax normalization,
 //! transactional patch, G2 replay.
 
 use ax::driver::Session;
@@ -19,8 +19,8 @@ fn terse_rewrites_to_conventional() {
     assert!(conv.contains("a: i32"), "{conv}");
     assert!(conv.contains("-> i32"), "{conv}");
     let mut s = Session::new();
-    s.surface = Surface::Terse;
-    let out = s.compile("t.ax", terse).unwrap();
+    s.surface = Surface::Ax;
+    let out = s.compile("t.ax", &conv).unwrap();
     assert_eq!(out.fns.len(), 1);
 }
 
@@ -31,7 +31,7 @@ fn dense_rewrites_and_compiles() {
     assert!(terse.contains("fn add"), "{terse}");
     assert!(terse.contains("i32"), "{terse}");
     let mut s = Session::new();
-    s.surface = Surface::Dense;
+    s.surface = Surface::Ax;
     let out = s.compile("t.ax", dense).unwrap_or_else(|d| panic!("{d:?}"));
     assert_eq!(out.fns.len(), 1);
 }
@@ -45,7 +45,7 @@ fn dense_loop_and_bind_same_value() {
     assert!(dense.contains('~'), "{dense}");
     let mut a = Session::new();
     let mut b = Session::new();
-    b.surface = Surface::Dense;
+    b.surface = Surface::Ax;
     let oa = a.compile("a.ax", conv).unwrap();
     let ob = b
         .compile("b.ax", &dense)
@@ -70,7 +70,7 @@ fn main() -> i64 !{alloc[a]} = {
     assert!(dense.contains('?'), "{dense}");
     let mut a = Session::new();
     let mut b = Session::new();
-    b.surface = Surface::Dense;
+    b.surface = Surface::Ax;
     let oa = a.compile("a.ax", conv).unwrap();
     let ob = b
         .compile("b.ax", &dense)
@@ -93,12 +93,15 @@ fn main() -> i64 !{alloc[a], diverge} = {
 };
 "#;
     let dense = to_dense(conv);
-    assert!(dense.contains('%') || dense.contains("map.new"), "{dense}");
+    assert!(
+        dense.contains("{k:") || dense.contains("map.new"),
+        "{dense}"
+    );
     assert!(dense.contains('@') || dense.contains("while"), "{dense}");
     assert!(dense.contains('L') || dense.contains("i64"), "{dense}");
     let mut a = Session::new();
     let mut b = Session::new();
-    b.surface = Surface::Dense;
+    b.surface = Surface::Ax;
     let oa = a.compile("a.ax", conv).unwrap();
     let ob = b
         .compile("b.ax", &dense)
@@ -126,7 +129,7 @@ fn dense_compound_assign_same_value() {
     assert!(dense.contains("+="), "{dense}");
     let mut a = Session::new();
     let mut b = Session::new();
-    b.surface = Surface::Dense;
+    b.surface = Surface::Ax;
     let oa = a.compile("a.ax", conv).unwrap();
     let ob = b
         .compile("b.ax", &dense)
@@ -145,7 +148,7 @@ fn dense_i32_defaults_and_conditional_same_value() {
     assert!(expanded.contains(") i32"), "{expanded}");
 
     let mut s = Session::new();
-    s.surface = Surface::Dense;
+    s.surface = Surface::Ax;
     let out = s
         .compile("defaults.ax", written)
         .unwrap_or_else(|d| panic!("{expanded}\n{d:?}"));
@@ -154,7 +157,7 @@ fn dense_i32_defaults_and_conditional_same_value() {
 
     let nested = "#sign(n)=n<0??-1:n==0??0:1\n#main()=sign(0)\n";
     let mut t = Session::new();
-    t.surface = Surface::Dense;
+    t.surface = Surface::Ax;
     let out = t
         .compile("nested.ax", nested)
         .unwrap_or_else(|d| panic!("{d:?}"));
@@ -174,7 +177,7 @@ fn dense_packer_removes_optional_signature_types_and_space() {
     assert!(!dense.contains(" = "), "{dense}");
 
     let mut s = Session::new();
-    s.surface = Surface::Dense;
+    s.surface = Surface::Ax;
     s.compile("packed.ax", &dense)
         .unwrap_or_else(|d| panic!("{dense}\n{d:?}"));
 }
@@ -186,21 +189,21 @@ fn dense_shared_type_and_alloc_alias_compile() {
     assert!(expanded.contains("n usz"), "{expanded}");
     assert!(expanded.contains("alloc[a]"), "{expanded}");
     let mut s = Session::new();
-    s.surface = Surface::Dense;
+    s.surface = Surface::Ax;
     s.compile("shared.ax", written)
         .unwrap_or_else(|d| panic!("{expanded}\n{d:?}"));
 }
 
 #[test]
 fn dense_inferred_map_literal_matches_expanded_form() {
-    let written = "#main()L!a={m:=%{\"e\":2L,\"o\":3L};m[\"e\"]?0+m[\"o\"]?0}\n";
+    let written = "#main()L!a={m:={e:2L,o:3L};m[e]?0+m[o]?0}\n";
     let expanded = rewrite_dense_to_terse(written);
     assert!(
         expanded.contains("Map[String,i64]") || expanded.contains("Map[String, i64]"),
         "{expanded}"
     );
     let mut s = Session::new();
-    s.surface = Surface::Dense;
+    s.surface = Surface::Ax;
     let out = s
         .compile("maplit.ax", written)
         .unwrap_or_else(|d| panic!("{expanded}\n{d:?}"));
@@ -211,7 +214,49 @@ fn dense_inferred_map_literal_matches_expanded_form() {
 
     let conventional = "module t;\nfn main() -> i64 !{alloc[a]} = { let mut m: Map[String, i64] = map.new(test.alloc); m.insert(\"e\", 2i64); m.insert(\"o\", 3i64); match m.get(\"e\") { Some(v) => v; None => 0; } + match m.get(\"o\") { Some(v) => v; None => 0; } };\n";
     let packed = to_dense(conventional);
-    assert!(packed.contains("%{e:2L,o:3L}"), "{packed}");
+    assert!(packed.contains(":={e:2L,o:3L}"), "{packed}");
+}
+
+#[test]
+fn dense_braces_distinguish_maps_blocks_and_named_records() {
+    let source =
+        "type Pair={x:L,y:L};\n#main()L!a={m:={x:2L,y:3L};p Pair:=Pair{x:5L,y:7L};m[x]?0+p.y}\n";
+    let expanded = rewrite_dense_to_terse(source);
+    assert!(expanded.contains("map.new(test.alloc)"), "{expanded}");
+    assert!(expanded.contains("Pair{x:5i64,y:7i64}"), "{expanded}");
+    let mut session = Session::new();
+    session.surface = Surface::Ax;
+    let output = session
+        .compile("brace-kinds.ax", source)
+        .unwrap_or_else(|diagnostics| panic!("{expanded}\n{diagnostics:?}"));
+    assert_eq!(
+        ax::driver::run_main(&session.intern, &output, 0)
+            .unwrap()
+            .display(),
+        "9i64"
+    );
+}
+
+#[test]
+fn dense_empty_map_uses_expression_context() {
+    let source = "#main()Z!a={m:={};m#}\n";
+    let expanded = rewrite_dense_to_terse(source);
+    assert!(expanded.contains("Map[String,i32]"), "{expanded}");
+    let mut session = Session::new();
+    session.surface = Surface::Ax;
+    let output = session
+        .compile("empty-map.ax", source)
+        .unwrap_or_else(|diagnostics| panic!("{expanded}\n{diagnostics:?}"));
+    assert_eq!(
+        ax::driver::run_main(&session.intern, &output, 0)
+            .unwrap()
+            .display(),
+        "0usz"
+    );
+    let packed = to_dense(
+        "module t;\nfn main() -> usz !{alloc[a]} = { let mut m: Map[String, i32] = map.new(test.alloc); m.len() };\n",
+    );
+    assert!(packed.contains(":={}"), "{packed}");
 }
 
 #[test]
@@ -221,7 +266,7 @@ fn dense_k_reduce_sum_same_value() {
     assert!(dense.contains("+/"), "expected +/ pack, got {dense}");
     let mut a = Session::new();
     let mut b = Session::new();
-    b.surface = Surface::Dense;
+    b.surface = Surface::Ax;
     let oa = a.compile("a.ax", conv).unwrap();
     let ob = b
         .compile("b.ax", &dense)
@@ -233,7 +278,7 @@ fn dense_k_reduce_sum_same_value() {
     // Written form, not packed: agent writes +/n.
     let written = "#main() Z = +/10Z\n";
     let mut c = Session::new();
-    c.surface = Surface::Dense;
+    c.surface = Surface::Ax;
     let oc = c
         .compile("c.ax", written)
         .unwrap_or_else(|d| panic!("written={written}\n{d:?}"));
@@ -242,7 +287,7 @@ fn dense_k_reduce_sum_same_value() {
     // Bare `+/10` — integer literals infer as usz from `range`.
     let bare = "#main() Z = +/10\n";
     let mut d = Session::new();
-    d.surface = Surface::Dense;
+    d.surface = Surface::Ax;
     let od = d
         .compile("d10.ax", bare)
         .unwrap_or_else(|err| panic!("bare={bare}\n{err:?}"));
@@ -254,7 +299,7 @@ fn dense_k_reduce_sum_same_value() {
 fn dense_k_reduce_product_and_range() {
     let prod = "#main() Z = */1..5\n";
     let mut s = Session::new();
-    s.surface = Surface::Dense;
+    s.surface = Surface::Ax;
     let out = s.compile("p.ax", prod).unwrap_or_else(|d| panic!("{d:?}"));
     let v = ax::driver::run_main(&s.intern, &out, 0).unwrap();
     assert_eq!(v.display(), "24usz"); // 1*2*3*4
@@ -269,7 +314,7 @@ fn dense_inc_and_len_same_value() {
     assert!(dense.contains('[') || dense.contains(".at"), "{dense}");
     let mut a = Session::new();
     let mut b = Session::new();
-    b.surface = Surface::Dense;
+    b.surface = Surface::Ax;
     let oa = a.compile("a.ax", conv).unwrap();
     let ob = b
         .compile("b.ax", &dense)
@@ -279,7 +324,7 @@ fn dense_inc_and_len_same_value() {
     assert_eq!(va.display(), vb.display());
     let written = "#main() Z !alloc[a] = { xs V[Z]:= vec.new(test.alloc); xs.push(1Z); xs.push(2Z); s Z:= 0; i~xs# { s += xs[i] }; s++ ; s }\n";
     let mut c = Session::new();
-    c.surface = Surface::Dense;
+    c.surface = Surface::Ax;
     let oc = c
         .compile("c.ax", written)
         .unwrap_or_else(|d| panic!("written={written}\n{d:?}"));
@@ -301,7 +346,7 @@ fn dense_vec_reduce_and_empty() {
     );
     let mut a = Session::new();
     let mut b = Session::new();
-    b.surface = Surface::Dense;
+    b.surface = Surface::Ax;
     let oa = a.compile("a.ax", conv).unwrap();
     let ob = b
         .compile("b.ax", &dense)
@@ -313,7 +358,7 @@ fn dense_vec_reduce_and_empty() {
     let written =
         "#main() Z !alloc[a] = { xs V[Z]:= []; xs.push(2Z); xs.push(3Z); xs.push(4Z); +/xs# }\n";
     let mut c = Session::new();
-    c.surface = Surface::Dense;
+    c.surface = Surface::Ax;
     let oc = c
         .compile("w.ax", written)
         .unwrap_or_else(|d| panic!("written={written}\n{d:?}"));
@@ -321,7 +366,7 @@ fn dense_vec_reduce_and_empty() {
     assert_eq!(vc.display(), "9usz");
     let empty = "#main() Z !alloc[a] = { xs V[Z]:= []; +/xs# }\n";
     let mut d = Session::new();
-    d.surface = Surface::Dense;
+    d.surface = Surface::Ax;
     let od = d
         .compile("e.ax", empty)
         .unwrap_or_else(|err| panic!("empty={empty}\n{err:?}"));
@@ -329,7 +374,7 @@ fn dense_vec_reduce_and_empty() {
     assert_eq!(vd.display(), "0usz");
     let prod = "#main() Z !alloc[a] = { xs V[Z]:= []; xs.push(2Z); xs.push(3Z); */xs# }\n";
     let mut e = Session::new();
-    e.surface = Surface::Dense;
+    e.surface = Surface::Ax;
     let oe = e
         .compile("p.ax", prod)
         .unwrap_or_else(|err| panic!("prod={prod}\n{err:?}"));
@@ -338,22 +383,43 @@ fn dense_vec_reduce_and_empty() {
 }
 
 #[test]
+fn dense_dot_product_is_compact_and_equivalent() {
+    let conv = "module t;\nfn dot(a: Vec[u64], b: Vec[u64]) -> u64 = { let mut s: u64 = 0; for i in range(0, a.len()) { s = s + a.at(i) * b.at(i); }; s };\nfn main() -> i32 = 0;\n";
+    let dense = to_dense(conv);
+    assert!(dense.contains("+/a*b"), "{dense}");
+    let mut session = Session::new();
+    session.surface = Surface::Ax;
+    session
+        .compile("dot.ax", &dense)
+        .unwrap_or_else(|diagnostics| panic!("dense={dense}\n{diagnostics:?}"));
+    let runnable =
+        "#main() W !alloc[a] = { a V[W]:= []; b V[W]:= []; a<-2W; a<-3W; b<-5W; b<-7W; +/a*b }\n";
+    let mut runtime = Session::new();
+    runtime.surface = Surface::Ax;
+    let output = runtime
+        .compile("dot_run.ax", runnable)
+        .unwrap_or_else(|diagnostics| panic!("source={runnable}\n{diagnostics:?}"));
+    let value = ax::driver::run_main(&runtime.intern, &output, 0).unwrap();
+    assert_eq!(value.display(), "31u64");
+}
+
+#[test]
 fn dense_vec_minmax_and_set() {
     let mx = "#main() Z !alloc[a] = { xs V[Z]:= []; xs<-3Z; xs<-1Z; xs<-4Z; |/xs# }\n";
     let mut a = Session::new();
-    a.surface = Surface::Dense;
+    a.surface = Surface::Ax;
     let oa = a.compile("mx.ax", mx).unwrap_or_else(|d| panic!("{d:?}"));
     let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
     assert_eq!(va.display(), "4usz");
     let mn = "#main() Z !alloc[a] = { xs V[Z]:= []; xs<-3Z; xs<-1Z; xs<-4Z; &/xs# }\n";
     let mut b = Session::new();
-    b.surface = Surface::Dense;
+    b.surface = Surface::Ax;
     let ob = b.compile("mn.ax", mn).unwrap_or_else(|d| panic!("{d:?}"));
     let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
     assert_eq!(vb.display(), "1usz");
     let set = "#main() Z !alloc[a] = { xs V[Z]:= []; xs<-1Z; xs<-2Z; xs[0]<-9Z; xs[0] }\n";
     let mut c = Session::new();
-    c.surface = Surface::Dense;
+    c.surface = Surface::Ax;
     let oc = c.compile("st.ax", set).unwrap_or_else(|d| panic!("{d:?}"));
     let vc = ax::driver::run_main(&c.intern, &oc, 0).unwrap();
     assert_eq!(vc.display(), "9usz");
@@ -375,7 +441,7 @@ fn main() -> i64 !{alloc[a]} = {
 "#;
     let dense = to_dense(conv);
     assert!(
-        dense.contains("%{k:7L}"),
+        dense.contains(":={k:7L}"),
         "expected map-literal pack, got {dense}"
     );
     // String-key map reads use the dense surface's implicit zero default, so
@@ -383,7 +449,7 @@ fn main() -> i64 !{alloc[a]} = {
     assert!(dense.contains('['), "expected m[k], got {dense}");
     let mut a = Session::new();
     let mut b = Session::new();
-    b.surface = Surface::Dense;
+    b.surface = Surface::Ax;
     let oa = a.compile("a.ax", conv).unwrap();
     let ob = b
         .compile("b.ax", &dense)
@@ -393,7 +459,7 @@ fn main() -> i64 !{alloc[a]} = {
     assert_eq!(va.display(), vb.display());
     let written = "#main() L !alloc[a] = { m M[S, L]:= %; m[\"k\"]<-7L; m[\"k\"]?0 }\n";
     let mut c = Session::new();
-    c.surface = Surface::Dense;
+    c.surface = Surface::Ax;
     let oc = c
         .compile("w.ax", written)
         .unwrap_or_else(|d| panic!("written={written}\n{d:?}"));
@@ -401,7 +467,7 @@ fn main() -> i64 !{alloc[a]} = {
     assert_eq!(vc.display(), va.display());
     let push = "#main() Z !alloc[a] = { xs V[Z]:= []; xs<-2Z; xs<-3Z; +/xs# }\n";
     let mut d = Session::new();
-    d.surface = Surface::Dense;
+    d.surface = Surface::Ax;
     let od = d
         .compile("p.ax", push)
         .unwrap_or_else(|err| panic!("push={push}\n{err:?}"));
@@ -413,7 +479,7 @@ fn main() -> i64 !{alloc[a]} = {
 fn dense_compound_does_not_eat_division() {
     let src = "#main() I = { a I:= 8; b I:= 2; a / b }\n";
     let mut s = Session::new();
-    s.surface = Surface::Dense;
+    s.surface = Surface::Ax;
     let out = s.compile("d.ax", src).unwrap_or_else(|d| panic!("{d:?}"));
     let v = ax::driver::run_main(&s.intern, &out, 0).unwrap();
     assert_eq!(v.display(), "4i32");
@@ -423,32 +489,31 @@ fn dense_compound_does_not_eat_division() {
 fn terse_and_conventional_same_interface_hash() {
     let conv = "module t;\nfn add(a: i32, b: i32) -> i32 = a + b;\n";
     let terse = "module t;\nfn add(a i32, b i32) i32 = a + b;\n";
+    let expanded = rewrite_terse(terse);
     let mut a = Session::new();
     let mut b = Session::new();
-    b.surface = Surface::Terse;
+    b.surface = Surface::Ax;
     let oa = a.compile("a.ax", conv).unwrap();
-    let ob = b.compile("b.ax", terse).unwrap();
+    let ob = b.compile("b.ax", &expanded).unwrap();
     assert_eq!(oa.hashes[0].interface_hash, ob.hashes[0].interface_hash);
 }
 
 #[test]
-fn verbose_rejects_unannotated_let() {
+fn annotation_check_rejects_unannotated_let() {
     let src = "module t;\nfn main() -> i32 = { let x = 1; x };\n";
     let mut s = Session::new();
-    s.surface = Surface::Verbose;
+    s.require_annotations = true;
     match s.compile("t.ax", src) {
-        Ok(_) => panic!("verbose must require let annotations"),
-        Err(d) => assert!(d
-            .iter()
-            .any(|x| x.msg.contains("S-verbose") || x.code == "E0101")),
+        Ok(_) => panic!("annotation checking must require let annotations"),
+        Err(d) => assert!(d.iter().any(|x| x.code == "E0101")),
     }
 }
 
 #[test]
-fn verbose_accepts_annotated_let() {
+fn annotation_check_accepts_annotated_let() {
     let src = "module t;\nfn main() -> i32 = { let x: i32 = 1; x };\n";
     let mut s = Session::new();
-    s.surface = Surface::Verbose;
+    s.require_annotations = true;
     s.compile("t.ax", src).unwrap();
 }
 

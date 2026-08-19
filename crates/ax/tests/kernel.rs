@@ -383,6 +383,75 @@ fn api_server_lowers_typed_handler_to_native_reactor() {
 }
 
 #[test]
+fn dual_vector_fill_requests_interleaving() {
+    let src = r#"
+module t;
+fn main() -> u64 !{alloc[r]} = region r {
+    let mut xs: Vec[u64] = vec.new(r);
+    let mut ys: Vec[u64] = vec.new(r);
+    xs.reserve(64usz);
+    ys.reserve(64usz);
+    for i in range(0, 64) {
+        xs.push(i as u64);
+        ys.push((i as u64) * 3u64 + 1u64);
+    };
+    xs.at(63) + ys.at(63)
+};
+"#;
+    let (s, out) = compile(src);
+    let generated = ax::codegen::emit_c(&s.intern, &out).expect("emit dual vector fill C");
+    assert!(generated.contains("#pragma clang loop interleave_count(4)"));
+}
+
+#[test]
+fn counted_string_concat_reserves_capacity() {
+    let src = r#"
+module t;
+fn main() -> usz !{alloc[r]} = region r {
+    let mut s: String = "";
+    for _ in range(0, 64) { s = str.concat(r, s, "xy"); };
+    len(s)
+};
+"#;
+    let (session, output) = compile(src);
+    let generated = ax::codegen::emit_c(&session.intern, &output).unwrap();
+    assert!(generated.contains("ax_rt_str_concat_cached"));
+}
+
+#[test]
+fn reassigned_string_concat_uses_general_path() {
+    let src = r#"
+module t;
+fn main() -> usz !{alloc[r]} = region r {
+    let mut s: String = "";
+    for _ in range(0, 64) {
+        s = "z";
+        s = str.concat(r, s, "xy");
+    };
+    len(s)
+};
+"#;
+    let (session, output) = compile(src);
+    let generated = ax::codegen::emit_c(&session.intern, &output).unwrap();
+    assert!(!generated.contains("ax_rt_str_concat_cached"));
+}
+
+#[test]
+fn floating_recurrence_canonicalizes_at_observation() {
+    let src = r#"
+module t;
+fn main() -> f64 = {
+    let mut x: f64 = 0.25;
+    for _ in range(0, 64) { x = x * x + 0.125; };
+    x
+};
+"#;
+    let (session, output) = compile(src);
+    let generated = ax::codegen::emit_c(&session.intern, &output).unwrap();
+    assert_eq!(generated.matches("ax_canon_f64").count(), 1);
+}
+
+#[test]
 fn get_none_at_aborts() {
     let src = r#"
 module t;

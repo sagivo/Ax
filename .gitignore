@@ -3,6 +3,7 @@
 .DS_Store
 *.pdb
 .ax-cache/
+.ax-api/
 dist/
 
 # Build products `ax build` leaves next to a source file. The C is a build

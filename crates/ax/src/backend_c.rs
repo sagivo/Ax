@@ -30,6 +30,8 @@ pub fn emit(p: &Program) -> Result<String, String> {
         elem_of: std::collections::HashMap::new(),
         defs: std::collections::HashMap::new(),
         skip_emit: std::collections::HashSet::new(),
+        cached_concat: std::collections::HashSet::new(),
+        cached_concat_bounds: std::collections::HashMap::new(),
     };
     e.program()?;
     Ok(e.out)
@@ -47,6 +49,8 @@ struct Emit<'a> {
     defs: std::collections::HashMap<ValId, Op>,
     /// Values that are computed only to feed a later peephole (e.g. `s +=`).
     skip_emit: std::collections::HashSet<ValId>,
+    cached_concat: std::collections::HashSet<ValId>,
+    cached_concat_bounds: std::collections::HashMap<ValId, (ValId, ValId)>,
 }
 
 /// C type name for a machine type.
@@ -401,6 +405,9 @@ impl<'a> Emit<'a> {
         self.elem_of.clear();
         self.defs.clear();
         self.skip_emit = unused_ssa(f);
+        let loops = find_counted_loops(f);
+        self.cached_concat_bounds = cached_concat_bounds(f, &loops);
+        self.cached_concat = self.cached_concat_bounds.keys().copied().collect();
         let sig = self.body_signature(f);
         let _ = writeln!(self.out, "{sig} {{");
 
@@ -430,12 +437,16 @@ impl<'a> Emit<'a> {
             }
             let _ = writeln!(self.out, "    {} v{v};", cty(*t));
         }
+        let mut cached_concat: Vec<_> = self.cached_concat.iter().copied().collect();
+        cached_concat.sort_unstable();
+        for id in cached_concat {
+            let _ = writeln!(self.out, "    uint64_t axsc{id} = 0;");
+        }
         if !f.slots.is_empty() || !f.val_tys.is_empty() {
             // Silence "set but not used" for values only fed to dead code.
             self.out.push_str("    (void)0;\n");
         }
 
-        let loops = find_counted_loops(f);
         let whiles = find_while_loops(f, &loops);
         let skip = counted_skip_set(f, &loops);
         let wskip = while_skip_set(f, &whiles);
@@ -472,6 +483,11 @@ impl<'a> Emit<'a> {
     ) -> Result<(), String> {
         let i = lp.ind;
         let _ = writeln!(self.out, "    v{i} = v{};", lp.lo);
+        if loop_writes_distinct_buffers(f, lp, loops) {
+            self.out.push_str(
+                "    #if defined(__clang__)\n    #pragma clang loop interleave_count(4)\n    #elif defined(__GNUC__)\n    #pragma GCC unroll 4\n    #endif\n",
+            );
+        }
         let _ = writeln!(self.out, "    for (; v{i} < v{}; v{i}++) {{", lp.hi);
         // Body entry first, then the other blocks that stay inside this
         // `for`. Nested counted loops are emitted as nested `for`s from
@@ -750,13 +766,7 @@ impl<'a> Emit<'a> {
                     UnKind::FNeg => format!("(-v{v})"),
                     UnKind::Not => format!("(!v{v})"),
                     UnKind::BitNot => format!("({})(~({})v{v})", cty(t), uty(t)),
-                    UnKind::CanonNaN => {
-                        if t == IrTy::F32 {
-                            format!("ax_canon_f32(v{v})")
-                        } else {
-                            format!("ax_canon_f64(v{v})")
-                        }
-                    }
+                    UnKind::CanonNaN => format!("v{v}"),
                 };
                 set!(s);
             }
@@ -819,6 +829,9 @@ impl<'a> Emit<'a> {
                 set!(s);
             }
             Op::CopyAgg { ty, dst: d, src } => {
+                if self.cached_concat.contains(src) {
+                    return Ok(());
+                }
                 let n = agg_name(*ty);
                 let _ = writeln!(self.out, "    *({n} *)v{d} = *(const {n} *)v{src};");
             }
@@ -921,6 +934,19 @@ impl<'a> Emit<'a> {
                         "(memcmp(v{}, v{}, (size_t)v{}) == 0)",
                         args[0], args[1], args[2]
                     ));
+                    return Ok(());
+                }
+                if name == "ax_rt_str_concat"
+                    && args.len() == 4
+                    && self.cached_concat.contains(&args[3])
+                {
+                    let id = args[3];
+                    let (lo, hi) = self.cached_concat_bounds[&id];
+                    let _ = writeln!(
+                        self.out,
+                        "    ax_rt_str_concat_cached(v{}, v{}, v{}, &axsc{id}, v{hi} > v{lo} ? v{hi} - v{lo} : 0, v{});",
+                        args[0], args[1], args[2], args[1]
+                    );
                     return Ok(());
                 }
                 let argv: Vec<String> = args.iter().map(|a| format!("v{a}")).collect();
@@ -1890,6 +1916,112 @@ fn counted_body_blocks(f: &Func, lp: &CountedLoop, loops: &[CountedLoop]) -> Vec
     }
     out.sort();
     out
+}
+
+fn loop_writes_distinct_buffers(f: &Func, lp: &CountedLoop, loops: &[CountedLoop]) -> bool {
+    let mut bases = std::collections::HashSet::new();
+    for id in counted_body_blocks(f, lp, loops) {
+        for inst in &f.block(id).insts {
+            let Op::Store { ptr, .. } = inst.op else {
+                continue;
+            };
+            let Some(Op::ElemPtr { ptr: base, .. }) = value_op(f, ptr) else {
+                continue;
+            };
+            bases.insert(*base);
+            if bases.len() >= 2 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn value_op(f: &Func, value: ValId) -> Option<&Op> {
+    f.blocks
+        .iter()
+        .flat_map(|block| &block.insts)
+        .find(|inst| inst.result() == Some(value))
+        .map(|inst| &inst.op)
+}
+
+fn cached_concat_bounds(
+    f: &Func,
+    loops: &[CountedLoop],
+) -> std::collections::HashMap<ValId, (ValId, ValId)> {
+    let mut cached = std::collections::HashMap::new();
+    for lp in loops {
+        let blocks = counted_body_blocks(f, lp, loops);
+        for &block_id in &blocks {
+            let block = f.block(block_id);
+            for (index, inst) in block.insts.iter().enumerate() {
+                let Op::CallExt { name, args, .. } = &inst.op else {
+                    continue;
+                };
+                if name != "ax_rt_str_concat" || args.len() != 4 {
+                    continue;
+                }
+                let input = args[1];
+                let output = args[3];
+                if !matches!(
+                    block.insts.get(index + 1).map(|next| &next.op),
+                    Some(Op::CopyAgg { dst, src, .. }) if *dst == input && *src == output
+                ) {
+                    continue;
+                }
+                let output_is_temporary = f.blocks.iter().all(|other_block| {
+                    other_block
+                        .insts
+                        .iter()
+                        .enumerate()
+                        .all(|(other_index, other)| {
+                            (other_block.id == block_id
+                                && (other_index == index || other_index == index + 1))
+                                || !op_uses(&other.op, output)
+                        })
+                        && !term_uses(&other_block.term, output)
+                });
+                if !output_is_temporary {
+                    continue;
+                }
+                let safe = blocks.iter().all(|&member| {
+                    f.block(member)
+                        .insts
+                        .iter()
+                        .enumerate()
+                        .all(|(other_index, other)| {
+                            if member == block_id
+                                && (other_index == index || other_index == index + 1)
+                            {
+                                return true;
+                            }
+                            match &other.op {
+                                Op::RegionEnter(_) | Op::RegionExit(_) => false,
+                                Op::CopyAgg { dst, .. } => *dst != input,
+                                Op::Store { ptr, .. } => {
+                                    *ptr != input
+                                        && !matches!(
+                                            value_op(f, *ptr),
+                                            Some(Op::FieldPtr { ptr: base, .. }) if *base == input
+                                        )
+                                }
+                                Op::Call { args, .. } | Op::CallExt { args, .. } => {
+                                    !args.contains(&input)
+                                }
+                                Op::CallIndirect { ptr, args, .. } => {
+                                    *ptr != input && !args.contains(&input)
+                                }
+                                _ => true,
+                            }
+                        })
+                });
+                if safe {
+                    cached.entry(output).or_insert((lp.lo, lp.hi));
+                }
+            }
+        }
+    }
+    cached
 }
 
 /// Header-test `while`: head has no params, compares, body eventually

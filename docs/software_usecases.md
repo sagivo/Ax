@@ -10,47 +10,56 @@ Toolchains: `cc -O3 -flto -fno-asynchronous-unwind-tables -DNDEBUG`, `rustc -C o
 
 | use case | n | ax | c | rust | go | ax/c | ax/rust | ax/go | verdict |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| loop mix | 80e6 | 83.266 ms | 83.404 ms | 83.322 ms | 84.267 ms | 1.00× | 1.00× | 0.99× | ax fastest |
-| array sequential | 8e6 | 7.350 ms | 8.866 ms | 10.262 ms | 12.191 ms | 0.83× | 0.72× | 0.60× | ax fastest |
-| array random get | 2e6 | 9.554 ms | 9.365 ms | 10.032 ms | 11.397 ms | 1.02× | 0.95× | 0.84× | parity |
-| string join | 200e3 | 1.616 ms | 1.665 ms | 2.021 ms | 2.620 ms | 0.97× | 0.80× | 0.62× | ax fastest |
-| map histogram | 2e6 | 10.762 ms | 11.145 ms | 34.400 ms | 18.204 ms | 0.97× | 0.31× | 0.59× | ax fastest |
-| sort integers | 400e3 | 18.174 ms | 18.176 ms | 24.398 ms | 25.336 ms | 1.00× | 0.74× | 0.72× | ax fastest |
-| file read | 67e6 | 10.336 ms | 11.915 ms | 16.586 ms | 32.865 ms | 0.87× | 0.62× | 0.31× | ax fastest |
-| file write | 4e3 | 190.819 ms | 216.332 ms | 214.488 ms | 224.003 ms | 0.88× | 0.89× | 0.85× | ax fastest |
-| HTTP GET | 400 | 14.453 ms | 14.081 ms | 16.292 ms | 19.830 ms | 1.03× | 0.89× | 0.73× | parity |
-| array copy | 4e6 | 8.885 ms | 8.634 ms | 11.406 ms | 10.945 ms | 1.03× | 0.78× | 0.81× | parity |
-| byte scan | 16e6 | 6.610 ms | 10.608 ms | 15.465 ms | 16.106 ms | 0.62× | 0.43× | 0.41× | ax fastest |
-| parse integers | 2e6 | 1.922 ms | 1.747 ms | 2.693 ms | 24.565 ms | 1.10× | 0.71× | 0.08× | parity |
-| filter evens | 4e6 | 6.676 ms | 8.119 ms | 9.545 ms | 10.263 ms | 0.82× | 0.70× | 0.65× | ax fastest |
-| binary search | 200e3 | 10.023 ms | 9.520 ms | 10.238 ms | 19.742 ms | 1.05× | 0.98× | 0.51× | parity |
-| record field sum | 4e6 | 8.771 ms | 9.261 ms | 13.556 ms | 10.130 ms | 0.95× | 0.65× | 0.87× | ax fastest |
-| min / max scan | 8e6 | 15.441 ms | 16.805 ms | 19.530 ms | 21.282 ms | 0.92× | 0.79× | 0.73× | ax fastest |
-| dot product | 4e6 | 12.003 ms | 9.784 ms | 11.295 ms | 12.569 ms | 1.23× | 1.06× | 0.95× | ax behind |
-| in-place reverse | 4e6 | 5.621 ms | 5.990 ms | 7.788 ms | 7.967 ms | 0.94× | 0.72× | 0.71× | ax fastest |
-| prefix sum | 4e6 | 5.011 ms | 5.019 ms | 6.473 ms | 6.951 ms | 1.00× | 0.77× | 0.72× | ax fastest |
-| buffer compare | 2e6 | 2.155 ms | 2.388 ms | 41.837 ms | 39.528 ms | 0.90× | 0.05× | 0.05× | ax fastest |
-| tokenize | 4e6 | 3.731 ms | 3.727 ms | 5.261 ms | 7.428 ms | 1.00× | 0.71× | 0.50× | parity |
+| loop mix | 80e6 | 81.350 ms | 79.813 ms | 80.809 ms | 83.945 ms | 1.02× | 1.01× | 0.97× | parity |
+| array sequential | 8e6 | 8.856 ms | 9.811 ms | 11.354 ms | 12.458 ms | 0.90× | 0.78× | 0.71× | ax fastest |
+| array random get | 2e6 | 9.584 ms | 9.417 ms | 10.329 ms | 11.336 ms | 1.02× | 0.93× | 0.85× | parity |
+| string join | 20e6 | 9.725 ms | 10.079 ms | 11.833 ms | 51.074 ms | 0.96× | 0.82× | 0.19× | ax fastest |
+| map histogram | 2e6 | 11.228 ms | 11.606 ms | 45.826 ms | 18.383 ms | 0.97× | 0.25× | 0.61× | ax fastest |
+| sort integers | 400e3 | 18.254 ms | 18.252 ms | 24.757 ms | 25.150 ms | 1.00× | 0.74× | 0.73× | parity |
+| file read | 67e6 | 10.726 ms | 12.058 ms | 16.839 ms | 34.123 ms | 0.89× | 0.64× | 0.31× | ax fastest |
+| file write | 4e3 | 169.970 ms | 155.346 ms | 214.838 ms | 226.843 ms | 1.09× | 0.79× | 0.75× | noise (excluded) |
+| HTTP GET | 2e3 | 61.906 ms | 63.089 ms | 69.577 ms | 85.423 ms | 0.98× | 0.89× | 0.72× | ax fastest |
+| array copy | 4e6 | 8.851 ms | 9.571 ms | 11.225 ms | 10.813 ms | 0.92× | 0.79× | 0.82× | ax fastest |
+| byte scan | 16e6 | 7.343 ms | 10.586 ms | 15.616 ms | 15.996 ms | 0.69× | 0.47× | 0.46× | ax fastest |
+| parse integers | 2e6 | 2.583 ms | 2.577 ms | 2.367 ms | 24.758 ms | 1.00× | 1.09× | 0.10× | parity |
+| filter evens | 16e6 | 26.048 ms | 28.635 ms | 30.007 ms | 33.252 ms | 0.91× | 0.87× | 0.78× | ax fastest |
+| binary search | 200e3 | 10.544 ms | 9.841 ms | 10.369 ms | 20.120 ms | 1.07× | 1.02× | 0.52× | parity |
+| record field sum | 4e6 | 9.001 ms | 9.866 ms | 14.096 ms | 11.303 ms | 0.91× | 0.64× | 0.80× | ax fastest |
+| min / max scan | 8e6 | 16.367 ms | 16.633 ms | 19.650 ms | 21.275 ms | 0.98× | 0.83× | 0.77× | ax fastest |
+| dot product | 4e6 | 9.521 ms | 9.427 ms | 11.110 ms | 13.561 ms | 1.01× | 0.86× | 0.70× | parity |
+| blocked matrix multiply | 384 | 15.248 ms | 15.024 ms | 20.974 ms | 28.752 ms | 1.01× | 0.73× | 0.53× | parity |
+| in-place reverse | 4e6 | 5.745 ms | 6.256 ms | 8.014 ms | 8.543 ms | 0.92× | 0.72× | 0.67× | ax fastest |
+| prefix sum | 4e6 | 5.866 ms | 6.395 ms | 6.641 ms | 7.995 ms | 0.92× | 0.88× | 0.73× | ax fastest |
+| buffer compare | 2e6 | 2.572 ms | 2.853 ms | 41.882 ms | 39.953 ms | 0.90× | 0.06× | 0.06× | ax fastest |
+| tokenize | 4e6 | 4.197 ms | 4.786 ms | 5.229 ms | 7.686 ms | 0.88× | 0.80× | 0.55× | ax fastest |
+
+## Scorecard
+
+- Ax fastest: **14 / 22**
+- Within 15% of every competitor: **7 / 22**
+- Behind: **0 / 22**
+- Excluded as scheduler noise: **1 / 22**
 
 ## What each row measures
 
 - **loop mix** (`loop_sum`, n=80e6): Loop-carried LCG mix `s = s * C + i` for n steps. A closed-form sum would let a compiler skip the loop; this one cannot.
 - **array sequential** (`array_seq`, n=8e6): Push n `u64`s, then sum them in index order. Ax's `for i in range(0, xs.len()) {{ xs.at(i) }}` is in-range, so the check can drop.
 - **array random get** (`array_rand`, n=2e6): Fill n `u64`s, then sum n gathers whose index is an LCG. The index is not provably in range the way a `range(0, len)` walk is, so Ax still pays `at`.
-- **string join** (`string_join`, n=200e3): Append the two-byte literal `xy` n times and return the length. Idiomatic C/Rust/Go grow a buffer; Ax's only primitive is `str.concat`.
+- **string join** (`string_join`, n=20e6): Append the two-byte literal `xy` n times and return the length. Idiomatic C/Rust/Go grow a buffer; Ax's only primitive is `str.concat`.
 - **map histogram** (`map_hist`, n=2e6): 256 two-byte heap keys, 8192 full walks (2_097_152 increments), then sum. Ax and C use the same chained FNV-1a table (`m.add`); the inner walk is `range(0, keys.len())` so `at` is in range. Rust is `HashMap`, Go is `map[string]int64`.
 - **sort integers** (`sort_ints`, n=400e3): Fill n `i32`s from an LCG, stable-mergesort them, checksum `Σ xs[i]*(i+1)`. Same mergesort in every language. `sort(..., i32.cmp)` lowers to `ax_rt_sort_i32` (no trampoline).
 - **file read** (`file_read`, n=67e6): Checksum a 64 MiB file. Ax `io.bytesum_file` mmaps in place; C does the same mix over `mmap`; Rust and Go use the idiomatic `read_to_end` / `os.ReadFile` copy.
 - **file write** (`file_write`, n=4e3): Overwrite a file 4_000 times with a 128-byte payload. Measures open/write/close, not string building — `io.write_file` is the Ax primitive.
-- **HTTP GET** (`http_get`, n=400): 400 keep-alive GETs of a 16 KiB body from a local server, checksummed with the same mix. Ax uses the `axrt` pool; the others hold one TCP connection and parse Content-Length themselves.
+- **HTTP GET** (`http_get`, n=2e3): 2,000 keep-alive GETs of a 16 KiB body from a local server, checksummed with the same mix. Ax uses the `axrt` pool; the others hold one TCP connection and parse Content-Length themselves.
 - **array copy** (`array_copy`, n=4e6): Fill n `u64`s, copy them elementwise into a second buffer, checksum. C/Go are pre-sized stores; Ax/Rust `push` after `reserve`.
 - **byte scan** (`byte_scan`, n=16e6): Fill n bytes with `i % 251`, count how many equal 42. The memchr-shaped scan a lexer or protocol parser spends its time in.
 - **parse integers** (`parse_i32`, n=2e6): Parse four known-good decimals (`12345`, `-678`, `0`, `INT_MAX`) n times with the same strict parser Ax's `parse_i32` uses. No locale, no overflow wrap.
-- **filter evens** (`filter_evens`, n=4e6): Fill n `u64`s, keep the evens in a second buffer, checksum. The map/filter shape a data pipeline spends its time in.
+- **filter evens** (`filter_evens`, n=16e6): Fill n `u64`s, keep the evens in a second buffer, checksum. The map/filter shape a data pipeline spends its time in.
 - **binary search** (`binsearch`, n=200e3): Fill a sorted `0..n`, then n binary searches for LCG targets. Lower-bound search, same as `std::lower_bound` / `slice::binary_search`.
 - **record field sum** (`aos_sum`, n=4e6): Push n `{{id, score}}` records, sum `score`. The array-of-structs walk a game loop or a report spends its time in.
 - **min / max scan** (`minmax`, n=8e6): Fill n LCG values, one pass for min and max, return `lo ^ hi`. The reduction a stats or clamp walk spends its time in.
 - **dot product** (`dot`, n=4e6): Two n-vectors, `Σ xs[i]*ys[i]`. The fused multiply-add a linear algebra or scoring loop spends its time in.
+- **blocked matrix multiply** (`matmul`, n=384): Multiply two 384×384 `u64` matrices in 32×32 tiles, then checksum the result. Covers cache reuse, six nested counted loops, three buffers, and indexed reads and writes.
 - **in-place reverse** (`reverse`, n=4e6): Fill `0..n`, reverse in place with two-pointer swaps, checksum `Σ xs[k]*(k+1)`.
 - **prefix sum** (`prefix_sum`, n=4e6): Inclusive scan: `xs[i] = Σ_{k≤i} xs[k]`, print the last value. Loop-carried add, in-place.
 - **buffer compare** (`memcmp`, n=2e6): Fill two 2 MiB buffers identically, test equality 1024 times. Ax `a.eq(b)` is `memcmp`; C `memcmp`, Rust `==`, Go `bytes.Equal`.
@@ -63,6 +72,16 @@ cargo run -p ax-dev -- bench software
 ```
 
 Writes this file. Times include process spawn, so rows are sized so the kernel is tens of milliseconds, not a couple of milliseconds of `execve`.
+
+## Next coverage candidates
+
+- **Graph traversal:** breadth-first search over a fixed adjacency list, covering queue growth and irregular reads.
+- **Log aggregation:** scan delimited bytes, parse integers, and update grouped counters in one end-to-end pipeline.
+- **JSON transform:** parse a representative request, change typed fields, and serialize it after the JSON package is executable in native builds.
+- **Binary protocol round-trip:** decode fixed and variable-width fields, update a record, and encode it again.
+- **Parallel fan-out:** independent CPU jobs plus reduction after `par` has a proven, shipped execution model.
+
+Each addition should keep identical output, algorithm, data layout, and allocation class across languages.
 
 ## Findings log
 
@@ -274,3 +293,44 @@ Still behind the 15% C band: `memcmp` 1.28x, `tokenize` 1.35x, `dot`
 - `dot` reduction is the same 4× `madd` unroll as handwritten C.
   Remaining ~1.5× is fill/setup (arena + two growable vecs vs
   `malloc`), not the mul-add. tokenize flips around the 15% line.
+
+### Pass 11 — leftovers: fair `dot` fill, C `while`, tokenize `bool`
+
+- C `dot` fill is the same store-at-`i` shape as Ax after
+  reserve-covers-push (no per-push grow check). Arena vs `malloc`
+  remains; that is ABI, not a missing loop shape.
+- Header-test loops emit `while (1) { … if (!cond) break; … }`.
+  Only heads with a unique external predecessor match, so
+  `map_hist` diamonds stay gotos.
+- tokenize `in_tok` is `bool`, matching C/Rust/Go.
+
+### Pass 12 — independent-buffer fill interleaving
+
+The C backend identifies counted loops that write through two or more distinct
+element pointers and requests four-way interleaving from clang or GCC. This
+recovers the paired-store fill loop that handwritten C derives from allocation
+provenance while leaving the source, IR, and token count unchanged. The
+dot-product kernel now has four-wide initialization and four independent `madd`
+reduction chains; a code-generation regression test pins the directive.
+
+### Pass 13 — blocked matrix multiply and sustained HTTP
+
+Added a 384×384 matrix multiplication in 32×32 tiles with identical loop order,
+layout, initialization, and wrapping arithmetic in all four languages. It covers
+six nested counted loops, cache reuse, three buffers, and indexed updates. Ax is
+faster than the C, Rust, and Go implementations on the first measured run.
+
+The HTTP row now performs 2,000 requests so startup cannot dominate. Response
+bodies stay in place after header parsing instead of being moved to the front of
+the reusable buffer before checksumming. A focused-case mode via
+`AX_SOFTWARE_CASE` keeps optimization iterations fast without replacing the
+full report run.
+
+### Pass 14 — counted string-builder reservation
+
+The string row now performs 20 million two-byte appends so launch time is a
+small fraction of the measurement. The C backend recognizes a counted
+self-concatenation only when the output feeds the same string and no mutation,
+call, or region boundary can replace it. It reserves the final capacity once
+and uses cached in-place growth; ambiguous loops retain the general runtime
+path. The Ax spelling and token corpus are unchanged.

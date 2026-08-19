@@ -1,0 +1,7 @@
+//! Ax API framework overhead benchmark: the same routed JSON response.
+module bench.http.ax_framework_server;
+
+// ax-api port 18080
+// ax-api GET / -> root
+
+fn root(request: http.Request) -> http.Response = api.ok("{\"ok\":true}");

@@ -1,0 +1,23 @@
+//! Ax API framework MVP: a resource-oriented JSON service in one file.
+module examples.rest_api;
+
+// ax-api port 8080
+// ax-api GET /v1/items -> list_items
+// ax-api GET /v1/items/{id} -> show_item
+// ax-api POST /v1/items -> create_item
+// ax-api PUT /v1/items/{id} -> update_item
+// ax-api DELETE /v1/items/{id} -> delete_item
+
+fn list_items(request: http.Request) -> http.Response =
+    api.ok([{id: 1, name: "first"}]);
+
+fn show_item(request: http.Request, id: String) -> http.Response = api.ok(id);
+
+fn create_item(request: http.Request) -> http.Response =
+    api.created(request.body);
+
+fn update_item(request: http.Request, id: String) -> http.Response =
+    api.ok(request.body);
+
+fn delete_item(request: http.Request, id: String) -> http.Response =
+    api.no_content();

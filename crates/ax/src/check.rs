@@ -155,7 +155,7 @@ pub struct Checker<'a> {
     holes: Vec<HoleInfo>,
     allow_holes: bool,
     strict_det: bool,
-    verbose: bool,
+    require_annotations: bool,
     module: String,
     /// Imports: last segment / alias -> prefix used for lookup (e.g. "fs")
     imports: HashMap<Symbol, String>,
@@ -286,7 +286,7 @@ impl<'a> Checker<'a> {
             holes: Vec::new(),
             allow_holes,
             strict_det,
-            verbose: false,
+            require_annotations: false,
             module: String::new(),
             imports: HashMap::new(),
             node_types: Vec::new(),
@@ -1400,16 +1400,16 @@ impl<'a> Checker<'a> {
         self.rec(e.id, ty)
     }
 
-    pub fn set_verbose(&mut self, v: bool) {
-        self.verbose = v;
+    pub fn set_require_annotations(&mut self, require: bool) {
+        self.require_annotations = require;
     }
 
     fn check_let(&mut self, l: &LetStmt, env: &mut Env) {
-        if self.verbose && l.ty.is_none() {
+        if self.require_annotations && l.ty.is_none() {
             self.err(
                 "E0101",
                 l.span,
-                "S-verbose forbids local inference: annotate every let",
+                "annotation checking requires a type on every let binding",
             );
         }
         let hint = l.ty.as_ref().map(|t| self.lower_type(t, None));

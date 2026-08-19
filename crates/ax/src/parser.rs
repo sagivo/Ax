@@ -1,5 +1,5 @@
 //! Recursive-descent parser. Generated conceptually from spec/grammar.ebnf.
-//! One AST; this is the S-conventional frontend.
+//! Parser for Ax's internal expanded representation.
 
 use crate::ast::*;
 use crate::diag::{Diagnostic, Severity};

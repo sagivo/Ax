@@ -43,19 +43,19 @@ fn bench_tokens() -> Result<(), String> {
         let terse_src = crate::frontend::to_terse(&ax_src);
         let dense_src = crate::frontend::to_dense(&ax_src);
 
-        // The terse form must be the same program: compile it through the terse
-        // surface and check it produces the same value as the conventional one.
+        // The mechanically expanded form must remain the same program.
         let mut s1 = Session::new();
         let out1 = s1
             .compile(&format!("{name}.ax"), &ax_src)
             .map_err(|d| format!("{name}: conventional form failed: {d:?}"))?;
         let mut s2 = Session::new();
-        s2.surface = crate::frontend::Surface::Terse;
+        s2.surface = crate::frontend::Surface::Ax;
+        let expanded_src = crate::frontend::rewrite_terse(&terse_src);
         let out2 = s2
-            .compile(&format!("{name}.ax"), &terse_src)
+            .compile(&format!("{name}.ax"), &expanded_src)
             .map_err(|d| format!("{name}: terse form failed to compile: {d:?}"))?;
         let mut s3 = Session::new();
-        s3.surface = crate::frontend::Surface::Dense;
+        s3.surface = crate::frontend::Surface::Ax;
         let out3 = s3
             .compile(&format!("{name}.ax"), &dense_src)
             .map_err(|d| format!("{name}: dense form failed to compile: {d:?}"))?;
@@ -160,7 +160,7 @@ fn bench_tokens() -> Result<(), String> {
             .compile(&format!("g{}.ax", k.name), &ax_src)
             .map_err(|d| format!("{}: conventional failed: {d:?}", k.name))?;
         let mut s3 = Session::new();
-        s3.surface = crate::frontend::Surface::Dense;
+        s3.surface = crate::frontend::Surface::Ax;
         let out3 = s3
             .compile(&format!("g{}.ax", k.name), &dense_src)
             .map_err(|d| format!("{}: dense failed: {d:?}\n{dense_src}", k.name))?;
@@ -1337,7 +1337,7 @@ fn work_units(stem: &str, n: u64) -> u64 {
 fn bench_metrics() -> Result<(), String> {
     println!("Ax metrics  (median wall time, process spawn included for native bins)\n");
     println!("Backends:  c = cc -O3 -flto   rust = rustc -C opt-level=3 -C lto=thin");
-    println!("           ax-native = ax build (same cc flags + axrt)   ax-interp = oracle\n");
+    println!("           ax-native = ax build (same optimization/LTO, strict FP + axrt)   ax-interp = oracle\n");
 
     let mut md = String::from(
         "# Ax metrics\n\nSame algorithm in every language; the harness checks the printed \
@@ -3506,9 +3506,9 @@ fn main() -> i64 = {{
     let mut acc: i64 = 0;
     for y in range(0, n) {{
         for x in range(0, n) {{
-            let dx = (x as f64) / (n as f64) - 0.5;
-            let dy = (y as f64) / (n as f64) - 0.5;
-            if dx * dx + dy * dy < 0.25 {{ acc = acc + 1; }}
+            let dx = (x as i64) * 2 - (n as i64);
+            let dy = (y as i64) * 2 - (n as i64);
+            if dx * dx + dy * dy < (n as i64) * (n as i64) {{ acc = acc + 1; }}
         }};
     }};
     acc
@@ -3527,9 +3527,9 @@ int main(void) {{
     long long acc = 0;
     for (uint64_t y = 0; y < n; y++)
         for (uint64_t x = 0; x < n; x++) {{
-            double dx = (double)x / (double)n - 0.5;
-            double dy = (double)y / (double)n - 0.5;
-            if (dx*dx + dy*dy < 0.25) acc++;
+            int64_t dx = (int64_t)x * 2 - (int64_t)n;
+            int64_t dy = (int64_t)y * 2 - (int64_t)n;
+            if (dx*dx + dy*dy < (int64_t)n * (int64_t)n) acc++;
         }}
     printf("%lld\n", acc);
     return 0;
@@ -3548,9 +3548,9 @@ fn main() {{
     while y < n {{
         let mut x = 0u64;
         while x < n {{
-            let dx = (x as f64) / (n as f64) - 0.5;
-            let dy = (y as f64) / (n as f64) - 0.5;
-            if dx*dx + dy*dy < 0.25 {{ acc += 1; }}
+            let dx = x as i64 * 2 - n as i64;
+            let dy = y as i64 * 2 - n as i64;
+            if dx*dx + dy*dy < n as i64 * n as i64 {{ acc += 1; }}
             x += 1;
         }}
         y += 1;
