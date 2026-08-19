@@ -27,6 +27,9 @@ pub fn emit(p: &Program) -> Result<String, String> {
         p,
         out: String::with_capacity(16 * 1024),
         slot_of: std::collections::HashMap::new(),
+        elem_of: std::collections::HashMap::new(),
+        defs: std::collections::HashMap::new(),
+        skip_emit: std::collections::HashSet::new(),
     };
     e.program()?;
     Ok(e.out)
@@ -38,6 +41,12 @@ struct Emit<'a> {
     /// Slot index of a `vN` that is `&sK` for a scalar slot. Load/store
     /// through it becomes `sK` so clang can keep the local in a register.
     slot_of: std::collections::HashMap<ValId, u32>,
+    /// Dest of `ElemPtr` → (elem, base, idx). A later load/store becomes `p[i]`.
+    elem_of: std::collections::HashMap<ValId, (Repr, ValId, ValId)>,
+    /// Last defining op of each SSA value in this function, for peepholes.
+    defs: std::collections::HashMap<ValId, Op>,
+    /// Values that are computed only to feed a later peephole (e.g. `s +=`).
+    skip_emit: std::collections::HashSet<ValId>,
 }
 
 /// C type name for a machine type.
@@ -389,6 +398,9 @@ impl<'a> Emit<'a> {
             self.memo_wrapper(f);
         }
         self.slot_of.clear();
+        self.elem_of.clear();
+        self.defs.clear();
+        self.skip_emit = unused_ssa(f);
         let sig = self.body_signature(f);
         let _ = writeln!(self.out, "{sig} {{");
 
@@ -513,6 +525,72 @@ impl<'a> Emit<'a> {
         }
     }
 
+    /// `s = s + x` / `s = x + s` → `s += x` so clang sees a reduction.
+    fn emit_acc_add(&mut self, f: &Func, slot: u32, val: ValId) -> bool {
+        let Some(Op::Bin {
+            op: BinKind::Add,
+            l,
+            r,
+        }) = self.defs.get(&val)
+        else {
+            return false;
+        };
+        let t = f.ty_of(val);
+        if t.is_float() || t == IrTy::Bool {
+            return false;
+        }
+        let (acc, other) = if self.is_slot_load(*l, slot) {
+            (*l, *r)
+        } else if self.is_slot_load(*r, slot) {
+            (*r, *l)
+        } else {
+            return false;
+        };
+        let _ = acc;
+        let rhs = self.c_expr(f, other);
+        let _ = writeln!(self.out, "    s{slot} += {rhs};");
+        true
+    }
+
+    /// C expression for an SSA value, inlining a load/`p[i]`/bin when cheap.
+    fn c_expr(&self, f: &Func, v: ValId) -> String {
+        match self.defs.get(&v) {
+            Some(Op::Load { ptr, .. }) => {
+                if let Some(s) = self.slot_of.get(ptr) {
+                    format!("s{s}")
+                } else if let Some((elem, base, idx)) = self.elem_of.get(ptr).copied() {
+                    index_expr(elem, base, idx)
+                } else {
+                    format!("v{v}")
+                }
+            }
+            Some(Op::Bin { op, l, r }) => {
+                let t = f.ty_of(*l);
+                let le = self.c_expr(f, *l);
+                let re = self.c_expr(f, *r);
+                format!("({})", bin_expr(*op, t, &le, &re))
+            }
+            Some(Op::ConstInt(n)) => {
+                let t = f.ty_of(v);
+                format!(
+                    "({})({}){}{}",
+                    cty(t),
+                    uty(t),
+                    if *n < 0 { "-" } else { "" },
+                    format_args!("{}{}", n.unsigned_abs(), int_suffix(t))
+                )
+            }
+            _ => format!("v{v}"),
+        }
+    }
+
+    fn is_slot_load(&self, v: ValId, slot: u32) -> bool {
+        matches!(
+            self.defs.get(&v),
+            Some(Op::Load { ptr, .. }) if self.slot_of.get(ptr) == Some(&slot)
+        )
+    }
+
     fn edge_in_loop(&mut self, f: &Func, e: &Edge, lp: &CountedLoop, indent: &str) {
         if e.to == lp.step {
             let _ = writeln!(self.out, "{indent}continue;");
@@ -525,6 +603,12 @@ impl<'a> Emit<'a> {
 
     fn inst(&mut self, f: &Func, i: &Inst) -> Result<(), String> {
         let dst = i.result();
+        if let Some(v) = dst {
+            self.defs.insert(v, i.op.clone());
+            if self.skip_emit.contains(&v) {
+                return Ok(());
+            }
+        }
         macro_rules! set {
             ($e:expr) => {{
                 let v = dst.ok_or("internal: value-producing op with no result")?;
@@ -595,13 +679,24 @@ impl<'a> Emit<'a> {
             Op::Load { ty, ptr } => {
                 if let Some(s) = self.slot_of.get(ptr) {
                     set!(format!("s{s}"));
+                } else if let Some((elem, base, idx)) = self.elem_of.get(ptr).copied() {
+                    set!(index_expr(elem, base, idx));
                 } else {
                     set!(format!("*({} *)v{ptr}", cty(*ty)));
                 }
             }
             Op::Store { ty, ptr, val } => {
-                if let Some(s) = self.slot_of.get(ptr) {
+                if let Some(s) = self.slot_of.get(ptr).copied() {
+                    if self.emit_acc_add(f, s, *val) {
+                        return Ok(());
+                    }
                     let _ = writeln!(self.out, "    s{s} = v{val};");
+                } else if let Some((elem, base, idx)) = self.elem_of.get(ptr).copied() {
+                    let _ = writeln!(
+                        self.out,
+                        "    {} = v{val};",
+                        index_expr(elem, base, idx)
+                    );
                 } else {
                     let _ = writeln!(self.out, "    *({} *)v{ptr} = v{val};", cty(*ty));
                 }
@@ -611,6 +706,12 @@ impl<'a> Emit<'a> {
                 set!(format!("(void *)&(({} *)v{ptr})->{acc}", agg_name(*agg)));
             }
             Op::ElemPtr { elem, ptr, idx } => {
+                if let Some(v) = dst {
+                    self.elem_of.insert(v, (*elem, *ptr, *idx));
+                    if !elem_ptr_escapes(f, v) {
+                        return Ok(());
+                    }
+                }
                 let s = match elem {
                     Repr::Scalar(t) => format!("(void *)(({} *)v{ptr} + v{idx})", cty(*t)),
                     Repr::Agg(a) => format!("(void *)(({} *)v{ptr} + v{idx})", agg_name(*a)),
@@ -746,49 +847,7 @@ impl<'a> Emit<'a> {
     }
 
     fn bin(&self, op: BinKind, t: IrTy, l: ValId, r: ValId) -> String {
-        let u = uty(t);
-        let c = cty(t);
-        match op {
-            // Wrapping: compute unsigned, convert back.
-            BinKind::Add => format!("({c})(({u})v{l} + ({u})v{r})"),
-            BinKind::Sub => format!("({c})(({u})v{l} - ({u})v{r})"),
-            BinKind::Mul => format!("({c})(({u})v{l} * ({u})v{r})"),
-            // Helpers: C leaves `INT_MIN / -1` and division by zero undefined.
-            BinKind::DivTrunc => format!("ax_div_{}(v{l}, v{r})", suffix(t)),
-            BinKind::RemTrunc => format!("ax_rem_{}(v{l}, v{r})", suffix(t)),
-            // The divisor is already known non-zero here. Unsigned division then
-            // needs no guard at all and becomes a bare machine divide; signed
-            // still needs the `INT_MIN / -1` case, which C leaves undefined.
-            BinKind::DivTruncNZ if !t.is_signed() => format!("(v{l} / v{r})"),
-            BinKind::RemTruncNZ if !t.is_signed() => format!("(v{l} % v{r})"),
-            BinKind::DivTruncNZ => format!("ax_div_nz_{}(v{l}, v{r})", suffix(t)),
-            BinKind::RemTruncNZ => format!("ax_rem_nz_{}(v{l}, v{r})", suffix(t)),
-            BinKind::FAdd => format!("(v{l} + v{r})"),
-            BinKind::FSub => format!("(v{l} - v{r})"),
-            BinKind::FMul => format!("(v{l} * v{r})"),
-            BinKind::FDiv => format!("(v{l} / v{r})"),
-            BinKind::FRem => {
-                if t == IrTy::F32 {
-                    format!("ax_fmodf(v{l}, v{r})")
-                } else {
-                    format!("ax_fmod(v{l}, v{r})")
-                }
-            }
-            BinKind::And if t == IrTy::Bool => format!("(v{l} && v{r})"),
-            BinKind::Or if t == IrTy::Bool => format!("(v{l} || v{r})"),
-            BinKind::And => format!("({c})(({u})v{l} & ({u})v{r})"),
-            BinKind::Or => format!("({c})(({u})v{l} | ({u})v{r})"),
-            BinKind::Xor => format!("({c})(({u})v{l} ^ ({u})v{r})"),
-            // Shift counts are masked to the width (see spec/primitives.md).
-            BinKind::Shl => format!("ax_shl_{}(v{l}, v{r})", suffix(t)),
-            BinKind::Shr => format!("ax_shr_{}(v{l}, v{r})", suffix(t)),
-            BinKind::Eq => format!("(v{l} == v{r})"),
-            BinKind::Ne => format!("(v{l} != v{r})"),
-            BinKind::Lt => format!("(v{l} < v{r})"),
-            BinKind::Le => format!("(v{l} <= v{r})"),
-            BinKind::Gt => format!("(v{l} > v{r})"),
-            BinKind::Ge => format!("(v{l} >= v{r})"),
-        }
+        bin_expr(op, t, &format!("v{l}"), &format!("v{r}"))
     }
 
     /// Block arguments are copied through temporaries: a join whose argument is
@@ -1189,6 +1248,222 @@ struct CountedLoop {
     ind: ValId,
     lo: ValId,
     hi: ValId,
+}
+
+fn bin_expr(op: BinKind, t: IrTy, l: &str, r: &str) -> String {
+    let u = uty(t);
+    let c = cty(t);
+    match op {
+        BinKind::Add => format!("({c})(({u}){l} + ({u}){r})"),
+        BinKind::Sub => format!("({c})(({u}){l} - ({u}){r})"),
+        BinKind::Mul => format!("({c})(({u}){l} * ({u}){r})"),
+        BinKind::DivTrunc => format!("ax_div_{}({l}, {r})", suffix(t)),
+        BinKind::RemTrunc => format!("ax_rem_{}({l}, {r})", suffix(t)),
+        BinKind::DivTruncNZ if !t.is_signed() => format!("({l} / {r})"),
+        BinKind::RemTruncNZ if !t.is_signed() => format!("({l} % {r})"),
+        BinKind::DivTruncNZ => format!("ax_div_nz_{}({l}, {r})", suffix(t)),
+        BinKind::RemTruncNZ => format!("ax_rem_nz_{}({l}, {r})", suffix(t)),
+        BinKind::FAdd => format!("({l} + {r})"),
+        BinKind::FSub => format!("({l} - {r})"),
+        BinKind::FMul => format!("({l} * {r})"),
+        BinKind::FDiv => format!("({l} / {r})"),
+        BinKind::FRem => {
+            if t == IrTy::F32 {
+                format!("ax_fmodf({l}, {r})")
+            } else {
+                format!("ax_fmod({l}, {r})")
+            }
+        }
+        BinKind::And if t == IrTy::Bool => format!("({l} && {r})"),
+        BinKind::Or if t == IrTy::Bool => format!("({l} || {r})"),
+        BinKind::And => format!("({c})(({u}){l} & ({u}){r})"),
+        BinKind::Or => format!("({c})(({u}){l} | ({u}){r})"),
+        BinKind::Xor => format!("({c})(({u}){l} ^ ({u}){r})"),
+        BinKind::Shl => format!("ax_shl_{}({l}, {r})", suffix(t)),
+        BinKind::Shr => format!("ax_shr_{}({l}, {r})", suffix(t)),
+        BinKind::Eq => format!("({l} == {r})"),
+        BinKind::Ne => format!("({l} != {r})"),
+        BinKind::Lt => format!("({l} < {r})"),
+        BinKind::Le => format!("({l} <= {r})"),
+        BinKind::Gt => format!("({l} > {r})"),
+        BinKind::Ge => format!("({l} >= {r})"),
+    }
+}
+
+/// SSA values never read after they are defined. Their assignments can be
+/// omitted; a later peephole (e.g. `s += p[i]*q[i]`) inlines them.
+fn unused_ssa(f: &Func) -> std::collections::HashSet<ValId> {
+    let mut defs = std::collections::HashMap::new();
+    for b in &f.blocks {
+        for inst in &b.insts {
+            if let Some(v) = inst.result() {
+                defs.insert(v, &inst.op);
+            }
+        }
+    }
+    // Results of `s = s + x` are not live; the store becomes `s += x`.
+    let mut dead = std::collections::HashSet::new();
+    for b in &f.blocks {
+        for inst in &b.insts {
+            if let Op::Store { ptr, val, .. } = &inst.op {
+                if let Some(Op::Bin {
+                    op: BinKind::Add,
+                    l,
+                    r,
+                }) = defs.get(val)
+                {
+                    let l_is = matches!(defs.get(l), Some(Op::Load { ptr: p, .. }) if p == ptr);
+                    let r_is = matches!(defs.get(r), Some(Op::Load { ptr: p, .. }) if p == ptr);
+                    if l_is ^ r_is {
+                        dead.insert(*val);
+                    }
+                }
+            }
+        }
+    }
+    // Anything only consumed by a dead value is dead too.
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let mut used = std::collections::HashSet::new();
+        for b in &f.blocks {
+            for inst in &b.insts {
+                if inst.result().is_some_and(|v| dead.contains(&v)) {
+                    continue;
+                }
+                collect_op_uses(&inst.op, &mut used);
+            }
+            collect_term_uses(&b.term, &mut used);
+        }
+        for b in &f.blocks {
+            for inst in &b.insts {
+                let Some(v) = inst.result() else { continue };
+                if dead.contains(&v) || used.contains(&v) || f.params.contains(&v) || b.params.contains(&v)
+                {
+                    continue;
+                }
+                if matches!(
+                    inst.op,
+                    Op::Call { .. }
+                        | Op::CallExt { .. }
+                        | Op::CallIndirect { .. }
+                        | Op::Store { .. }
+                        | Op::CopyAgg { .. }
+                        | Op::RegionEnter(_)
+                        | Op::RegionExit(_)
+                        | Op::UniqueFree(_)
+                        | Op::RcRetain(_)
+                        | Op::RcRelease(_)
+                ) {
+                    continue;
+                }
+                dead.insert(v);
+                changed = true;
+            }
+        }
+    }
+    dead
+}
+
+fn collect_op_uses(op: &Op, used: &mut std::collections::HashSet<ValId>) {
+    match op {
+        Op::Bin { l, r, .. } => {
+            used.insert(*l);
+            used.insert(*r);
+        }
+        Op::Un { v, .. } | Op::Cast { v, .. } => {
+            used.insert(*v);
+        }
+        Op::Select { c, a, b } => {
+            used.insert(*c);
+            used.insert(*a);
+            used.insert(*b);
+        }
+        Op::Load { ptr, .. } => {
+            used.insert(*ptr);
+        }
+        Op::Store { ptr, val, .. } => {
+            used.insert(*ptr);
+            used.insert(*val);
+        }
+        Op::FieldPtr { ptr, .. } => {
+            used.insert(*ptr);
+        }
+        Op::ElemPtr { ptr, idx, .. } => {
+            used.insert(*ptr);
+            used.insert(*idx);
+        }
+        Op::CopyAgg { dst, src, .. } => {
+            used.insert(*dst);
+            used.insert(*src);
+        }
+        Op::Call { args, .. } | Op::CallExt { args, .. } => {
+            used.extend(args.iter().copied());
+        }
+        Op::CallIndirect { ptr, args, .. } => {
+            used.insert(*ptr);
+            used.extend(args.iter().copied());
+        }
+        Op::RegionAlloc { size, .. } | Op::UniqueAlloc { size, .. } | Op::RcAlloc { size, .. } => {
+            used.insert(*size);
+        }
+        Op::UniqueFree(p) | Op::RcRetain(p) | Op::RcRelease(p) => {
+            used.insert(*p);
+        }
+        _ => {}
+    }
+}
+
+fn collect_term_uses(t: &Term, used: &mut std::collections::HashSet<ValId>) {
+    match t {
+        Term::Jump(e) => used.extend(e.args.iter().copied()),
+        Term::Br {
+            cond,
+            then_e,
+            else_e,
+        } => {
+            used.insert(*cond);
+            used.extend(then_e.args.iter().copied());
+            used.extend(else_e.args.iter().copied());
+        }
+        Term::Switch { on, cases, default } => {
+            used.insert(*on);
+            used.extend(default.args.iter().copied());
+            for (_, e) in cases {
+                used.extend(e.args.iter().copied());
+            }
+        }
+        Term::Ret(Some(x)) | Term::RetErr(x) => {
+            used.insert(*x);
+        }
+        _ => {}
+    }
+}
+
+fn index_expr(elem: Repr, base: ValId, idx: ValId) -> String {
+    match elem {
+        Repr::Scalar(t) => format!("(({} *)v{base})[v{idx}]", cty(t)),
+        Repr::Agg(a) => format!("(({} *)v{base})[v{idx}]", agg_name(a)),
+    }
+}
+
+/// `ElemPtr` only used by load/store can stay as `p[i]`; no temp pointer.
+fn elem_ptr_escapes(f: &Func, addr: ValId) -> bool {
+    for b in &f.blocks {
+        for inst in &b.insts {
+            match &inst.op {
+                Op::Load { ptr, .. } if *ptr == addr => {}
+                Op::Store { ptr, .. } if *ptr == addr => {}
+                Op::ElemPtr { .. } if inst.result() == Some(addr) => {}
+                other if op_uses(other, addr) => return true,
+                _ => {}
+            }
+        }
+        if term_uses(&b.term, addr) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Does `addr` escape as a pointer, or is it only fed to load/store?

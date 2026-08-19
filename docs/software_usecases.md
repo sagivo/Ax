@@ -10,27 +10,27 @@ Toolchains: `cc -O3 -flto -fno-asynchronous-unwind-tables -DNDEBUG`, `rustc -C o
 
 | use case | n | ax | c | rust | go | ax/c | ax/rust | ax/go | verdict |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| loop mix | 80e6 | 77.374 ms | 77.901 ms | 77.394 ms | 82.176 ms | 0.99× | 1.00× | 0.94× | ax fastest |
-| array sequential | 8e6 | 7.188 ms | 8.367 ms | 9.970 ms | 11.596 ms | 0.86× | 0.72× | 0.62× | ax fastest |
-| array random get | 2e6 | 8.787 ms | 8.951 ms | 9.746 ms | 10.495 ms | 0.98× | 0.90× | 0.84× | ax fastest |
-| string join | 200e3 | 1.855 ms | 2.250 ms | 3.167 ms | 2.808 ms | 0.82× | 0.59× | 0.66× | ax fastest |
-| map histogram | 2e6 | 10.652 ms | 10.871 ms | 34.326 ms | 17.835 ms | 0.98× | 0.31× | 0.60× | ax fastest |
-| sort integers | 400e3 | 17.995 ms | 17.802 ms | 24.219 ms | 25.010 ms | 1.01× | 0.74× | 0.72× | parity |
-| file read | 67e6 | 10.707 ms | 11.510 ms | 17.027 ms | 33.167 ms | 0.93× | 0.63× | 0.32× | ax fastest |
-| file write | 4e3 | 188.435 ms | 218.480 ms | 227.644 ms | 231.888 ms | 0.86× | 0.83× | 0.81× | ax fastest |
-| HTTP GET | 400 | 15.499 ms | 13.385 ms | 15.756 ms | 19.502 ms | 1.16× | 0.98× | 0.79× | ax behind |
-| array copy | 4e6 | 8.884 ms | 9.507 ms | 9.767 ms | 9.810 ms | 0.93× | 0.91× | 0.91× | ax fastest |
-| byte scan | 16e6 | 6.697 ms | 10.646 ms | 14.627 ms | 16.283 ms | 0.63× | 0.46× | 0.41× | ax fastest |
-| parse integers | 2e6 | 1.557 ms | 1.905 ms | 2.886 ms | 24.832 ms | 0.82× | 0.54× | 0.06× | ax fastest |
-| filter evens | 4e6 | 6.007 ms | 6.745 ms | 8.216 ms | 9.398 ms | 0.89× | 0.73× | 0.64× | ax fastest |
-| binary search | 200e3 | 10.048 ms | 9.501 ms | 9.990 ms | 19.418 ms | 1.06× | 1.01× | 0.52× | parity |
-| record field sum | 4e6 | 7.460 ms | 7.734 ms | 12.655 ms | 10.630 ms | 0.96× | 0.59× | 0.70× | ax fastest |
-| min / max scan | 8e6 | 16.029 ms | 15.929 ms | 18.307 ms | 21.030 ms | 1.01× | 0.88× | 0.76× | parity |
-| dot product | 4e6 | 12.764 ms | 8.761 ms | 10.576 ms | 13.635 ms | 1.46× | 1.21× | 0.94× | ax behind |
-| in-place reverse | 4e6 | 5.323 ms | 5.110 ms | 7.438 ms | 7.618 ms | 1.04× | 0.72× | 0.70× | parity |
-| prefix sum | 4e6 | 5.975 ms | 5.908 ms | 7.174 ms | 7.304 ms | 1.01× | 0.83× | 0.82× | parity |
-| buffer compare | 2e6 | 2.359 ms | 2.970 ms | 40.963 ms | 39.573 ms | 0.79× | 0.06× | 0.06× | ax fastest |
-| tokenize | 4e6 | 4.008 ms | 4.512 ms | 5.748 ms | 7.581 ms | 0.89× | 0.70× | 0.53× | ax fastest |
+| loop mix | 80e6 | 78.755 ms | 78.953 ms | 79.220 ms | 82.670 ms | 1.00× | 0.99× | 0.95× | ax fastest |
+| array sequential | 8e6 | 8.416 ms | 9.943 ms | 10.950 ms | 12.082 ms | 0.85× | 0.77× | 0.70× | ax fastest |
+| array random get | 2e6 | 9.190 ms | 8.983 ms | 9.825 ms | 11.070 ms | 1.02× | 0.94× | 0.83× | parity |
+| string join | 200e3 | 1.730 ms | 1.424 ms | 1.637 ms | 2.717 ms | 1.21× | 1.06× | 0.64× | ax behind |
+| map histogram | 2e6 | 10.748 ms | 11.144 ms | 33.991 ms | 18.152 ms | 0.96× | 0.32× | 0.59× | ax fastest |
+| sort integers | 400e3 | 17.706 ms | 17.915 ms | 24.135 ms | 25.001 ms | 0.99× | 0.73× | 0.71× | ax fastest |
+| file read | 67e6 | 11.098 ms | 11.392 ms | 17.038 ms | 31.664 ms | 0.97× | 0.65× | 0.35× | ax fastest |
+| file write | 4e3 | 227.789 ms | 236.814 ms | 249.529 ms | 237.358 ms | 0.96× | 0.91× | 0.96× | ax fastest |
+| HTTP GET | 400 | 8.767 ms | 8.851 ms | 9.364 ms | 12.533 ms | 0.99× | 0.94× | 0.70× | ax fastest |
+| array copy | 4e6 | 9.413 ms | 9.075 ms | 10.202 ms | 10.928 ms | 1.04× | 0.92× | 0.86× | parity |
+| byte scan | 16e6 | 6.964 ms | 10.534 ms | 15.803 ms | 16.159 ms | 0.66× | 0.44× | 0.43× | ax fastest |
+| parse integers | 2e6 | 1.800 ms | 2.184 ms | 1.849 ms | 25.235 ms | 0.82× | 0.97× | 0.07× | ax fastest |
+| filter evens | 4e6 | 6.386 ms | 7.130 ms | 7.904 ms | 9.820 ms | 0.90× | 0.81× | 0.65× | ax fastest |
+| binary search | 200e3 | 9.682 ms | 9.783 ms | 10.529 ms | 19.643 ms | 0.99× | 0.92× | 0.49× | ax fastest |
+| record field sum | 4e6 | 9.054 ms | 9.310 ms | 13.057 ms | 10.719 ms | 0.97× | 0.69× | 0.84× | ax fastest |
+| min / max scan | 8e6 | 16.396 ms | 14.859 ms | 21.800 ms | 20.429 ms | 1.10× | 0.75× | 0.80× | parity |
+| dot product | 4e6 | 12.910 ms | 8.635 ms | 9.792 ms | 12.413 ms | 1.50× | 1.32× | 1.04× | ax behind |
+| in-place reverse | 4e6 | 6.017 ms | 5.927 ms | 7.913 ms | 8.037 ms | 1.02× | 0.76× | 0.75× | parity |
+| prefix sum | 4e6 | 5.451 ms | 4.911 ms | 6.301 ms | 6.687 ms | 1.11× | 0.87× | 0.82× | parity |
+| buffer compare | 2e6 | 1.957 ms | 2.227 ms | 42.696 ms | 39.903 ms | 0.88× | 0.05× | 0.05× | ax fastest |
+| tokenize | 4e6 | 4.445 ms | 3.728 ms | 5.142 ms | 7.300 ms | 1.19× | 0.86× | 0.61× | ax behind |
 
 ## What each row measures
 
