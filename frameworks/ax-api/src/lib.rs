@@ -32,6 +32,8 @@ pub struct App {
     pub auth_header: Option<String>,
     pub auth_value: Option<String>,
     pub session_cookie: Option<String>,
+    pub database: Option<String>,
+    pub database_env: Option<(String, String)>,
 }
 
 pub fn compile(source: &str) -> Result<(App, String), String> {
@@ -56,6 +58,8 @@ fn parse_directives(source: &str) -> Result<App, String> {
     let mut auth_header = None;
     let mut auth_value = None;
     let mut session_cookie = None;
+    let mut database = None;
+    let mut database_env = None;
     let mut routes = Vec::new();
     let mut seen = HashSet::new();
     for (line_index, line) in source.lines().enumerate() {
@@ -128,6 +132,37 @@ fn parse_directives(source: &str) -> Result<App, String> {
                 ));
             }
             session_cookie = Some(value.into());
+            continue;
+        }
+        if let Some(value) = directive.strip_prefix("database ") {
+            let value = value.trim();
+            if value.is_empty() {
+                return Err(format!("line {}: database path is empty", line_index + 1));
+            }
+            database = Some(value.into());
+            continue;
+        }
+        if let Some(value) = directive.strip_prefix("database_env ") {
+            let mut parts = value.split_whitespace();
+            let name = parts.next().ok_or_else(|| {
+                format!(
+                    "line {}: database_env requires NAME FALLBACK",
+                    line_index + 1
+                )
+            })?;
+            let fallback = parts.next().ok_or_else(|| {
+                format!(
+                    "line {}: database_env requires NAME FALLBACK",
+                    line_index + 1
+                )
+            })?;
+            if parts.next().is_some() {
+                return Err(format!(
+                    "line {}: database_env requires exactly NAME FALLBACK",
+                    line_index + 1
+                ));
+            }
+            database_env = Some((name.into(), fallback.into()));
             continue;
         }
         if let Some(value) = directive.strip_prefix("middleware ") {
@@ -237,6 +272,9 @@ fn parse_directives(source: &str) -> Result<App, String> {
     if routes.is_empty() {
         return Err("no routes found; add `// ax-api GET / -> handler`".into());
     }
+    if database.is_some() && database_env.is_some() {
+        return Err("configure only one of database or database_env".into());
+    }
     Ok(App {
         port,
         routes,
@@ -246,6 +284,8 @@ fn parse_directives(source: &str) -> Result<App, String> {
         auth_header,
         auth_value,
         session_cookie,
+        database,
+        database_env,
     })
 }
 
@@ -369,23 +409,39 @@ fn path_condition(route: &Route, request: &str) -> String {
     )
 }
 
-fn handler_call(route: &Route) -> String {
+fn handler_call(app: &App, route: &Route) -> String {
     if route.body_type.is_some() {
-        return format!("__ax_api_body_{}(request)", route.handler);
+        return if has_database(app) {
+            format!("__ax_api_body_{}(database, request)", route.handler)
+        } else {
+            format!("__ax_api_body_{}(request)", route.handler)
+        };
     }
-    format!("{}({})", route.handler, handler_arguments(route).join(", "))
+    if has_database(app) {
+        format!("__ax_api_db_{}(database, request)", route.handler)
+    } else {
+        format!(
+            "{}({})",
+            route.handler,
+            handler_arguments(route, false).join(", ")
+        )
+    }
 }
 
-fn handler_arguments(route: &Route) -> Vec<String> {
+fn handler_arguments(route: &Route, database: bool) -> Vec<String> {
     let body = route
         .body_type
         .as_ref()
         .map(|_| "json.decode(test.alloc, request.body)".to_string());
-    handler_arguments_with_body(route, body.as_deref())
+    handler_arguments_with_body(route, body.as_deref(), database)
 }
 
-fn handler_arguments_with_body(route: &Route, body: Option<&str>) -> Vec<String> {
-    let mut args = vec!["request".to_string()];
+fn handler_arguments_with_body(route: &Route, body: Option<&str>, database: bool) -> Vec<String> {
+    let mut args = Vec::new();
+    if database {
+        args.push("database".to_string());
+    }
+    args.push("request".to_string());
     for (index, _) in route.params.iter().enumerate() {
         args.push(format!(
             "http.path_param(request.path, {}, {}u16)",
@@ -420,22 +476,52 @@ fn handler_arguments_with_body(route: &Route, body: Option<&str>) -> Vec<String>
 fn generate_dispatch(app: &App) -> String {
     let mut out = String::new();
     for route in &app.routes {
-        if let Some(body_type) = &route.body_type {
-            let decode_name = format!("__ax_api_decode_{}", route.handler);
+        if has_database(app) {
+            let body_parameter = route
+                .body_type
+                .as_ref()
+                .map(|body_type| format!(", body: {body_type}"))
+                .unwrap_or_default();
             let call_args =
-                handler_arguments_with_body(route, Some(&format!("{decode_name}(request)")));
+                handler_arguments_with_body(route, route.body_type.as_ref().map(|_| "body"), true);
             out.push_str(&format!(
-                "fn {decode_name}(request: http.Request) -> {body_type} !{{alloc[a], err[json.Error]}} = json.decode(test.alloc, request.body);\n\n"
-            ));
-            out.push_str(&format!(
-                "fn __ax_api_body_{}(request: http.Request) -> http.Response !{{alloc[a]}} =\n    match attempt {}({}) {{\n        Ok(response) => response;\n        Err(_) => http.response(422u16, \"{{\\\"error\\\":{{\\\"code\\\":\\\"invalid_json\\\",\\\"message\\\":\\\"Invalid JSON body\\\"}}}}\");\n    }};\n\n",
+                "fn __ax_api_db_{}(database: db.Pool, request: http.Request{}) -> http.Response !{{alloc[a], io[db]}} =\n    match attempt {}({}) {{\n        Ok(response) => response;\n        Err(_) => http.response(500u16, \"{{\\\"error\\\":{{\\\"code\\\":\\\"database_error\\\",\\\"message\\\":\\\"Database operation failed\\\"}}}}\");\n    }};\n\n",
                 route.handler,
+                body_parameter,
                 route.handler,
                 call_args.join(", ")
             ));
         }
+        if let Some(body_type) = &route.body_type {
+            let decode_name = format!("__ax_api_decode_{}", route.handler);
+            out.push_str(&format!(
+                "fn {decode_name}(request: http.Request) -> {body_type} !{{alloc[a], err[json.Error]}} = json.decode(test.alloc, request.body);\n\n"
+            ));
+            let parameters = if has_database(app) {
+                "database: db.Pool, request: http.Request"
+            } else {
+                "request: http.Request"
+            };
+            let success = if has_database(app) {
+                format!("__ax_api_db_{}(database, request, body)", route.handler)
+            } else {
+                let call_args = handler_arguments_with_body(route, Some("body"), false);
+                format!("{}({})", route.handler, call_args.join(", "))
+            };
+            out.push_str(&format!(
+                "fn __ax_api_body_{}({parameters}) -> http.Response !{{{}}} =\n    match attempt {decode_name}(request) {{\n        Ok(body) => {success};\n        Err(_) => http.response(422u16, \"{{\\\"error\\\":{{\\\"code\\\":\\\"invalid_json\\\",\\\"message\\\":\\\"Invalid JSON body\\\"}}}}\");\n    }};\n\n",
+                route.handler,
+                if has_database(app) { "alloc[a], io[db]" } else { "alloc[a]" }
+            ));
+        }
     }
-    out.push_str("fn __ax_api_dispatch(request: http.Request) -> http.Response !{alloc[a]} =\n");
+    if has_database(app) {
+        out.push_str("fn __ax_api_dispatch(database: db.Pool, request: http.Request) -> http.Response !{alloc[a], io[db]} =\n");
+    } else {
+        out.push_str(
+            "fn __ax_api_dispatch(request: http.Request) -> http.Response !{alloc[a]} =\n",
+        );
+    }
     let mut first = true;
     if let Some(header) = &app.auth_header {
         let expected = app.auth_value.as_deref().unwrap_or("");
@@ -463,7 +549,7 @@ fn generate_dispatch(app: &App) -> String {
             "{keyword} request.method == {} && {} {{\n        {}\n    }}\n",
             ax_string(&route.method),
             path_condition(route, "request"),
-            handler_call(route)
+            handler_call(app, route)
         ));
     }
     let openapi = ax_string(&openapi_document(app));
@@ -482,21 +568,61 @@ fn generate_dispatch(app: &App) -> String {
         ))
         .collect::<Vec<_>>()
         .join(" || ");
-    out.push_str(&format!(
-        "    else if {paths} {{\n        if request.method == \"OPTIONS\" {{\n            http.response(204u16, \"\")\n        }} else {{\n            http.response(405u16, \"{{\\\"error\\\":{{\\\"code\\\":\\\"method_not_allowed\\\",\\\"message\\\":\\\"Method not allowed\\\"}}}}\")\n        }}\n    }} else {{\n        http.response(404u16, \"{{\\\"error\\\":{{\\\"code\\\":\\\"not_found\\\",\\\"message\\\":\\\"Route not found\\\"}}}}\")\n    }};\n\nfn main() -> unit !{{io[net], abort}} = {} ;\n",
-        if app.body_limit == DEFAULT_BODY_LIMIT && app.timeout_ms == 0 && app.cors_origin.is_none() {
-            format!("http.serve_handler({}u16, __ax_api_dispatch)", app.port)
+    let server = if has_database(app) {
+        let database = database_expression(app);
+        if app.body_limit == DEFAULT_BODY_LIMIT && app.timeout_ms == 0 && app.cors_origin.is_none()
+        {
+            format!(
+                "http.serve_handler_state({}u16, db.open({}), __ax_api_dispatch)",
+                app.port, database
+            )
         } else {
             format!(
-                "http.serve_handler_config({}u16, __ax_api_dispatch, {}u32, {}u32, {})",
+                "http.serve_handler_state_config({}u16, db.open({}), __ax_api_dispatch, {}u32, {}u32, {})",
                 app.port,
+                database,
                 app.body_limit,
                 app.timeout_ms,
                 ax_string(app.cors_origin.as_deref().unwrap_or(""))
             )
         }
+    } else if app.body_limit == DEFAULT_BODY_LIMIT
+        && app.timeout_ms == 0
+        && app.cors_origin.is_none()
+    {
+        format!("http.serve_handler({}u16, __ax_api_dispatch)", app.port)
+    } else {
+        format!(
+            "http.serve_handler_config({}u16, __ax_api_dispatch, {}u32, {}u32, {})",
+            app.port,
+            app.body_limit,
+            app.timeout_ms,
+            ax_string(app.cors_origin.as_deref().unwrap_or(""))
+        )
+    };
+    let main_effects = if app.database_env.is_some() {
+        "alloc[a], io[db], io[env], err[db.Error], io[net], abort"
+    } else if app.database.is_some() {
+        "alloc[a], io[db], err[db.Error], io[net], abort"
+    } else {
+        "alloc[a], io[net], abort"
+    };
+    out.push_str(&format!(
+        "    else if {paths} {{\n        if request.method == \"OPTIONS\" {{\n            http.response(204u16, \"\")\n        }} else {{\n            http.response(405u16, \"{{\\\"error\\\":{{\\\"code\\\":\\\"method_not_allowed\\\",\\\"message\\\":\\\"Method not allowed\\\"}}}}\")\n        }}\n    }} else {{\n        http.response(404u16, \"{{\\\"error\\\":{{\\\"code\\\":\\\"not_found\\\",\\\"message\\\":\\\"Route not found\\\"}}}}\")\n    }};\n\nfn main() -> unit !{{{main_effects}}} = {server};\n"
     ));
     out
+}
+
+fn has_database(app: &App) -> bool {
+    app.database.is_some() || app.database_env.is_some()
+}
+
+fn database_expression(app: &App) -> String {
+    if let Some(path) = &app.database {
+        return ax_string(path);
+    }
+    let (name, fallback) = app.database_env.as_ref().expect("database configured");
+    format!("env.get_or({}, {})", ax_string(name), ax_string(fallback))
 }
 
 fn docs_html() -> String {
@@ -1071,6 +1197,36 @@ mod tests {
         let c = ax::codegen::emit_c(&session.intern, &checked).unwrap();
         assert!(c.contains("ax_rt_http_serve_handler"));
         assert!(!c.contains("ax_rt_api_"));
+    }
+
+    #[test]
+    fn database_directive_injects_pool_and_contains_route_errors() {
+        let source = r#"
+module app;
+// ax-api database :memory:
+// ax-api GET /items -> items
+type Item = {id: i64, name: String};
+fn items(database: db.Pool, request: http.Request) -> http.Response !{alloc[a], err[db.Error], io[db]} = {
+    let rows: Vec[Item] = db.query0(database, test.alloc, "SELECT 1 AS id, 'first' AS name");
+    api.ok("ok")
+};
+"#;
+        let (app, generated) = compile(source).unwrap();
+        assert_eq!(app.database.as_deref(), Some(":memory:"));
+        assert!(generated.contains("__ax_api_db_items(database, request)"));
+        assert!(generated.contains("match attempt items(database, request)"));
+        assert!(generated.contains("http.serve_handler_state(8080u16, db.open(\":memory:\")"));
+        let mut session = ax::driver::Session::new();
+        let file = session.parse("generated.ax", &generated).unwrap();
+        let checked = session.check(&file);
+        assert!(
+            !checked.diags.iter().any(|diag| diag.is_error()),
+            "{}",
+            ax::driver::render_diags(&session.sm, &session.intern, &checked.diags)
+        );
+        let c = ax::codegen::emit_c(&session.intern, &checked).unwrap();
+        assert!(c.contains("ax_rt_http_serve_handler_state"));
+        assert!(c.contains("ax_db_query"));
     }
 
     #[test]

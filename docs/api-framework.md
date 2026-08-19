@@ -139,6 +139,46 @@ ax-api expand app.ax
 The source file must not define `fn main`; `ax-api` generates the only main
 function and wires it to the configured port.
 
+## Database state
+
+Ax DB is optional and remains a standalone component. Configure one shared
+SQLite pool with a directive:
+
+```ax
+// ax-api database app.sqlite
+// ax-api GET /items -> list_items
+
+type Item = {id: i64, name: String};
+fn list_items(database: db.Pool, request: http.Request) -> http.Response
+    !{alloc[a], err[db.Error], io[db]} = {
+    let rows: Vec[Item] = db.query0(
+        database,
+        test.alloc,
+        "SELECT id, name FROM items ORDER BY id"
+    );
+    api.ok(json.encode(test.alloc, rows))
+};
+```
+
+When configured, `database` is the first argument of every application handler.
+The generated `main` opens it once and uses the core stateful-handler ABI. The
+generated route boundary catches an unhandled database error and returns `500`
+with code `database_error`; handlers may catch errors themselves for more
+specific responses. See [`packages/ax-db/README.md`](../packages/ax-db/README.md)
+for parameter binding, typed rows, transactions, migrations, and current SQLite
+type limits.
+
+For deployment configuration, read the path through the core environment
+capability and retain a local fallback:
+
+```ax
+// ax-api database_env AX_DATABASE_PATH app.sqlite
+```
+
+This expands to `env.get_or("AX_DATABASE_PATH", "app.sqlite")`, and the
+generated main function declares `io[env]` in addition to its database and
+network effects.
+
 ## Defining routes
 
 A route directive has this exact shape:
@@ -316,7 +356,8 @@ is not available to the source generator.
 The server speaks HTTP/1.1. `// ax-api body_limit N` bounds request bodies and
 `// ax-api timeout_ms N` applies socket read/write timeouts. `ax-api run` can
 terminate TLS with Rustls and forward clear HTTP to the generated service.
-The framework still does not add an `Allow` header to `405` responses.
+`405` responses include an `Allow` header listing the verbs understood by the
+generated dispatcher.
 
 ## Testing an application
 

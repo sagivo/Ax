@@ -1,0 +1,3 @@
+//! expect: "fallback"
+module conf.io.env_get_or;
+fn main() -> String !{io[env]} = env.get_or("AX_CONFORMANCE_MISSING_VALUE_7F3A", "fallback");

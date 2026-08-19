@@ -367,12 +367,16 @@ void ax_http_cookie(const AxStr *headers, const AxStr *name, AxStr *out);
 /* ---- json -------------------------------------------------------------- */
 
 /* Decode `[{...}, ...]` into a Vec of records described by `desc`.
-   Returns false on malformed input; the caller raises json.Error. Missing
-   fields are left zeroed, extra fields are ignored. */
+   Returns false on malformed input or schema mismatch; the caller raises
+   json.Error. Every descriptor field must appear exactly once. */
 bool ax_rt_json_decode_recs(const AxAlloc *a, const AxStr *raw,
                             const AxTypeDesc *desc, AxVec *out);
 bool ax_rt_json_decode_record(const AxAlloc *a, const AxStr *raw,
                               const AxTypeDesc *desc, void *out);
+void ax_rt_json_encode_record(const AxAlloc *a, const AxTypeDesc *desc,
+                              const void *record, AxStr *out);
+void ax_rt_json_encode_recs(const AxAlloc *a, const AxTypeDesc *desc,
+                            const AxVec *records, AxStr *out);
 
 /* ---- filesystem (capability-mediated) ---------------------------------- */
 
@@ -421,6 +425,14 @@ void ax_rt_http_serve_handler_config(uint16_t port, void *handler,
                                      const AxTypeDesc *response_desc,
                                      uint32_t body_limit, uint32_t timeout_ms,
                                      const AxStr *cors_origin);
+void ax_rt_http_serve_handler_state(uint16_t port, void *state, void *handler,
+                                    const AxTypeDesc *request_desc,
+                                    const AxTypeDesc *response_desc);
+void ax_rt_http_serve_handler_state_config(uint16_t port, void *state, void *handler,
+                                           const AxTypeDesc *request_desc,
+                                           const AxTypeDesc *response_desc,
+                                           uint32_t body_limit, uint32_t timeout_ms,
+                                           const AxStr *cors_origin);
 bool ax_rt_http_path_match(const AxStr *path, const AxStr *pattern);
 void ax_rt_http_path_param(const AxStr *path, const AxStr *pattern,
                            uint16_t index, AxStr *out);
@@ -428,6 +440,7 @@ void ax_rt_http_query_param(const AxStr *query, const AxStr *name, AxStr *out);
 void ax_rt_http_header(const AxStr *headers, const AxStr *name, AxStr *out);
 void ax_rt_http_cookie(const AxStr *headers, const AxStr *name, AxStr *out);
 void ax_rt_argv(int32_t i, AxStr *out);
+void ax_rt_env_get_or(const AxStr *name, const AxStr *fallback, AxStr *out);
 
 /* ---- division by a loop-invariant divisor ------------------------------ */
 

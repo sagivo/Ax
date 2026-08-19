@@ -249,7 +249,8 @@ impl<'a> Lowerer<'a> {
                 let n = self.sym(*def);
                 match n.as_str() {
                     // Opaque runtime handles.
-                    "Alloc" | "ReadCap" | "fs.ReadCap" | "Map" | "SortedMap" => IrTy::Ptr,
+                    "Alloc" | "ReadCap" | "fs.ReadCap" | "Map" | "SortedMap" | "db.Pool"
+                    | "db.Tx" => IrTy::Ptr,
                     _ => {
                         if self.agg_of(t)?.is_some() {
                             IrTy::Ptr
@@ -301,7 +302,8 @@ impl<'a> Lowerer<'a> {
                         let elem = args.first().cloned().unwrap_or(Type::unit());
                         Some(self.build_slice_agg(&key, &elem)?)
                     }
-                    "Alloc" | "ReadCap" | "fs.ReadCap" | "Map" | "SortedMap" => None,
+                    "Alloc" | "ReadCap" | "fs.ReadCap" | "Map" | "SortedMap" | "db.Pool"
+                    | "db.Tx" => None,
                     _ => {
                         let def_sym = *def;
                         let td = self
@@ -5134,6 +5136,47 @@ impl<'l, 'a> FnLower<'l, 'a> {
                 });
                 Ok(Some(unit(self)))
             }
+            "http.serve_handler_state" | "http.serve_handler_state_config" => {
+                let port = self.expr(&args[0])?;
+                let state = self.expr(&args[1])?;
+                let handler = self.expr(&args[2])?;
+                let request_ty = Type::Named {
+                    def: self.l.intern_sym("http.Request"),
+                    args: vec![],
+                };
+                let response_ty = Type::Named {
+                    def: self.l.intern_sym("http.Response"),
+                    args: vec![],
+                };
+                let request_agg = self
+                    .l
+                    .agg_of(&request_ty)?
+                    .ok_or("native backend: `http.Request` has no layout")?;
+                let response_agg = self
+                    .l
+                    .agg_of(&response_ty)?
+                    .ok_or("native backend: `http.Response` has no layout")?;
+                let request_desc = self.fb.push(Op::TypeDescriptor(request_agg), IrTy::Ptr);
+                let response_desc = self.fb.push(Op::TypeDescriptor(response_agg), IrTy::Ptr);
+                let mut runtime_args =
+                    vec![port.v, state.v, handler.v, request_desc, response_desc];
+                if name.ends_with("_config") {
+                    runtime_args.push(self.expr(&args[3])?.v);
+                    runtime_args.push(self.expr(&args[4])?.v);
+                    runtime_args.push(self.expr(&args[5])?.v);
+                }
+                self.fb.push_void(Op::CallExt {
+                    name: if name.ends_with("_config") {
+                        "ax_rt_http_serve_handler_state_config".into()
+                    } else {
+                        "ax_rt_http_serve_handler_state".into()
+                    },
+                    args: runtime_args,
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(unit(self)))
+            }
             "http.path_match" => {
                 let path = self.expr(&args[0])?;
                 let pattern = self.expr(&args[1])?;
@@ -5181,7 +5224,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
             }
             "io.bytesum_file" | "io.read_file" | "io.write_file" | "http.get_bytesum"
             | "http.get" | "http.serve" | "http.listen" | "http.respond" | "http.close"
-            | "argv" => {
+            | "argv" | "env.get_or" => {
                 let mut argv = Vec::new();
                 for a in args {
                     argv.push(self.expr(a)?.v);
@@ -5197,6 +5240,7 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     "http.listen" => "ax_rt_http_listen",
                     "http.respond" => "ax_rt_http_respond",
                     "http.close" => "ax_rt_http_close",
+                    "env.get_or" => "ax_rt_env_get_or",
                     _ => "ax_rt_argv",
                 };
                 if let Some(a) = agg {
@@ -5244,6 +5288,26 @@ impl<'l, 'a> FnLower<'l, 'a> {
             "fs.read" => Ok(Some(self.lower_fs_read(args, e)?)),
             "json.decode_recs" => Ok(Some(self.lower_json_decode(args, e, false)?)),
             "json.decode" => Ok(Some(self.lower_json_decode(args, e, true)?)),
+            "json.encode" => Ok(Some(self.lower_json_encode(args)?)),
+            "db.open" => Ok(Some(self.lower_db_open(args)?)),
+            "db.close" => {
+                let pool = self.expr(&args[0])?;
+                self.fb.push_void(Op::CallExt {
+                    name: "ax_db_close".into(),
+                    args: vec![pool.v],
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(unit(self)))
+            }
+            "db.exec0" | "db.exec" | "db.tx_exec0" | "db.tx_exec" => {
+                Ok(Some(self.lower_db_exec(name, args)?))
+            }
+            "db.query0" | "db.query" | "db.tx_query0" | "db.tx_query" => {
+                Ok(Some(self.lower_db_query(name, args, e)?))
+            }
+            "db.begin" => Ok(Some(self.lower_db_begin(args)?)),
+            "db.commit" | "db.rollback" => Ok(Some(self.lower_db_finish(name, args)?)),
             "parse_i32" => {
                 let s = self.expr(&args[0])?;
                 let out = self.fb.alloc_slot(SlotKind::Scalar(IrTy::I32), "");
@@ -5768,6 +5832,182 @@ impl<'l, 'a> FnLower<'l, 'a> {
             ty: IrTy::Ptr,
             agg: Some(vec_agg),
         })
+    }
+
+    fn lower_db_open(&mut self, args: &[Expr]) -> Result<LVal, String> {
+        let path = self.expr(&args[0])?;
+        let pool = self.fb.push(
+            Op::CallExt {
+                name: "ax_db_open".into(),
+                args: vec![path.v],
+                ret: IrTy::Ptr,
+                fallible: false,
+            },
+            IrTy::Ptr,
+        );
+        let zero = self.fb.const_int(0, IrTy::Ptr);
+        let ok = self.fb.bin(BinKind::Ne, pool, zero);
+        self.branch_db_result(ok)?;
+        Ok(LVal::scalar(pool, IrTy::Ptr))
+    }
+
+    fn lower_json_encode(&mut self, args: &[Expr]) -> Result<LVal, String> {
+        let alloc = self.expr(&args[0])?;
+        let value_type = self.ty_of_node(args[1].id);
+        let value = self.expr(&args[1])?;
+        let str_agg = self.str_agg()?;
+        let out = self.fb.alloc_slot(SlotKind::Agg(str_agg), "json");
+        let (runtime, element_type) = match &value_type {
+            Type::Named { def, args } if self.l.sym(*def) == "Vec" => (
+                "ax_rt_json_encode_recs",
+                args.first()
+                    .cloned()
+                    .ok_or("native backend: json.encode Vec has no element type")?,
+            ),
+            other => ("ax_rt_json_encode_record", other.clone()),
+        };
+        let element_agg = self
+            .l
+            .agg_of(&element_type)?
+            .ok_or("native backend: json.encode supports records and Vec[record]")?;
+        let desc = self.fb.push(Op::TypeDescriptor(element_agg), IrTy::Ptr);
+        self.fb.push_void(Op::CallExt {
+            name: runtime.into(),
+            args: vec![alloc.v, desc, value.v, out],
+            ret: IrTy::Unit,
+            fallible: false,
+        });
+        Ok(LVal {
+            v: out,
+            ty: IrTy::Ptr,
+            agg: Some(str_agg),
+        })
+    }
+
+    fn lower_db_begin(&mut self, args: &[Expr]) -> Result<LVal, String> {
+        let pool = self.expr(&args[0])?;
+        let tx = self.fb.push(
+            Op::CallExt {
+                name: "ax_db_begin".into(),
+                args: vec![pool.v],
+                ret: IrTy::Ptr,
+                fallible: false,
+            },
+            IrTy::Ptr,
+        );
+        let zero = self.fb.const_int(0, IrTy::Ptr);
+        let ok = self.fb.bin(BinKind::Ne, tx, zero);
+        self.branch_db_result(ok)?;
+        Ok(LVal::scalar(tx, IrTy::Ptr))
+    }
+
+    fn lower_db_exec(&mut self, name: &str, args: &[Expr]) -> Result<LVal, String> {
+        let handle = self.expr(&args[0])?;
+        let sql = self.expr(&args[1])?;
+        let params = if name.ends_with('0') {
+            self.fb.const_int(0, IrTy::Ptr)
+        } else {
+            self.expr(&args[2])?.v
+        };
+        let changes = self.fb.alloc_slot(SlotKind::Scalar(IrTy::U64), "changes");
+        let runtime = if name.starts_with("db.tx_") {
+            "ax_db_tx_exec"
+        } else {
+            "ax_db_exec"
+        };
+        let ok = self.fb.push(
+            Op::CallExt {
+                name: runtime.into(),
+                args: vec![handle.v, sql.v, params, changes],
+                ret: IrTy::Bool,
+                fallible: false,
+            },
+            IrTy::Bool,
+        );
+        self.branch_db_result(ok)?;
+        let value = self.fb.load(IrTy::U64, changes);
+        Ok(LVal::scalar(value, IrTy::U64))
+    }
+
+    fn lower_db_query(&mut self, name: &str, args: &[Expr], e: &Expr) -> Result<LVal, String> {
+        let handle = self.expr(&args[0])?;
+        let alloc = self.expr(&args[1])?;
+        let sql = self.expr(&args[2])?;
+        let params = if name.ends_with('0') {
+            self.fb.const_int(0, IrTy::Ptr)
+        } else {
+            self.expr(&args[3])?.v
+        };
+        let (_, vec_agg) = self.ir_of(e)?;
+        let vec_agg = vec_agg.ok_or("native backend: database query has no Vec layout")?;
+        let elem_ty = self.container_elem(&self.ty_of_node(e.id))?;
+        let elem_agg = self
+            .l
+            .agg_of(&elem_ty)?
+            .ok_or("native backend: database query needs a record result type")?;
+        let desc = self.fb.push(Op::TypeDescriptor(elem_agg), IrTy::Ptr);
+        let out = self.fb.alloc_slot(SlotKind::Agg(vec_agg), "rows");
+        let runtime = if name.starts_with("db.tx_") {
+            "ax_db_tx_query"
+        } else {
+            "ax_db_query"
+        };
+        let ok = self.fb.push(
+            Op::CallExt {
+                name: runtime.into(),
+                args: vec![handle.v, alloc.v, sql.v, params, desc, out],
+                ret: IrTy::Bool,
+                fallible: false,
+            },
+            IrTy::Bool,
+        );
+        self.branch_db_result(ok)?;
+        Ok(LVal {
+            v: out,
+            ty: IrTy::Ptr,
+            agg: Some(vec_agg),
+        })
+    }
+
+    fn lower_db_finish(&mut self, name: &str, args: &[Expr]) -> Result<LVal, String> {
+        let tx = self.expr(&args[0])?;
+        let runtime = if name == "db.commit" {
+            "ax_db_commit"
+        } else {
+            "ax_db_rollback"
+        };
+        let ok = self.fb.push(
+            Op::CallExt {
+                name: runtime.into(),
+                args: vec![tx.v],
+                ret: IrTy::Bool,
+                fallible: false,
+            },
+            IrTy::Bool,
+        );
+        self.branch_db_result(ok)?;
+        Ok(LVal::scalar(self.fb.unit(), IrTy::Unit))
+    }
+
+    fn branch_db_result(&mut self, ok: ValId) -> Result<(), String> {
+        let good = self.fb.new_block();
+        let bad = self.fb.new_block();
+        self.fb.set_term(Term::Br {
+            cond: ok,
+            then_e: Edge {
+                to: good,
+                args: vec![],
+            },
+            else_e: Edge {
+                to: bad,
+                args: vec![],
+            },
+        });
+        self.fb.switch_to(bad);
+        let payload = self.error_payload_for("db.Error", "Failed")?;
+        self.emit_raise(payload)?;
+        self.fb.switch_to(good);
+        Ok(())
     }
 
     /// Layout of the built-in string aggregate.

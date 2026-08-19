@@ -1720,6 +1720,7 @@ impl<'a> Checker<'a> {
         // this a generic result stays `Vec[T]` in the type table and every
         // consumer downstream is stuck with an unsubstituted parameter.
         let mut binds: HashMap<Symbol, Type> = HashMap::new();
+        let mut effect_binds: HashMap<Symbol, EffectSet> = HashMap::new();
         if !sig.generics.is_empty() {
             if let Some(exp) = expected {
                 crate::types::unify_param(&sig.ret, exp, &mut binds);
@@ -1748,6 +1749,7 @@ impl<'a> Checker<'a> {
                 if !sig.generics.is_empty() {
                     crate::types::unify_param(&params[i], &got, &mut binds);
                 }
+                bind_effect_params(&params[i], &got, &mut effect_binds);
                 if !type_mentions_param(&exp) && !self.arg_compatible(&exp, &got) {
                     self.type_mismatch(a.span, &exp, &got, &env.def_id);
                 }
@@ -1766,7 +1768,18 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        let mut effects = sig.effects.clone();
+        let mut effects = EffectSet::new();
+        for effect in &sig.effects.atoms {
+            if let EffectAtom::Var(symbol) = effect {
+                if let Some(bound) = effect_binds.get(symbol) {
+                    effects = effects.union(bound);
+                } else {
+                    effects.insert(effect.clone());
+                }
+            } else {
+                effects.insert(effect.clone());
+            }
+        }
         // inject err[F] → err[E] if needed
         if let Some(callee_err) = effects.err_type().cloned() {
             self.inject_or_admit(&callee_err, env, span);
@@ -3579,6 +3592,57 @@ fn type_mentions_param(t: &Type) -> bool {
             .iter()
             .any(|(_, fs)| fs.iter().any(|(_, x)| type_mentions_param(x))),
         _ => false,
+    }
+}
+
+fn bind_effect_params(expected: &Type, actual: &Type, binds: &mut HashMap<Symbol, EffectSet>) {
+    match (expected, actual) {
+        (
+            Type::Fn {
+                params: expected_params,
+                ret: expected_ret,
+                effects: expected_effects,
+            },
+            Type::Fn {
+                params: actual_params,
+                ret: actual_ret,
+                effects: actual_effects,
+            },
+        ) => {
+            for effect in &expected_effects.atoms {
+                if let EffectAtom::Var(symbol) = effect {
+                    let bound = binds.entry(*symbol).or_default();
+                    *bound = bound.union(actual_effects);
+                }
+            }
+            for (expected_param, actual_param) in expected_params.iter().zip(actual_params) {
+                bind_effect_params(expected_param, actual_param, binds);
+            }
+            bind_effect_params(expected_ret, actual_ret, binds);
+        }
+        (Type::Named { args: expected, .. }, Type::Named { args: actual, .. })
+        | (Type::Tuple(expected), Type::Tuple(actual)) => {
+            for (expected, actual) in expected.iter().zip(actual) {
+                bind_effect_params(expected, actual, binds);
+            }
+        }
+        (Type::Record(expected), Type::Record(actual)) => {
+            for ((_, expected), (_, actual)) in expected.iter().zip(actual) {
+                bind_effect_params(expected, actual, binds);
+            }
+        }
+        (
+            Type::Ref {
+                inner: expected, ..
+            },
+            Type::Ref { inner: actual, .. },
+        )
+        | (Type::Own(expected), Type::Own(actual))
+        | (Type::Untrusted(expected), Type::Untrusted(actual))
+        | (Type::Secret(expected), Type::Secret(actual)) => {
+            bind_effect_params(expected, actual, binds);
+        }
+        _ => {}
     }
 }
 

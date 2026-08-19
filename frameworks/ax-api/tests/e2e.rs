@@ -140,14 +140,14 @@ fn create_typed(request: http.Request, item: Item) -> http.Response = api.ok(ite
 
     let typed = request(
         port,
-        "POST /typed HTTP/1.1\r\nHost: localhost\r\nContent-Length: 25\r\nConnection: close\r\n\r\n{\"name\":\"typed\",\"count\":1}",
+        "POST /typed HTTP/1.1\r\nHost: localhost\r\nContent-Length: 26\r\nConnection: close\r\n\r\n{\"name\":\"typed\",\"count\":1}",
     );
     assert!(typed.starts_with("HTTP/1.1 200 OK\r\n"), "{typed}");
-    assert!(typed.ends_with("\r\n\r\n\"typed\""), "{typed}");
+    assert!(typed.ends_with("\r\n\r\ntyped"), "{typed}");
 
     let invalid_typed = request(
         port,
-        "POST /typed HTTP/1.1\r\nHost: localhost\r\nContent-Length: 29\r\nConnection: close\r\n\r\n{\"name\":\"typed\",\"extra\":1}",
+        "POST /typed HTTP/1.1\r\nHost: localhost\r\nContent-Length: 26\r\nConnection: close\r\n\r\n{\"name\":\"typed\",\"extra\":1}",
     );
     assert!(
         invalid_typed.starts_with("HTTP/1.1 422 Unprocessable Content\r\n"),
@@ -164,6 +164,19 @@ fn create_typed(request: http.Request, item: Item) -> http.Response = api.ok(ite
     );
     assert!(missing.contains("\"code\":\"not_found\""), "{missing}");
 
+    let wrong_method = request(
+        port,
+        "PATCH /stream HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(
+        wrong_method.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"),
+        "{wrong_method}"
+    );
+    assert!(
+        wrong_method.contains("Allow: GET, POST, PUT, PATCH, DELETE, OPTIONS\r\n"),
+        "{wrong_method}"
+    );
+
     let schema = request(
         port,
         "GET /openapi.json HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
@@ -176,5 +189,77 @@ fn create_typed(request: http.Request, item: Item) -> http.Response = api.ok(ite
 
     let _ = server.0.kill();
     let _ = server.0.wait();
+    fs::remove_dir_all(PathBuf::from(root)).unwrap();
+}
+
+#[test]
+fn database_state_serves_typed_rows() {
+    let port = TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let root = std::env::temp_dir().join(format!("ax-api-db-e2e-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let source = root.join("app.ax");
+    let database = root.join("app.sqlite");
+    let binary = root.join("app");
+    fs::write(
+        &source,
+        format!(
+            r#"module app;
+// ax-api port {port}
+// ax-api database {}
+// ax-api GET /items -> items
+type Item = {{id: i64, name: String}};
+fn items(database: db.Pool, request: http.Request) -> http.Response !{{alloc[a], err[db.Error], io[db]}} = {{
+    db.exec0(database, "CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)");
+    db.exec0(database, "INSERT OR IGNORE INTO items(id, name) VALUES (1, 'first')");
+    let rows: Vec[Item] = db.query0(database, test.alloc, "SELECT id, name FROM items ORDER BY id");
+    api.ok(json.encode(test.alloc, rows))
+}};
+"#,
+            database.display()
+        ),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ax-api"))
+        .args([
+            "build",
+            "--tier",
+            "release",
+            "-o",
+            binary.to_str().unwrap(),
+            source.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let server = Server(Command::new(&binary).spawn().unwrap());
+    let mut ready = false;
+    for _ in 0..100 {
+        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            ready = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(ready, "server did not listen");
+    let response = request(
+        port,
+        "GET /items HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+    assert!(
+        response.ends_with("\r\n\r\n[{\"id\":1,\"name\":\"first\"}]"),
+        "{response}"
+    );
+    drop(server);
     fs::remove_dir_all(PathBuf::from(root)).unwrap();
 }

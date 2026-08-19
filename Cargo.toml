@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ax", "frameworks/ax-api", "tools/ax-density", "tools/ax-dev"]
+members = ["crates/ax", "frameworks/ax-api", "packages/ax-db", "tools/ax-density", "tools/ax-dev"]
 default-members = ["crates/ax"]
 
 [workspace.package]

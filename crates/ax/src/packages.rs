@@ -69,6 +69,25 @@ pub fn component_stubs() -> Vec<PackManifest> {
         .collect()
 }
 
+pub fn component_packs() -> Vec<PackManifest> {
+    vec![component("db", "0.1.0")]
+}
+
+fn component(name: &str, version: &str) -> PackManifest {
+    PackManifest {
+        api: PACK_API,
+        name: name.into(),
+        version: version.into(),
+        kind: PackKind::Component,
+        source_hash: hash::sha256_hex(format!("{name}@{version}").as_bytes()),
+        files: BTreeMap::new(),
+        deps: vec![PackDep {
+            name: "core".into(),
+            version: "0.1.0".into(),
+        }],
+    }
+}
+
 fn builtin(name: &str, version: &str) -> PackManifest {
     let mut files = BTreeMap::new();
     files.insert(
@@ -98,6 +117,7 @@ pub fn packs_dir() -> PathBuf {
 pub fn write_registry(dir: &Path) -> Result<Vec<PackManifest>, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let mut all = builtin_packs();
+    all.extend(component_packs());
     all.extend(component_stubs());
     for p in &all {
         let sub = dir.join(&p.name);
@@ -119,6 +139,10 @@ pub fn list_text() -> String {
     let mut o = String::new();
     o.push_str("builtin:\n");
     for p in builtin_packs() {
+        o.push_str(&format!("  {}@{}  {}\n", p.name, p.version, p.source_hash));
+    }
+    o.push_str("components:\n");
+    for p in component_packs() {
         o.push_str(&format!("  {}@{}  {}\n", p.name, p.version, p.source_hash));
     }
     o.push_str("components (reserved, not shipped in v1):\n");

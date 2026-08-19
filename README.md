@@ -120,6 +120,18 @@ See the [Ax API quick start](docs/api-framework.md) for REST routing, request
 fields, JSON responses, automatic errors, performance, and the complete MVP
 example.
 
+### Database-backed APIs
+
+The standalone **Ax DB** component provides SQLite connections, bound
+parameters, direct decoding into typed Ax records, transactions, and idempotent
+migrations. Ax API can open one application database and pass it explicitly to
+handlers with `// ax-api database app.sqlite`. The core language only owns the
+opaque-resource and stateful-handler ABI; SQL and migration policy stay in
+`packages/ax-db`.
+
+See [Ax DB](packages/ax-db/README.md) and the executable
+[`examples/db_sqlite.ax`](examples/db_sqlite.ax).
+
 ## Protocol
 
 ```
@@ -332,7 +344,7 @@ cargo run -p ax-dev -- conform          # conformance corpus, every tier
 cargo run -p ax-dev -- testharness      # Test Spec v1.0 tree under tests/
 ```
 
-The conformance corpus (`conformance/`) is 128 cases ported by scenario from Go's
+The conformance corpus (`conformance/`) is 132 cases ported by scenario from Go's
 `test/` and Rust's suites: integer wrapping and shift semantics, truncating
 division, IEEE comparison and NaN canonicalisation, bitwise ops, casts, control
 flow, records and variants, error propagation and injection, regions, the

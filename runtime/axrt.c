@@ -6,6 +6,7 @@
 
 #define _GNU_SOURCE
 #include "axrt.h"
+#include "axdb.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -441,6 +442,8 @@ static volatile int g_srv_run = 0;
 static char *g_srv_response = NULL;
 static size_t g_srv_response_len = 0;
 static void *g_srv_handler = NULL;
+static void *g_srv_state = NULL;
+static bool g_srv_has_state = false;
 static const AxTypeDesc *g_srv_request_desc = NULL;
 static const AxTypeDesc *g_srv_response_desc = NULL;
 static uint32_t g_srv_req_method_off = 0;
@@ -724,6 +727,11 @@ static int srv_build_handler_response(char *out, size_t capacity,
             break;
     }
     AX_SRV_COPY("Content-Type: application/json\r\n");
+    /* A method error is still useful to generic clients when it advertises
+       the verbs understood by the generated dispatcher. OPTIONS is included
+       because the framework answers it for every known route. */
+    if (status == 405)
+        AX_SRV_COPY("Allow: GET, POST, PUT, PATCH, DELETE, OPTIONS\r\n");
     if (g_srv_cors_origin && g_srv_cors_origin_len) {
         AX_SRV_COPY("Access-Control-Allow-Origin: ");
         if ((size_t)(p - out) + g_srv_cors_origin_len + 2 > capacity)
@@ -829,8 +837,14 @@ static int srv_prepare_handler(AxSrvConn *c, const char *request,
     if (g_srv_req_headers_off != UINT32_MAX)
         memcpy(request_store.bytes + g_srv_req_headers_off, &field, sizeof(field));
 
-    typedef void (*AxHttpHandler)(void *, void *);
-    ((AxHttpHandler)g_srv_handler)(request_store.bytes, response_store.bytes);
+    if (g_srv_has_state) {
+        typedef void (*AxHttpStateHandler)(void *, void *, void *);
+        ((AxHttpStateHandler)g_srv_handler)(g_srv_state, request_store.bytes,
+                                           response_store.bytes);
+    } else {
+        typedef void (*AxHttpHandler)(void *, void *);
+        ((AxHttpHandler)g_srv_handler)(request_store.bytes, response_store.bytes);
+    }
 
     uint16_t status;
     AxStr body;
@@ -1397,6 +1411,8 @@ static int srv_run(uint16_t port) {
 int ax_http_serve_static(uint16_t port, const void *body, size_t len) {
     ax_http_stop_server();
     g_srv_handler = NULL;
+    g_srv_state = NULL;
+    g_srv_has_state = false;
     g_srv_request_desc = NULL;
     g_srv_response_desc = NULL;
     if (len > SIZE_MAX - 256) return -1;
@@ -1442,7 +1458,42 @@ int ax_http_serve_handler_config(uint16_t port, void *handler,
     if (!handler || srv_set_descriptors(request_desc, response_desc) != 0)
         return -1;
     g_srv_handler = handler;
+    g_srv_state = NULL;
+    g_srv_has_state = false;
     return srv_run(port);
+}
+
+void ax_rt_http_serve_handler_state(uint16_t port, void *state, void *handler,
+                                    const AxTypeDesc *request_desc,
+                                    const AxTypeDesc *response_desc) {
+    AxStr empty = {"", 0};
+    ax_rt_http_serve_handler_state_config(port, state, handler, request_desc,
+                                          response_desc, AX_SRV_INBUF - 256, 0,
+                                          &empty);
+}
+
+void ax_rt_http_serve_handler_state_config(uint16_t port, void *state, void *handler,
+                                           const AxTypeDesc *request_desc,
+                                           const AxTypeDesc *response_desc,
+                                           uint32_t body_limit, uint32_t timeout_ms,
+                                           const AxStr *cors_origin) {
+    ax_http_stop_server();
+    g_srv_body_limit = body_limit ? body_limit : AX_SRV_INBUF - 256;
+    g_srv_timeout_ms = timeout_ms;
+    free(g_srv_cors_origin);
+    g_srv_cors_origin = NULL;
+    g_srv_cors_origin_len = 0;
+    if (cors_origin && cors_origin->len) {
+        g_srv_cors_origin = (char *)malloc(cors_origin->len);
+        if (!g_srv_cors_origin) return;
+        memcpy(g_srv_cors_origin, cors_origin->ptr, cors_origin->len);
+        g_srv_cors_origin_len = cors_origin->len;
+    }
+    if (!handler || srv_set_descriptors(request_desc, response_desc) != 0) return;
+    g_srv_handler = handler;
+    g_srv_state = state;
+    g_srv_has_state = true;
+    (void)srv_run(port);
 }
 
 void ax_http_stop_server(void) {
@@ -1593,6 +1644,7 @@ void ax_http_close(void) {
 
 void ax_rt_shutdown(void) {
     ax_http_stop_server();
+    ax_db_shutdown();
     if (g_api_fd >= 0) {
         shutdown(g_api_fd, SHUT_RDWR);
         close(g_api_fd);

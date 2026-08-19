@@ -478,6 +478,9 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
     let sym_parse_error = intern.intern("ParseError");
     let sym_fs_error = intern.intern("fs.Error");
     let sym_json_error = intern.intern("json.Error");
+    let sym_db_error = intern.intern("db.Error");
+    let sym_db_pool = intern.intern("db.Pool");
+    let sym_db_tx = intern.intern("db.Tx");
     let sym_fs_read_cap = intern.intern("fs.ReadCap");
     let sym_rec = intern.intern("Rec");
     let sym_files = intern.intern("files");
@@ -771,7 +774,7 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
                     false,
                 ),
                 (alloc, alloc_type(b), false),
-                (path, fs_path_ty, false),
+                (path, fs_path_ty.clone(), false),
             ],
             Type::Untrusted(Box::new(string_type(b))),
             fs_eff,
@@ -801,17 +804,192 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
             json_eff.clone(),
         ),
     ));
+    let mut json_decode_sig = sig(
+        intern,
+        "std.json::fn:decode",
+        "decode",
+        vec![(alloc, alloc_type(b), false), (raw, string_type(b), false)],
+        Type::Param(sym_t),
+        json_eff,
+    );
+    json_decode_sig.generics = vec![sym_t];
+    out.push(("json.decode".into(), json_decode_sig));
+    let value = intern.intern("value");
+    let mut json_encode_sig = sig(
+        intern,
+        "std.json::fn:encode",
+        "encode",
+        vec![
+            (alloc, alloc_type(b), false),
+            (value, Type::Param(sym_t), false),
+        ],
+        string_type(b),
+        {
+            let mut effects = EffectSet::new();
+            effects.insert(EffectAtom::Alloc(alloc));
+            effects
+        },
+    );
+    json_encode_sig.generics = vec![sym_t];
+    out.push(("json.encode".into(), json_encode_sig));
+
+    let db_pool_type = Type::Named {
+        def: sym_db_pool,
+        args: vec![],
+    };
+    let db_tx_type = Type::Named {
+        def: sym_db_tx,
+        args: vec![],
+    };
+    let db_error_type = Type::Named {
+        def: sym_db_error,
+        args: vec![],
+    };
+    let mut db_effects = EffectSet::new();
+    db_effects.insert(EffectAtom::Io(intern.intern("db")));
+    db_effects.insert(EffectAtom::Err(db_error_type.clone()));
+    let mut db_query_effects = db_effects.clone();
+    db_query_effects.insert(EffectAtom::Alloc(alloc));
+    let sql = intern.intern("sql");
+    let params = intern.intern("params");
+    let pool = intern.intern("pool");
+    let tx = intern.intern("tx");
+    let string_vec = vec_type(b, string_type(b));
     out.push((
-        "json.decode".into(),
+        "db.open".into(),
         sig(
             intern,
-            "std.json::fn:decode",
-            "decode",
-            vec![(alloc, alloc_type(b), false), (raw, string_type(b), false)],
-            Type::Param(sym_t),
-            json_eff,
+            "std.db::fn:open",
+            "open",
+            vec![(path, fs_path_ty.clone(), false)],
+            db_pool_type.clone(),
+            db_effects.clone(),
         ),
     ));
+    let mut db_close_effects = EffectSet::new();
+    db_close_effects.insert(EffectAtom::Io(intern.intern("db")));
+    out.push((
+        "db.close".into(),
+        sig(
+            intern,
+            "std.db::fn:close",
+            "close",
+            vec![(pool, db_pool_type.clone(), false)],
+            Type::unit(),
+            db_close_effects,
+        ),
+    ));
+    for (qualified, name, with_params) in [("db.exec0", "exec0", false), ("db.exec", "exec", true)]
+    {
+        let mut arguments = vec![
+            (pool, db_pool_type.clone(), false),
+            (sql, string_type(b), false),
+        ];
+        if with_params {
+            arguments.push((params, string_vec.clone(), false));
+        }
+        out.push((
+            qualified.into(),
+            sig(
+                intern,
+                &format!("std.db::fn:{name}"),
+                name,
+                arguments,
+                Type::u64(),
+                db_effects.clone(),
+            ),
+        ));
+    }
+    for (qualified, name, with_params) in
+        [("db.query0", "query0", false), ("db.query", "query", true)]
+    {
+        let mut arguments = vec![
+            (pool, db_pool_type.clone(), false),
+            (alloc, alloc_type(b), false),
+            (sql, string_type(b), false),
+        ];
+        if with_params {
+            arguments.push((params, string_vec.clone(), false));
+        }
+        let mut query_sig = sig(
+            intern,
+            &format!("std.db::fn:{name}"),
+            name,
+            arguments,
+            vec_type(b, Type::Param(sym_t)),
+            db_query_effects.clone(),
+        );
+        query_sig.generics = vec![sym_t];
+        out.push((qualified.into(), query_sig));
+    }
+    out.push((
+        "db.begin".into(),
+        sig(
+            intern,
+            "std.db::fn:begin",
+            "begin",
+            vec![(pool, db_pool_type.clone(), false)],
+            db_tx_type.clone(),
+            db_effects.clone(),
+        ),
+    ));
+    let tx_ref = static_ref(intern, db_tx_type.clone(), true);
+    for (qualified, name, with_params) in [
+        ("db.tx_exec0", "tx_exec0", false),
+        ("db.tx_exec", "tx_exec", true),
+    ] {
+        let mut arguments = vec![(tx, tx_ref.clone(), false), (sql, string_type(b), false)];
+        if with_params {
+            arguments.push((params, string_vec.clone(), false));
+        }
+        out.push((
+            qualified.into(),
+            sig(
+                intern,
+                &format!("std.db::fn:{name}"),
+                name,
+                arguments,
+                Type::u64(),
+                db_effects.clone(),
+            ),
+        ));
+    }
+    for (qualified, name, with_params) in [
+        ("db.tx_query0", "tx_query0", false),
+        ("db.tx_query", "tx_query", true),
+    ] {
+        let mut arguments = vec![
+            (tx, tx_ref.clone(), false),
+            (alloc, alloc_type(b), false),
+            (sql, string_type(b), false),
+        ];
+        if with_params {
+            arguments.push((params, string_vec.clone(), false));
+        }
+        let mut query_sig = sig(
+            intern,
+            &format!("std.db::fn:{name}"),
+            name,
+            arguments,
+            vec_type(b, Type::Param(sym_t)),
+            db_query_effects.clone(),
+        );
+        query_sig.generics = vec![sym_t];
+        out.push((qualified.into(), query_sig));
+    }
+    for name in ["commit", "rollback"] {
+        out.push((
+            format!("db.{name}"),
+            sig(
+                intern,
+                &format!("std.db::fn:{name}"),
+                name,
+                vec![(tx, db_tx_type.clone(), false)],
+                Type::unit(),
+                db_effects.clone(),
+            ),
+        ));
+    }
 
     out.push((
         "test.read_cap".into(),
@@ -1039,12 +1217,11 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
         def: intern.intern("http.Response"),
         args: vec![],
     };
+    let handler_effect = intern.intern("handler_effect");
     let mut serve_handler_effects = EffectSet::new();
-    serve_handler_effects.insert(EffectAtom::Alloc(alloc));
-    serve_handler_effects.insert(EffectAtom::Err(Type::Named {
-        def: sym_json_error,
-        args: vec![],
-    }));
+    serve_handler_effects.insert(EffectAtom::Var(handler_effect));
+    let mut serve_effects = net_abort.clone();
+    serve_effects.insert(EffectAtom::Var(handler_effect));
     out.push((
         "http.listen".into(),
         sig(
@@ -1146,7 +1323,7 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
                 ),
             ],
             Type::unit(),
-            net_abort.clone(),
+            serve_effects.clone(),
         ),
     ));
     out.push((
@@ -1162,7 +1339,7 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
                     Type::Fn {
                         params: vec![request_ty.clone()],
                         ret: Box::new(response_ty.clone()),
-                        effects: serve_handler_effects,
+                        effects: serve_handler_effects.clone(),
                     },
                     false,
                 ),
@@ -1171,8 +1348,59 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
                 (cors_origin, string_type(b), false),
             ],
             Type::unit(),
-            net_abort.clone(),
+            serve_effects.clone(),
         ),
+    ));
+    let state = intern.intern("state");
+    let mut state_handler_sig = sig(
+        intern,
+        "core::fn:http.serve_handler_state",
+        "serve_handler_state",
+        vec![
+            (port, Type::Prim(Prim::U16), false),
+            (state, Type::Param(sym_t), false),
+            (
+                handler,
+                Type::Fn {
+                    params: vec![Type::Param(sym_t), request_ty.clone()],
+                    ret: Box::new(response_ty.clone()),
+                    effects: serve_handler_effects.clone(),
+                },
+                false,
+            ),
+        ],
+        Type::unit(),
+        serve_effects.clone(),
+    );
+    state_handler_sig.generics = vec![sym_t];
+    out.push(("http.serve_handler_state".into(), state_handler_sig));
+    let mut state_handler_config_sig = sig(
+        intern,
+        "core::fn:http.serve_handler_state_config",
+        "serve_handler_state_config",
+        vec![
+            (port, Type::Prim(Prim::U16), false),
+            (state, Type::Param(sym_t), false),
+            (
+                handler,
+                Type::Fn {
+                    params: vec![Type::Param(sym_t), request_ty.clone()],
+                    ret: Box::new(response_ty.clone()),
+                    effects: serve_handler_effects,
+                },
+                false,
+            ),
+            (body_limit, Type::Prim(Prim::U32), false),
+            (timeout_ms, Type::Prim(Prim::U32), false),
+            (cors_origin, string_type(b), false),
+        ],
+        Type::unit(),
+        serve_effects,
+    );
+    state_handler_config_sig.generics = vec![sym_t];
+    out.push((
+        "http.serve_handler_state_config".into(),
+        state_handler_config_sig,
     ));
     out.push((
         "http.path_match".into(),
@@ -1252,6 +1480,23 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
             argv_row,
         ),
     ));
+    let mut env_row = EffectSet::new();
+    env_row.insert(EffectAtom::Io(intern.intern("env")));
+    let fallback = intern.intern("fallback");
+    out.push((
+        "env.get_or".into(),
+        sig(
+            intern,
+            "core::fn:env.get_or",
+            "get_or",
+            vec![
+                (name, string_type(b), false),
+                (fallback, string_type(b), false),
+            ],
+            Type::Untrusted(Box::new(string_type(b))),
+            env_row,
+        ),
+    ));
 
     let _ = (n, i);
     out
@@ -1277,6 +1522,30 @@ pub fn extra_type_defs(intern: &mut Interner) -> Vec<TypeDef> {
             injections: vec![],
             span: Span::DUMMY,
             def_id: "std.json::type:Error".into(),
+        },
+        TypeDef {
+            name: intern.intern("db.Error"),
+            generics: vec![],
+            kind: TypeDefKind::Variants(vec![(intern.intern("Failed"), vec![])]),
+            injections: vec![],
+            span: Span::DUMMY,
+            def_id: "std.db::type:Error".into(),
+        },
+        TypeDef {
+            name: intern.intern("db.Pool"),
+            generics: vec![],
+            kind: TypeDefKind::Record(vec![]),
+            injections: vec![],
+            span: Span::DUMMY,
+            def_id: "std.db::type:Pool".into(),
+        },
+        TypeDef {
+            name: intern.intern("db.Tx"),
+            generics: vec![],
+            kind: TypeDefKind::Record(vec![]),
+            injections: vec![],
+            span: Span::DUMMY,
+            def_id: "std.db::type:Tx".into(),
         },
         TypeDef {
             name: intern.intern("fs.ReadCap"),

@@ -1,0 +1,9 @@
+//! expect-error: E0200
+module conf.effects.handler_effects_are_forwarded;
+
+type Message = {ok: bool};
+
+fn handle(request: http.Request) -> http.Response !{alloc[a]} =
+    http.response(200u16, json.encode(test.alloc, {ok: request.path == "/"}));
+
+fn main() -> unit !{io[net], abort} = http.serve_handler(8080u16, handle);

@@ -114,8 +114,9 @@ impl Runtime {
 /// its sources. The JIT resolves every `ax_rt_*` call through this.
 fn build_runtime_dylib() -> Result<PathBuf, String> {
     let rt = crate::codegen::runtime_dir();
-    let sources = [rt.join("axrt.c"), rt.join("axlang.c")];
-    let header = rt.join("axrt.h");
+    let db_rt = crate::codegen::db_runtime_dir();
+    let sources = [rt.join("axrt.c"), rt.join("axlang.c"), db_rt.join("axdb.c")];
+    let headers = [rt.join("axrt.h"), db_rt.join("axdb.h")];
     let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/axrt");
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
     let ext = if cfg!(target_os = "macos") {
@@ -127,7 +128,7 @@ fn build_runtime_dylib() -> Result<PathBuf, String> {
 
     let newest_src = sources
         .iter()
-        .chain(std::iter::once(&header))
+        .chain(headers.iter())
         .filter_map(|p| std::fs::metadata(p).ok()?.modified().ok())
         .max();
     let lib_time = std::fs::metadata(&lib).ok().and_then(|m| m.modified().ok());
@@ -139,11 +140,12 @@ fn build_runtime_dylib() -> Result<PathBuf, String> {
 
     let mut cmd = std::process::Command::new("cc");
     cmd.args(["-O2", "-std=c11", "-fPIC", "-shared", "-pthread"])
-        .arg(format!("-I{}", rt.display()));
+        .arg(format!("-I{}", rt.display()))
+        .arg(format!("-I{}", db_rt.display()));
     for s in &sources {
         cmd.arg(s);
     }
-    cmd.arg("-lm").arg("-o").arg(&lib);
+    cmd.arg("-lm").arg("-lsqlite3").arg("-o").arg(&lib);
     let out = cmd.output().map_err(|e| format!("spawn cc: {e}"))?;
     if !out.status.success() {
         return Err(format!(
@@ -424,7 +426,7 @@ fn build_descriptors(p: &Program, rt: &Runtime) -> Result<HashMap<TypeId, usize>
 fn field_kind(f: &FieldDef) -> Option<i32> {
     if f.agg.is_some() {
         return if f.src == "String" || f.src == "str" || f.src.ends_with(" str") {
-            Some(12) // AX_FLD_STR
+            Some(11) // AX_FLD_STR
         } else {
             None
         };

@@ -8,6 +8,9 @@ use indexmap::IndexMap;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static DB_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -35,6 +38,8 @@ pub enum Value {
     },
     Fn(FnVal),
     Cap(Capability),
+    DbPool(Rc<str>),
+    DbTx(Rc<RefCell<DbTransaction>>),
     Alloc,
     Own(Box<Value>),
     Hole,
@@ -52,6 +57,12 @@ pub enum FnVal {
 pub enum Capability {
     FsRead { files: IndexMap<String, String> },
     Stdout,
+}
+
+#[derive(Clone, Debug)]
+pub struct DbTransaction {
+    path: Rc<str>,
+    statements: Vec<String>,
 }
 
 impl Value {
@@ -174,6 +185,8 @@ impl Value {
             Value::Range { start, end } => format!("{start}..{end}"),
             Value::Fn(f) => format!("<fn {:?}>", f),
             Value::Cap(_) => "<cap>".into(),
+            Value::DbPool(_) => "<db-pool>".into(),
+            Value::DbTx(_) => "<db-tx>".into(),
             Value::Alloc => "<alloc>".into(),
             Value::Own(v) => format!("own {}", v.display()),
             Value::Hole => "?".into(),
@@ -1672,6 +1685,30 @@ impl<'a> Interpreter<'a> {
             "fs.read" => self.fs_read(&args),
             "json.decode_recs" => self.json_decode_recs(&args),
             "json.decode" => self.json_decode_recs(&args),
+            "json.encode" => {
+                let value = args
+                    .get(1)
+                    .ok_or_else(|| Flow::Abort("json.encode missing value".into()))?;
+                let json = value_json(value)
+                    .ok_or_else(|| Flow::Abort("json.encode unsupported value".into()))?;
+                Ok(Value::Str(Rc::from(json.to_string())))
+            }
+            "db.open" => self.db_open(&args),
+            "db.close" => Ok(Value::Unit),
+            "db.exec0" | "db.exec" => self.db_exec(name, &args),
+            "db.query0" | "db.query" => self.db_query(name, &args),
+            "db.begin" => self.db_begin(&args),
+            "db.tx_exec0" | "db.tx_exec" => self.db_tx_exec(name, &args),
+            "db.tx_query0" | "db.tx_query" => self.db_tx_query(name, &args),
+            "db.commit" => self.db_finish(&args, true),
+            "db.rollback" => Ok(Value::Unit),
+            "env.get_or" => {
+                let name = value_as_path(args.first());
+                let fallback = value_as_path(args.get(1));
+                Ok(Value::Str(Rc::from(
+                    std::env::var(name).unwrap_or(fallback),
+                )))
+            }
             "test.read_cap" => {
                 let mut files = IndexMap::new();
                 if let Some(Value::Record(fs)) = args.first() {
@@ -1859,6 +1896,124 @@ impl<'a> Interpreter<'a> {
                 fields: IndexMap::new(),
             })),
         }
+    }
+
+    fn db_open(&mut self, args: &[Value]) -> IResult {
+        let requested = value_as_path(args.first());
+        let path = if requested == ":memory:" {
+            std::env::temp_dir()
+                .join(format!(
+                    "ax-interpreter-{}-{}.sqlite",
+                    std::process::id(),
+                    DB_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+                ))
+                .to_string_lossy()
+                .to_string()
+        } else {
+            requested
+        };
+        let output = std::process::Command::new("sqlite3")
+            .arg(&path)
+            .arg("PRAGMA foreign_keys = ON;")
+            .output()
+            .map_err(|_| db_error())?;
+        if !output.status.success() {
+            return Err(db_error());
+        }
+        Ok(Value::DbPool(Rc::from(path)))
+    }
+
+    fn db_exec(&mut self, name: &str, args: &[Value]) -> IResult {
+        let path = db_pool_path(args.first()).ok_or_else(db_error)?;
+        let params = if name.ends_with('0') {
+            None
+        } else {
+            args.get(2)
+        };
+        let sql = db_sql(args.get(1), params)?;
+        let output = db_sqlite(&path, &format!("{sql}; SELECT changes();"), false)?;
+        let changes = output
+            .trim()
+            .lines()
+            .last()
+            .unwrap_or("0")
+            .parse::<u64>()
+            .unwrap_or(0);
+        Ok(Value::Int {
+            bits: changes as i128,
+            prim: Prim::U64,
+        })
+    }
+
+    fn db_query(&mut self, name: &str, args: &[Value]) -> IResult {
+        let path = db_pool_path(args.first()).ok_or_else(db_error)?;
+        let params = if name.ends_with('0') {
+            None
+        } else {
+            args.get(3)
+        };
+        let sql = db_sql(args.get(2), params)?;
+        let output = db_sqlite(&path, &sql, true)?;
+        self.json_decode_recs(&[Value::Alloc, Value::Str(Rc::from(output))])
+    }
+
+    fn db_begin(&mut self, args: &[Value]) -> IResult {
+        let path = db_pool_path(args.first()).ok_or_else(db_error)?;
+        Ok(Value::DbTx(Rc::new(RefCell::new(DbTransaction {
+            path,
+            statements: Vec::new(),
+        }))))
+    }
+
+    fn db_tx_exec(&mut self, name: &str, args: &[Value]) -> IResult {
+        let tx = db_transaction(args.first()).ok_or_else(db_error)?;
+        let params = if name.ends_with('0') {
+            None
+        } else {
+            args.get(2)
+        };
+        let sql = db_sql(args.get(1), params)?;
+        tx.borrow_mut().statements.push(sql);
+        Ok(Value::Int {
+            bits: 0,
+            prim: Prim::U64,
+        })
+    }
+
+    fn db_tx_query(&mut self, name: &str, args: &[Value]) -> IResult {
+        let tx = db_transaction(args.first()).ok_or_else(db_error)?;
+        let params = if name.ends_with('0') {
+            None
+        } else {
+            args.get(3)
+        };
+        let query = db_sql(args.get(2), params)?;
+        let transaction = tx.borrow();
+        let mut sql = String::from("BEGIN IMMEDIATE;");
+        for statement in &transaction.statements {
+            sql.push_str(statement);
+            sql.push(';');
+        }
+        sql.push_str(&query);
+        sql.push_str(";ROLLBACK;");
+        let output = db_sqlite(&transaction.path, &sql, true)?;
+        self.json_decode_recs(&[Value::Alloc, Value::Str(Rc::from(output))])
+    }
+
+    fn db_finish(&mut self, args: &[Value], commit: bool) -> IResult {
+        if !commit {
+            return Ok(Value::Unit);
+        }
+        let tx = db_transaction(args.first()).ok_or_else(db_error)?;
+        let transaction = tx.borrow();
+        let mut sql = String::from("BEGIN IMMEDIATE;");
+        for statement in &transaction.statements {
+            sql.push_str(statement);
+            sql.push(';');
+        }
+        sql.push_str("COMMIT;");
+        db_sqlite(&transaction.path, &sql, false)?;
+        Ok(Value::Unit)
     }
 
     fn iterate(&self, v: &Value) -> Result<Vec<Value>, Flow> {
@@ -2070,6 +2225,125 @@ impl<'a> Interpreter<'a> {
     fn pop_scope(&mut self) {
         self.frames.pop();
     }
+}
+
+fn db_error() -> Flow {
+    Flow::Raise(Value::Variant {
+        name: "Failed".into(),
+        fields: IndexMap::new(),
+    })
+}
+
+fn value_json(value: &Value) -> Option<serde_json::Value> {
+    Some(match value {
+        Value::Unit => serde_json::Value::Null,
+        Value::Bool(value) => serde_json::Value::Bool(*value),
+        Value::Int { bits, prim } if prim.is_signed_int() => {
+            serde_json::Value::Number(serde_json::Number::from(*bits as i64))
+        }
+        Value::Int { bits, .. } => {
+            serde_json::Value::Number(serde_json::Number::from(*bits as u64))
+        }
+        Value::Float { .. } => serde_json::Number::from_f64(value.as_f64())
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
+        Value::Str(value) => serde_json::Value::String(value.to_string()),
+        Value::Record(fields) => serde_json::Value::Object(
+            fields
+                .iter()
+                .map(|(name, value)| Some((name.clone(), value_json(value)?)))
+                .collect::<Option<serde_json::Map<_, _>>>()?,
+        ),
+        Value::Vec(values) => serde_json::Value::Array(
+            values
+                .borrow()
+                .iter()
+                .map(value_json)
+                .collect::<Option<Vec<_>>>()?,
+        ),
+        Value::Own(inner) => return value_json(inner),
+        _ => return None,
+    })
+}
+
+fn db_pool_path(value: Option<&Value>) -> Option<Rc<str>> {
+    match value? {
+        Value::DbPool(path) => Some(path.clone()),
+        Value::Own(inner) => db_pool_path(Some(inner)),
+        _ => None,
+    }
+}
+
+fn db_transaction(value: Option<&Value>) -> Option<Rc<RefCell<DbTransaction>>> {
+    match value? {
+        Value::DbTx(tx) => Some(tx.clone()),
+        Value::Own(inner) => db_transaction(Some(inner)),
+        _ => None,
+    }
+}
+
+fn db_sql(sql: Option<&Value>, params: Option<&Value>) -> Result<String, Flow> {
+    let source = match sql {
+        Some(Value::Str(value)) => value.to_string(),
+        _ => return Err(db_error()),
+    };
+    let values = match params {
+        None => Vec::new(),
+        Some(Value::Vec(values)) => values
+            .borrow()
+            .iter()
+            .map(|value| match value {
+                Value::Str(text) => Ok(format!("'{}'", text.replace('\'', "''"))),
+                _ => Err(db_error()),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err(db_error()),
+    };
+    let mut output = String::with_capacity(source.len() + values.len() * 8);
+    let mut quoted = false;
+    let mut parameter = 0;
+    let mut characters = source.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\'' {
+            output.push(character);
+            if quoted && characters.peek() == Some(&'\'') {
+                output.push(characters.next().unwrap());
+            } else {
+                quoted = !quoted;
+            }
+        } else if character == '?' && !quoted {
+            let value = values.get(parameter).ok_or_else(db_error)?;
+            output.push_str(value);
+            parameter += 1;
+        } else {
+            output.push(character);
+        }
+    }
+    if parameter != values.len() {
+        return Err(db_error());
+    }
+    Ok(output)
+}
+
+fn db_sqlite(path: &str, sql: &str, json: bool) -> Result<String, Flow> {
+    let mut command = std::process::Command::new("sqlite3");
+    if json {
+        command.arg("-json");
+    }
+    let output = command
+        .arg(path)
+        .arg(sql)
+        .output()
+        .map_err(|_| db_error())?;
+    if !output.status.success() {
+        return Err(db_error());
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(if json && text.is_empty() {
+        "[]".into()
+    } else {
+        text
+    })
 }
 
 /// Evaluate a call at compile time, for constant folding.

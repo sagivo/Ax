@@ -57,6 +57,10 @@ pub fn runtime_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
 }
 
+pub fn db_runtime_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/ax-db/runtime")
+}
+
 pub fn build_native(
     intern: &Interner,
     checked: &CheckOutput,
@@ -85,7 +89,8 @@ pub fn build_tier(
     std::fs::write(&c_path, &c_src).map_err(|e| e.to_string())?;
 
     let rt = runtime_dir();
-    let sources = [rt.join("axrt.c"), rt.join("axlang.c")];
+    let db_rt = db_runtime_dir();
+    let sources = [rt.join("axrt.c"), rt.join("axlang.c"), db_rt.join("axdb.c")];
     for s in &sources {
         if !s.exists() {
             return Err(format!("missing runtime {}", s.display()));
@@ -116,11 +121,12 @@ pub fn build_tier(
     }
     cmd.args(["-std=c11", "-pthread"])
         .arg(format!("-I{}", rt.display()))
+        .arg(format!("-I{}", db_rt.display()))
         .arg(&c_path);
     for s in &sources {
         cmd.arg(s);
     }
-    cmd.arg("-lm").arg("-o").arg(&bin_path);
+    cmd.arg("-lm").arg("-lsqlite3").arg("-o").arg(&bin_path);
     let out = cmd.output().map_err(|e| format!("spawn cc: {e}"))?;
     if !out.status.success() {
         if tier == Tier::Portable {

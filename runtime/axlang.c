@@ -913,7 +913,8 @@ static bool js_store(unsigned char *rec, const AxFieldDesc *f, double num,
         return true;
     }
     if (is_str || (f->kind == AX_FLD_BOOL) != is_bool) return false;
-    if (f->kind != AX_FLD_BOOL && (!isfinite(num) || num != trunc(num))) return false;
+    if (f->kind != AX_FLD_BOOL && !isfinite(num)) return false;
+    if ((f->kind <= AX_FLD_U64) && num != trunc(num)) return false;
     switch (f->kind) {
         case AX_FLD_I8: if (num < INT8_MIN || num > INT8_MAX) return false; else { int8_t v = (int8_t)num; memcpy(slot, &v, 1); break; }
         case AX_FLD_I16: if (num < INT16_MIN || num > INT16_MAX) return false; else { int16_t v = (int16_t)num; memcpy(slot, &v, 2); break; }
@@ -1059,6 +1060,121 @@ bool ax_rt_json_decode_record(const AxAlloc *a, const AxStr *raw,
         ok = false;
     free(wrapped);
     return ok;
+}
+
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} AxJsonOut;
+
+static void jo_reserve(AxJsonOut *out, size_t extra) {
+    if (out->len + extra <= out->cap) return;
+    size_t cap = out->cap ? out->cap : 128;
+    while (cap < out->len + extra) cap *= 2;
+    char *data = (char *)realloc(out->data, cap);
+    if (!data) ax_abort("allocation failed");
+    out->data = data;
+    out->cap = cap;
+}
+
+static void jo_bytes(AxJsonOut *out, const char *data, size_t len) {
+    jo_reserve(out, len);
+    memcpy(out->data + out->len, data, len);
+    out->len += len;
+}
+
+static void jo_char(AxJsonOut *out, char value) {
+    jo_reserve(out, 1);
+    out->data[out->len++] = value;
+}
+
+static void jo_string(AxJsonOut *out, const char *data, size_t len) {
+    static const char hex[] = "0123456789abcdef";
+    jo_char(out, '"');
+    for (size_t index = 0; index < len; index++) {
+        unsigned char value = (unsigned char)data[index];
+        if (value == '"' || value == '\\') {
+            jo_char(out, '\\');
+            jo_char(out, (char)value);
+        } else if (value == '\n') {
+            jo_bytes(out, "\\n", 2);
+        } else if (value == '\r') {
+            jo_bytes(out, "\\r", 2);
+        } else if (value == '\t') {
+            jo_bytes(out, "\\t", 2);
+        } else if (value < 0x20) {
+            char escape[6] = {'\\', 'u', '0', '0', hex[value >> 4], hex[value & 15]};
+            jo_bytes(out, escape, sizeof(escape));
+        } else {
+            jo_char(out, (char)value);
+        }
+    }
+    jo_char(out, '"');
+}
+
+static void jo_field(AxJsonOut *out, const AxFieldDesc *field,
+                     const unsigned char *record) {
+    const unsigned char *slot = record + field->offset;
+    char number[64];
+    int length = 0;
+    switch (field->kind) {
+        case AX_FLD_I8: { int8_t v; memcpy(&v, slot, 1); length = snprintf(number, sizeof(number), "%d", (int)v); } break;
+        case AX_FLD_I16: { int16_t v; memcpy(&v, slot, 2); length = snprintf(number, sizeof(number), "%d", (int)v); } break;
+        case AX_FLD_I32: { int32_t v; memcpy(&v, slot, 4); length = snprintf(number, sizeof(number), "%d", v); } break;
+        case AX_FLD_I64: { int64_t v; memcpy(&v, slot, 8); length = snprintf(number, sizeof(number), "%lld", (long long)v); } break;
+        case AX_FLD_U8: { uint8_t v; memcpy(&v, slot, 1); length = snprintf(number, sizeof(number), "%u", (unsigned)v); } break;
+        case AX_FLD_U16: { uint16_t v; memcpy(&v, slot, 2); length = snprintf(number, sizeof(number), "%u", (unsigned)v); } break;
+        case AX_FLD_U32: { uint32_t v; memcpy(&v, slot, 4); length = snprintf(number, sizeof(number), "%u", v); } break;
+        case AX_FLD_U64: { uint64_t v; memcpy(&v, slot, 8); length = snprintf(number, sizeof(number), "%llu", (unsigned long long)v); } break;
+        case AX_FLD_F32: { float v; memcpy(&v, slot, 4); length = snprintf(number, sizeof(number), "%.9g", (double)v); } break;
+        case AX_FLD_F64: { double v; memcpy(&v, slot, 8); length = snprintf(number, sizeof(number), "%.17g", v); } break;
+        case AX_FLD_BOOL: { bool v; memcpy(&v, slot, 1); jo_bytes(out, v ? "true" : "false", v ? 4 : 5); return; }
+        case AX_FLD_STR: { AxStr v; memcpy(&v, slot, sizeof(v)); jo_string(out, v.ptr, v.len); return; }
+    }
+    if (length > 0) jo_bytes(out, number, (size_t)length);
+}
+
+static void jo_record(AxJsonOut *out, const AxTypeDesc *desc,
+                      const unsigned char *record) {
+    jo_char(out, '{');
+    for (uint32_t index = 0; index < desc->n_fields; index++) {
+        if (index) jo_char(out, ',');
+        jo_string(out, desc->fields[index].name, strlen(desc->fields[index].name));
+        jo_char(out, ':');
+        jo_field(out, &desc->fields[index], record);
+    }
+    jo_char(out, '}');
+}
+
+static void jo_finish(const AxAlloc *alloc, AxJsonOut *buffer, AxStr *out) {
+    char *data = (char *)ax_alloc_raw(alloc, buffer->len + 1, 1);
+    if (!data) ax_abort("allocation failed");
+    memcpy(data, buffer->data, buffer->len);
+    data[buffer->len] = 0;
+    out->ptr = data;
+    out->len = buffer->len;
+    free(buffer->data);
+}
+
+void ax_rt_json_encode_record(const AxAlloc *a, const AxTypeDesc *desc,
+                              const void *record, AxStr *out) {
+    AxJsonOut buffer = {0};
+    jo_record(&buffer, desc, (const unsigned char *)record);
+    jo_finish(a, &buffer, out);
+}
+
+void ax_rt_json_encode_recs(const AxAlloc *a, const AxTypeDesc *desc,
+                            const AxVec *records, AxStr *out) {
+    AxJsonOut buffer = {0};
+    jo_char(&buffer, '[');
+    for (uint64_t index = 0; index < records->len; index++) {
+        if (index) jo_char(&buffer, ',');
+        const unsigned char *record = (const unsigned char *)records->data + index * desc->size;
+        jo_record(&buffer, desc, record);
+    }
+    jo_char(&buffer, ']');
+    jo_finish(a, &buffer, out);
 }
 
 /* ---- capabilities ------------------------------------------------------ */
@@ -1275,6 +1391,21 @@ void ax_rt_argv(int32_t i, AxStr *out) {
     }
     out->ptr = g_argv[i];
     out->len = strlen(g_argv[i]);
+}
+
+void ax_rt_env_get_or(const AxStr *name, const AxStr *fallback, AxStr *out) {
+    char *key = (char *)malloc(name->len + 1);
+    if (!key) ax_abort("allocation failed");
+    memcpy(key, name->ptr, name->len);
+    key[name->len] = 0;
+    const char *value = getenv(key);
+    free(key);
+    if (value) {
+        out->ptr = value;
+        out->len = strlen(value);
+    } else {
+        *out = *fallback;
+    }
 }
 
 /* ---- support for a backend that is not C ------------------------------- */

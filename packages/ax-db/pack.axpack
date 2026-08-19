@@ -1,0 +1,14 @@
+{
+  "api": 1,
+  "name": "db",
+  "version": "0.1.0",
+  "kind": "component",
+  "source_hash": "5685490b447f6ffaa917e80591e9703ac7676b2344c212c0b82863ca5219e097",
+  "files": {},
+  "deps": [
+    {
+      "name": "core",
+      "version": "0.1.0"
+    }
+  ]
+}
