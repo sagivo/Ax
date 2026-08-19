@@ -5242,7 +5242,8 @@ impl<'l, 'a> FnLower<'l, 'a> {
             }
             "test.read_cap" => Ok(Some(self.lower_read_cap(args)?)),
             "fs.read" => Ok(Some(self.lower_fs_read(args, e)?)),
-            "json.decode_recs" | "json.decode" => Ok(Some(self.lower_json_decode(args, e)?)),
+            "json.decode_recs" => Ok(Some(self.lower_json_decode(args, e, false)?)),
+            "json.decode" => Ok(Some(self.lower_json_decode(args, e, true)?)),
             "parse_i32" => {
                 let s = self.expr(&args[0])?;
                 let out = self.fb.alloc_slot(SlotKind::Scalar(IrTy::I32), "");
@@ -5682,9 +5683,51 @@ impl<'l, 'a> FnLower<'l, 'a> {
 
     /// `json.decode_recs(a, raw)` — decode into `Vec[R]` using `R`'s layout
     /// descriptor, so there is one decoder rather than one per record type.
-    fn lower_json_decode(&mut self, args: &[Expr], e: &Expr) -> Result<LVal, String> {
+    fn lower_json_decode(
+        &mut self,
+        args: &[Expr],
+        e: &Expr,
+        prefer_record: bool,
+    ) -> Result<LVal, String> {
         let alloc = self.expr(&args[0])?;
         let raw = self.expr(&args[1])?;
+        if prefer_record && self.container_elem(&self.ty_of_node(e.id)).is_err() {
+            let (_, agg) = self.ir_of(e)?;
+            let agg = agg.ok_or("native backend: `json.decode` has no record layout")?;
+            let desc = self.fb.push(Op::TypeDescriptor(agg), IrTy::Ptr);
+            let out = self.fb.alloc_slot(SlotKind::Agg(agg), "record");
+            let ok = self.fb.push(
+                Op::CallExt {
+                    name: "ax_rt_json_decode_record".into(),
+                    args: vec![alloc.v, raw.v, desc, out],
+                    ret: IrTy::Bool,
+                    fallible: false,
+                },
+                IrTy::Bool,
+            );
+            let good = self.fb.new_block();
+            let bad = self.fb.new_block();
+            self.fb.set_term(Term::Br {
+                cond: ok,
+                then_e: Edge {
+                    to: good,
+                    args: vec![],
+                },
+                else_e: Edge {
+                    to: bad,
+                    args: vec![],
+                },
+            });
+            self.fb.switch_to(bad);
+            let payload = self.error_payload_for("json.Error", "Invalid")?;
+            self.emit_raise(payload)?;
+            self.fb.switch_to(good);
+            return Ok(LVal {
+                v: out,
+                ty: IrTy::Ptr,
+                agg: Some(agg),
+            });
+        }
         let (_, vec_agg) = self.ir_of(e)?;
         let vec_agg = vec_agg.ok_or("native backend: `json.decode_recs` with no Vec layout")?;
         let elem_ty = self.container_elem(&self.ty_of_node(e.id))?;

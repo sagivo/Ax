@@ -169,9 +169,9 @@ fn show_post(request: http.Request, user_id: String, post_id: String) -> http.Re
 fn asset(request: http.Request, path: String) -> http.Response = api.ok(path);
 ```
 
-Parameters are raw, zero-copy views. They are not converted to integers or
-percent-decoded. A slash inside a `{name}` value does not match; a wildcard
-does include slashes. Query strings are excluded from path matching, so
+Parameters are decoded strings. A slash inside a `{name}` value does not match
+the route even when it is percent-encoded; a wildcard does include slashes.
+Query strings are excluded from path matching, so
 `/users/42/posts/7?verbose=1` still reaches the route.
 
 Routes are tested in declaration order. Put more specific static routes before
@@ -240,14 +240,14 @@ Every handler receives a typed `http.Request` record:
 | `request.headers` | Raw HTTP header lines |
 | `request.body` | Raw request body as a `String` |
 
-Named route options use zero-copy extraction helpers. `query=name` reads a
-query key, `header=Name` reads a case-insensitive header, and `session=name`
-reads a named cookie. Values are not URL-decoded; decode them in the handler if
-your API requires percent-encoded input.
+Named route options use extraction helpers. `query=name` reads a query key,
+`header=Name` reads a case-insensitive header, and `session=name` reads a named
+cookie. Path, query, and cookie values are percent-decoded; query `+` is
+interpreted as a space. Header values remain verbatim.
 
 Typed `body=Type` routes use Ax's descriptor-driven `json.decode` and catch
-malformed input as `422`. Missing record fields retain the decoder's zero value;
-add application-level checks when a field is required.
+malformed input as `422`. The native decoder rejects unknown or duplicate
+fields, missing fields, wrong primitive kinds, and numeric overflow.
 
 ## Returning a response
 
@@ -307,10 +307,11 @@ Every service automatically exposes:
 - `401` authentication and session-cookie guards when `// ax-api auth` or
   `// ax-api session` is configured.
 
-The generated OpenAPI document is intentionally minimal: it currently reports
-success responses as `200` and does not describe request bodies, headers,
-authentication, or error schemas. Treat it as a route inventory, not a complete
-contract.
+The generated OpenAPI document includes path, query, header, and cookie
+parameters, JSON request-body references for `body=Type` routes, common error
+responses, and an `apiAuth` security scheme when authentication is configured.
+Record schemas are represented as open objects because Ax's descriptor metadata
+is not available to the source generator.
 
 The server speaks HTTP/1.1. `// ax-api body_limit N` bounds request bodies and
 `// ax-api timeout_ms N` applies socket read/write timeouts. `ax-api run` can
@@ -401,20 +402,22 @@ sh bench/http/run.sh
 ```
 
 Results depend on the host, compiler, and load pattern. The current reactor has
-roughly a 4 KiB connection buffer; `body_limit` can lower the accepted request
-size but cannot raise that hard ceiling yet.
+one 64 KiB connection buffer; `body_limit` can lower the accepted request size
+and may be set up to 65,280 bytes.
 
 ## Implemented feature set and boundaries
 
 The framework now provides typed record JSON decoding, named query/header/cookie
 extraction, auth and session guards, CORS headers, nested and wildcard routes,
 configurable body/time-out limits, generated OpenAPI and interactive docs, a
-hot-reload watcher, Rustls TLS termination, and chunked response framing.
+dependency-aware hot-reload watcher, Rustls TLS termination, and chunked
+response framing.
 
-The remaining intentional boundaries are strict: JSON decoding follows Ax's
-record decoder (missing fields receive zero values), query and cookie values are
-returned raw rather than percent-decoded, and the native reactor still caps a
-single request/response around 4 KiB. Chunked request bodies are decoded before
-the handler receives `request.body`; `api.stream` provides chunked HTTP framing
-for bounded responses. True incremental producer callbacks require a future
-async stream type in the Ax core.
+Typed JSON bodies are schema-checked at the native boundary: malformed JSON,
+unknown or duplicate fields, missing fields, wrong primitive kinds, and numeric
+overflow all produce `422`. Path, query, and cookie values are percent-decoded
+(query `+` becomes a space). The native reactor bounds one connection at 64 KiB;
+`body_limit` may be set up to 65,280 bytes. Chunked request bodies are decoded
+before the handler receives `request.body`; `api.stream` provides chunked HTTP
+framing for bounded responses. True incremental producer callbacks still
+require a future async stream type in the Ax core.

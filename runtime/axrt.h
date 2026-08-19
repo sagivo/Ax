@@ -371,6 +371,8 @@ void ax_http_cookie(const AxStr *headers, const AxStr *name, AxStr *out);
    fields are left zeroed, extra fields are ignored. */
 bool ax_rt_json_decode_recs(const AxAlloc *a, const AxStr *raw,
                             const AxTypeDesc *desc, AxVec *out);
+bool ax_rt_json_decode_record(const AxAlloc *a, const AxStr *raw,
+                              const AxTypeDesc *desc, void *out);
 
 /* ---- filesystem (capability-mediated) ---------------------------------- */
 

@@ -455,7 +455,9 @@ static uint32_t g_srv_res_stream_off = 0;
 
 #define AX_SRV_MAX_WORKERS 64
 #define AX_SRV_MAX_EVENTS 256
-#define AX_SRV_INBUF 4096
+/* One connection owns one input and output buffer. 64 KiB keeps common JSON
+   APIs from hitting the old 4 KiB ceiling while remaining bounded per worker. */
+#define AX_SRV_INBUF 65536
 
 static int g_srv_fds[AX_SRV_MAX_WORKERS];
 static pthread_t g_srv_threads[AX_SRV_MAX_WORKERS - 1];
@@ -992,6 +994,9 @@ bool ax_http_path_match(const AxStr *path, const AxStr *pattern) {
     return xi == path->len;
 }
 
+static void ax_http_decode_value(const char *ptr, size_t len, int plus_space,
+                                 AxStr *out);
+
 void ax_http_path_param(const AxStr *path, const AxStr *pattern,
                            uint16_t wanted, AxStr *out) {
     size_t pi = 0, xi = 0, found = 0;
@@ -1000,8 +1005,7 @@ void ax_http_path_param(const AxStr *path, const AxStr *pattern,
     while (pi < pattern->len) {
         if (pattern->ptr[pi] == '*' && pi + 1 == pattern->len) {
             if (found == wanted) {
-                out->ptr = path->ptr + xi;
-                out->len = path->len - xi;
+                ax_http_decode_value(path->ptr + xi, path->len - xi, 0, out);
             }
             return;
         }
@@ -1011,8 +1015,7 @@ void ax_http_path_param(const AxStr *path, const AxStr *pattern,
             size_t len;
             if (!ax_http_segment(path, &xi, &seg, &len)) return;
             if (found++ == wanted) {
-                out->ptr = seg;
-                out->len = len;
+                ax_http_decode_value(seg, len, 0, out);
                 return;
             }
             pi += 2;
@@ -1031,6 +1034,40 @@ static int ax_http_ascii_equal(const char *a, size_t an,
     return 1;
 }
 
+/* Decode URL values into a thread-local ring so named arguments can retain
+   independent slices for the duration of one handler call. */
+#define AX_HTTP_DECODE_SLOTS 16
+static __thread char g_http_decode[AX_HTTP_DECODE_SLOTS][AX_SRV_INBUF];
+static __thread unsigned g_http_decode_slot;
+
+static int ax_http_hex(unsigned char c) {
+    if (c >= '0' && c <= '9') return (int)(c - '0');
+    if (c >= 'a' && c <= 'f') return (int)(c - 'a' + 10);
+    if (c >= 'A' && c <= 'F') return (int)(c - 'A' + 10);
+    return -1;
+}
+
+static void ax_http_decode_value(const char *ptr, size_t len, int plus_space,
+                                 AxStr *out) {
+    char *dst = g_http_decode[g_http_decode_slot++ % AX_HTTP_DECODE_SLOTS];
+    size_t written = 0;
+    for (size_t i = 0; i < len && written + 1 < AX_SRV_INBUF; i++) {
+        if (ptr[i] == '%' && i + 2 < len) {
+            int hi = ax_http_hex((unsigned char)ptr[i + 1]);
+            int lo = ax_http_hex((unsigned char)ptr[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                dst[written++] = (char)((hi << 4) | lo);
+                i += 2;
+                continue;
+            }
+        }
+        dst[written++] = plus_space && ptr[i] == '+' ? ' ' : ptr[i];
+    }
+    dst[written] = 0;
+    out->ptr = dst;
+    out->len = written;
+}
+
 void ax_http_query_param(const AxStr *query, const AxStr *name, AxStr *out) {
     out->ptr = "";
     out->len = 0;
@@ -1045,8 +1082,7 @@ void ax_http_query_param(const AxStr *query, const AxStr *name, AxStr *out) {
             while (at < query->len && query->ptr[at] != '&') at++;
         }
         if (ax_http_ascii_equal(query->ptr + key, key_len, name->ptr, name->len)) {
-            out->ptr = query->ptr + value;
-            out->len = at - value;
+            ax_http_decode_value(query->ptr + value, at - value, 1, out);
             return;
         }
         if (at < query->len && query->ptr[at] == '&') at++;
@@ -1094,8 +1130,7 @@ void ax_http_cookie(const AxStr *headers, const AxStr *name, AxStr *out) {
             while (at < cookie_header.len && cookie_header.ptr[at] != ';') at++;
             if (ax_http_ascii_equal(cookie_header.ptr + key, key_len,
                                     name->ptr, name->len)) {
-                out->ptr = cookie_header.ptr + value;
-                out->len = at - value;
+                ax_http_decode_value(cookie_header.ptr + value, at - value, 0, out);
                 return;
             }
         }

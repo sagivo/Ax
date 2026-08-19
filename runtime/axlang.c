@@ -12,6 +12,8 @@
 #include "axrt.h"
 
 #include <math.h>
+#include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -788,7 +790,23 @@ static bool js_string(AxJson *j, const char **start, size_t *len) {
     if (!js_eat(j, '"')) return false;
     const char *s = j->p;
     while (j->p < j->end && *j->p != '"') {
-        if (*j->p == '\\' && j->p + 1 < j->end) j->p++;
+        if ((unsigned char)*j->p < 0x20) return false;
+        if (*j->p == '\\') {
+            if (j->p + 1 >= j->end) return false;
+            char esc = j->p[1];
+            if (!(esc == '"' || esc == '\\' || esc == '/' || esc == 'b' ||
+                  esc == 'f' || esc == 'n' || esc == 'r' || esc == 't' ||
+                  esc == 'u')) return false;
+            if (esc == 'u') {
+                if (j->p + 5 >= j->end) return false;
+                for (size_t i = 2; i < 6; i++)
+                    if (!isxdigit((unsigned char)j->p[i])) return false;
+                j->p += 6;
+                continue;
+            }
+            j->p += 2;
+            continue;
+        }
         j->p++;
     }
     if (j->p >= j->end) return false;
@@ -801,19 +819,36 @@ static bool js_string(AxJson *j, const char **start, size_t *len) {
 static bool js_number(AxJson *j, double *out) {
     js_ws(j);
     const char *s = j->p;
-    if (j->p < j->end && (*j->p == '-' || *j->p == '+')) j->p++;
-    while (j->p < j->end && ((*j->p >= '0' && *j->p <= '9') || *j->p == '.' || *j->p == 'e' ||
-                             *j->p == 'E' || *j->p == '-' || *j->p == '+')) {
+    if (j->p < j->end && *j->p == '-') j->p++;
+    if (j->p >= j->end) return false;
+    if (*j->p == '0') {
         j->p++;
+        if (j->p < j->end && *j->p >= '0' && *j->p <= '9') return false;
+    } else {
+        if (*j->p < '1' || *j->p > '9') return false;
+        while (j->p < j->end && *j->p >= '0' && *j->p <= '9') j->p++;
     }
-    if (j->p == s) return false;
+    if (j->p < j->end && *j->p == '.') {
+        j->p++;
+        const char *fraction = j->p;
+        while (j->p < j->end && *j->p >= '0' && *j->p <= '9') j->p++;
+        if (j->p == fraction) return false;
+    }
+    if (j->p < j->end && (*j->p == 'e' || *j->p == 'E')) {
+        j->p++;
+        if (j->p < j->end && (*j->p == '-' || *j->p == '+')) j->p++;
+        const char *exponent = j->p;
+        while (j->p < j->end && *j->p >= '0' && *j->p <= '9') j->p++;
+        if (j->p == exponent) return false;
+    }
     char buf[64];
     size_t n = (size_t)(j->p - s);
     if (n >= sizeof(buf)) return false;
     memcpy(buf, s, n);
     buf[n] = 0;
-    *out = strtod(buf, NULL);
-    return true;
+    char *end = NULL;
+    *out = strtod(buf, &end);
+    return end && *end == 0 && isfinite(*out);
 }
 
 /* Skip one value of any shape, for fields the descriptor does not name. */
@@ -863,35 +898,37 @@ static bool js_skip(AxJson *j) {
     return js_number(j, &d);
 }
 
-static void js_store(unsigned char *rec, const AxFieldDesc *f, double num,
+static bool js_store(unsigned char *rec, const AxFieldDesc *f, double num,
                      const char *str, size_t str_len, bool is_str,
-                     const AxAlloc *a) {
+                     bool is_bool, const AxAlloc *a) {
     unsigned char *slot = rec + f->offset;
     if (f->kind == AX_FLD_STR) {
-        if (!is_str) return;
+        if (!is_str || is_bool) return false;
         /* Copy into the caller's allocator: the raw buffer may be reused. */
         char *p = (char *)ax_alloc_raw(a, str_len + 1, 1);
         memcpy(p, str, str_len);
         p[str_len] = 0;
         AxStr v = {p, str_len};
         memcpy(slot, &v, sizeof(v));
-        return;
+        return true;
     }
-    if (is_str) return;
+    if (is_str || (f->kind == AX_FLD_BOOL) != is_bool) return false;
+    if (f->kind != AX_FLD_BOOL && (!isfinite(num) || num != trunc(num))) return false;
     switch (f->kind) {
-        case AX_FLD_I8: { int8_t v = (int8_t)num; memcpy(slot, &v, 1); break; }
-        case AX_FLD_I16: { int16_t v = (int16_t)num; memcpy(slot, &v, 2); break; }
-        case AX_FLD_I32: { int32_t v = (int32_t)num; memcpy(slot, &v, 4); break; }
-        case AX_FLD_I64: { int64_t v = (int64_t)num; memcpy(slot, &v, 8); break; }
-        case AX_FLD_U8: { uint8_t v = (uint8_t)num; memcpy(slot, &v, 1); break; }
-        case AX_FLD_U16: { uint16_t v = (uint16_t)num; memcpy(slot, &v, 2); break; }
-        case AX_FLD_U32: { uint32_t v = (uint32_t)num; memcpy(slot, &v, 4); break; }
-        case AX_FLD_U64: { uint64_t v = (uint64_t)num; memcpy(slot, &v, 8); break; }
+        case AX_FLD_I8: if (num < INT8_MIN || num > INT8_MAX) return false; else { int8_t v = (int8_t)num; memcpy(slot, &v, 1); break; }
+        case AX_FLD_I16: if (num < INT16_MIN || num > INT16_MAX) return false; else { int16_t v = (int16_t)num; memcpy(slot, &v, 2); break; }
+        case AX_FLD_I32: if (num < INT32_MIN || num > INT32_MAX) return false; else { int32_t v = (int32_t)num; memcpy(slot, &v, 4); break; }
+        case AX_FLD_I64: if (num < (double)INT64_MIN || num > (double)INT64_MAX) return false; else { int64_t v = (int64_t)num; memcpy(slot, &v, 8); break; }
+        case AX_FLD_U8: if (num < 0 || num > UINT8_MAX) return false; else { uint8_t v = (uint8_t)num; memcpy(slot, &v, 1); break; }
+        case AX_FLD_U16: if (num < 0 || num > UINT16_MAX) return false; else { uint16_t v = (uint16_t)num; memcpy(slot, &v, 2); break; }
+        case AX_FLD_U32: if (num < 0 || num > UINT32_MAX) return false; else { uint32_t v = (uint32_t)num; memcpy(slot, &v, 4); break; }
+        case AX_FLD_U64: if (num < 0 || num > (double)UINT64_MAX) return false; else { uint64_t v = (uint64_t)num; memcpy(slot, &v, 8); break; }
         case AX_FLD_F32: { float v = (float)num; memcpy(slot, &v, 4); break; }
         case AX_FLD_F64: { double v = num; memcpy(slot, &v, 8); break; }
         case AX_FLD_BOOL: { bool v = num != 0.0; memcpy(slot, &v, 1); break; }
-        default: break;
+        default: return false;
     }
+    return true;
 }
 
 bool ax_rt_json_decode_recs(const AxAlloc *a, const AxStr *raw,
@@ -905,7 +942,10 @@ bool ax_rt_json_decode_recs(const AxAlloc *a, const AxStr *raw,
     if (!rec) ax_abort("out of memory");
     for (;;) {
         memset(rec, 0, desc->size);
+        bool *seen = (bool *)calloc(desc->n_fields ? desc->n_fields : 1, sizeof(bool));
+        if (!seen) ax_abort("out of memory");
         if (!js_eat(&j, '{')) {
+            free(seen);
             free(rec);
             return false;
         }
@@ -915,55 +955,82 @@ bool ax_rt_json_decode_recs(const AxAlloc *a, const AxStr *raw,
                 const char *key;
                 size_t key_len;
                 if (!js_string(&j, &key, &key_len) || !js_eat(&j, ':')) {
+                    free(seen);
                     free(rec);
                     return false;
                 }
                 const AxFieldDesc *f = NULL;
+                uint32_t field_index = 0;
                 for (uint32_t i = 0; i < desc->n_fields; i++) {
                     const AxFieldDesc *cand = &desc->fields[i];
                     if (strlen(cand->name) == key_len &&
                         memcmp(cand->name, key, key_len) == 0) {
                         f = cand;
+                        field_index = i;
                         break;
                     }
                 }
                 if (!f) {
-                    if (!js_skip(&j)) {
-                        free(rec);
-                        return false;
-                    }
+                    /* A typed body is a schema boundary: reject misspelled or
+                       unexpected fields instead of silently dropping data. */
+                    free(seen);
+                    free(rec);
+                    return false;
+                } else if (seen[field_index]) {
+                    free(seen);
+                    free(rec);
+                    return false;
                 } else {
+                    seen[field_index] = true;
+                    bool stored = false;
                     js_ws(&j);
                     if (j.p < j.end && *j.p == '"') {
                         const char *sv;
                         size_t sl;
                         if (!js_string(&j, &sv, &sl)) {
+                            free(seen);
                             free(rec);
                             return false;
                         }
-                        js_store(rec, f, 0, sv, sl, true, a);
+                        stored = js_store(rec, f, 0, sv, sl, true, false, a);
                     } else if (j.p < j.end && (*j.p == 't' || *j.p == 'f')) {
                         bool t = *j.p == 't';
                         if (!js_skip(&j)) {
+                            free(seen);
                             free(rec);
                             return false;
                         }
-                        js_store(rec, f, t ? 1.0 : 0.0, NULL, 0, false, a);
+                        stored = js_store(rec, f, t ? 1.0 : 0.0, NULL, 0, false, true, a);
                     } else {
                         double num;
                         if (!js_number(&j, &num)) {
+                            free(seen);
                             free(rec);
                             return false;
                         }
-                        js_store(rec, f, num, NULL, 0, false, a);
+                        stored = js_store(rec, f, num, NULL, 0, false, false, a);
+                    }
+                    if (!stored) {
+                        free(seen);
+                        free(rec);
+                        return false;
                     }
                 }
                 if (js_eat(&j, ',')) continue;
                 if (js_eat(&j, '}')) break;
+                free(seen);
                 free(rec);
                 return false;
             }
         }
+        for (uint32_t i = 0; i < desc->n_fields; i++) {
+            if (!seen[i]) {
+                free(seen);
+                free(rec);
+                return false;
+            }
+        }
+        free(seen);
         ax_rt_vec_push(out, rec, desc->size);
         if (js_eat(&j, ',')) continue;
         if (js_eat(&j, ']')) break;
@@ -972,6 +1039,26 @@ bool ax_rt_json_decode_recs(const AxAlloc *a, const AxStr *raw,
     }
     free(rec);
     return true;
+}
+
+bool ax_rt_json_decode_record(const AxAlloc *a, const AxStr *raw,
+                              const AxTypeDesc *desc, void *out) {
+    if (!raw || !desc || !out || raw->len > SIZE_MAX - 3) return false;
+    char *wrapped = (char *)malloc((size_t)raw->len + 3);
+    if (!wrapped) ax_abort("out of memory");
+    wrapped[0] = '[';
+    memcpy(wrapped + 1, raw->ptr, (size_t)raw->len);
+    wrapped[raw->len + 1] = ']';
+    wrapped[raw->len + 2] = 0;
+    AxStr array = {wrapped, (size_t)raw->len + 2};
+    AxVec values;
+    bool ok = ax_rt_json_decode_recs(a, &array, desc, &values);
+    if (ok && values.len == 1)
+        memcpy(out, values.data, desc->size);
+    else
+        ok = false;
+    free(wrapped);
+    return ok;
 }
 
 /* ---- capabilities ------------------------------------------------------ */

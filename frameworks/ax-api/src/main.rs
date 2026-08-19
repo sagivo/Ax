@@ -132,14 +132,33 @@ fn tls_run(
     let mut child = Command::new(binary)
         .spawn()
         .map_err(|e| format!("start {}: {e}", binary.display()))?;
+    for _ in 0..100 {
+        if TcpStream::connect(("127.0.0.1", backend_port)).is_ok() {
+            break;
+        }
+        if let Some(status) = child.try_wait().map_err(|e| format!("wait backend: {e}"))? {
+            return Err(format!(
+                "backend exited before TLS listener was ready: {status}"
+            ));
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| format!("configure TLS listener: {e}"))?;
     println!("ax-api: TLS listening on https://127.0.0.1:{tls_port}");
-    for incoming in listener.incoming() {
-        let stream = match incoming {
-            Ok(stream) => stream,
-            Err(e) => {
-                eprintln!("ax-api TLS accept: {e}");
+    loop {
+        if let Some(status) = child.try_wait().map_err(|e| format!("wait backend: {e}"))? {
+            eprintln!("ax-api: backend exited with {status}");
+            break;
+        }
+        let stream = match listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(25));
                 continue;
             }
+            Err(e) => return Err(format!("ax-api TLS accept: {e}")),
         };
         let config = Arc::clone(&config);
         thread::spawn(move || {
@@ -148,7 +167,9 @@ fn tls_run(
             }
         });
     }
-    let _ = child.kill();
+    if child.try_wait().ok().flatten().is_none() {
+        let _ = child.kill();
+    }
     let _ = child.wait();
     Ok(())
 }
@@ -205,12 +226,10 @@ fn parse_content_length(headers: &[u8]) -> Option<usize> {
 
 fn watch(source_path: &Path, tier: Tier, interval: Duration) -> Result<(), String> {
     let mut child: Option<Child> = None;
-    let mut last_modified = None;
+    let mut last_modified: Option<Vec<(PathBuf, std::time::SystemTime)>> = None;
     loop {
-        let modified = fs::metadata(source_path)
-            .and_then(|metadata| metadata.modified())
-            .map_err(|e| format!("stat {}: {e}", source_path.display()))?;
-        if last_modified != Some(modified) {
+        let modified = source_fingerprint(source_path)?;
+        if last_modified.as_ref() != Some(&modified) {
             if let Some(mut running) = child.take() {
                 let _ = running.kill();
                 let _ = running.wait();
@@ -226,6 +245,41 @@ fn watch(source_path: &Path, tier: Tier, interval: Duration) -> Result<(), Strin
         }
         thread::sleep(interval);
     }
+}
+
+fn source_fingerprint(source_path: &Path) -> Result<Vec<(PathBuf, std::time::SystemTime)>, String> {
+    let root = source_path
+        .parent()
+        .ok_or_else(|| format!("source has no parent: {}", source_path.display()))?;
+    let mut files = Vec::new();
+    fn visit(path: &Path, files: &mut Vec<(PathBuf, std::time::SystemTime)>) -> io::Result<()> {
+        let metadata = fs::metadata(path)?;
+        if metadata.is_file() {
+            if path.extension().and_then(|ext| ext.to_str()) == Some("ax") {
+                files.push((path.to_path_buf(), metadata.modified()?));
+            }
+            return Ok(());
+        }
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            visit(&entry.path(), files)?;
+        }
+        Ok(())
+    }
+    visit(root, &mut files).map_err(|e| format!("scan {}: {e}", root.display()))?;
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    if !files.iter().any(|(path, _)| path == source_path) {
+        let metadata = fs::metadata(source_path)
+            .map_err(|e| format!("stat {}: {e}", source_path.display()))?;
+        files.push((
+            source_path.to_path_buf(),
+            metadata.modified().map_err(|e| e.to_string())?,
+        ));
+    }
+    Ok(files)
 }
 
 fn source_arg(args: &[String]) -> Result<&Path, String> {

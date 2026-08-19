@@ -5,6 +5,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+const MAX_BODY_LIMIT: u32 = 65_280;
+const DEFAULT_BODY_LIMIT: u32 = MAX_BODY_LIMIT;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Route {
     pub method: String,
@@ -47,7 +50,7 @@ pub fn compile(source: &str) -> Result<(App, String), String> {
 
 fn parse_directives(source: &str) -> Result<App, String> {
     let mut port = 8080u16;
-    let mut body_limit = 3840u32;
+    let mut body_limit = DEFAULT_BODY_LIMIT;
     let mut timeout_ms = 0u32;
     let mut cors_origin = None;
     let mut auth_header = None;
@@ -75,10 +78,11 @@ fn parse_directives(source: &str) -> Result<App, String> {
                     line_index + 1
                 )
             })?;
-            if body_limit == 0 || body_limit > 3840 {
+            if body_limit == 0 || body_limit > MAX_BODY_LIMIT {
                 return Err(format!(
-                    "line {}: body_limit must be between 1 and 3840 bytes",
-                    line_index + 1
+                    "line {}: body_limit must be between 1 and {} bytes",
+                    line_index + 1,
+                    MAX_BODY_LIMIT
                 ));
             }
             continue;
@@ -373,18 +377,21 @@ fn handler_call(route: &Route) -> String {
 }
 
 fn handler_arguments(route: &Route) -> Vec<String> {
+    let body = route
+        .body_type
+        .as_ref()
+        .map(|_| "json.decode(test.alloc, request.body)".to_string());
+    handler_arguments_with_body(route, body.as_deref())
+}
+
+fn handler_arguments_with_body(route: &Route, body: Option<&str>) -> Vec<String> {
     let mut args = vec!["request".to_string()];
-    if route.params.len() == 1 && route.pattern.ends_with("{}") && !route.pattern.contains('*') {
-        let open = route.path.find('{').unwrap();
-        args.push(format!("str.drop(request.path, {open}usz)"));
-    } else {
-        for (index, _) in route.params.iter().enumerate() {
-            args.push(format!(
-                "http.path_param(request.path, {}, {}u16)",
-                ax_string(&route.pattern),
-                index
-            ));
-        }
+    for (index, _) in route.params.iter().enumerate() {
+        args.push(format!(
+            "http.path_param(request.path, {}, {}u16)",
+            ax_string(&route.pattern),
+            index
+        ));
     }
     for query in &route.query_params {
         args.push(format!(
@@ -404,9 +411,8 @@ fn handler_arguments(route: &Route) -> Vec<String> {
             ax_string(session)
         ));
     }
-    if let Some(body_type) = &route.body_type {
-        args.push(format!("json.decode(test.alloc, request.body)"));
-        let _ = body_type;
+    if let Some(body) = body {
+        args.push(body.to_string());
     }
     args
 }
@@ -414,12 +420,18 @@ fn handler_arguments(route: &Route) -> Vec<String> {
 fn generate_dispatch(app: &App) -> String {
     let mut out = String::new();
     for route in &app.routes {
-        if route.body_type.is_some() {
+        if let Some(body_type) = &route.body_type {
+            let decode_name = format!("__ax_api_decode_{}", route.handler);
+            let call_args =
+                handler_arguments_with_body(route, Some(&format!("{decode_name}(request)")));
+            out.push_str(&format!(
+                "fn {decode_name}(request: http.Request) -> {body_type} !{{alloc[a], err[json.Error]}} = json.decode(test.alloc, request.body);\n\n"
+            ));
             out.push_str(&format!(
                 "fn __ax_api_body_{}(request: http.Request) -> http.Response !{{alloc[a]}} =\n    match attempt {}({}) {{\n        Ok(response) => response;\n        Err(_) => http.response(422u16, \"{{\\\"error\\\":{{\\\"code\\\":\\\"invalid_json\\\",\\\"message\\\":\\\"Invalid JSON body\\\"}}}}\");\n    }};\n\n",
                 route.handler,
                 route.handler,
-                handler_arguments(route).join(", ")
+                call_args.join(", ")
             ));
         }
     }
@@ -472,7 +484,7 @@ fn generate_dispatch(app: &App) -> String {
         .join(" || ");
     out.push_str(&format!(
         "    else if {paths} {{\n        if request.method == \"OPTIONS\" {{\n            http.response(204u16, \"\")\n        }} else {{\n            http.response(405u16, \"{{\\\"error\\\":{{\\\"code\\\":\\\"method_not_allowed\\\",\\\"message\\\":\\\"Method not allowed\\\"}}}}\")\n        }}\n    }} else {{\n        http.response(404u16, \"{{\\\"error\\\":{{\\\"code\\\":\\\"not_found\\\",\\\"message\\\":\\\"Route not found\\\"}}}}\")\n    }};\n\nfn main() -> unit !{{io[net], abort}} = {} ;\n",
-        if app.body_limit == 3840 && app.timeout_ms == 0 && app.cors_origin.is_none() {
+        if app.body_limit == DEFAULT_BODY_LIMIT && app.timeout_ms == 0 && app.cors_origin.is_none() {
             format!("http.serve_handler({}u16, __ax_api_dispatch)", app.port)
         } else {
             format!(
@@ -524,7 +536,7 @@ fn openapi_document(app: &App) -> String {
         if path_index > 0 {
             out.push(',');
         }
-        out.push_str(&json_string(path));
+        out.push_str(&json_string(&openapi_path(path)));
         out.push_str(":{");
         for (route_index, route) in routes.iter().enumerate() {
             if route_index > 0 {
@@ -533,26 +545,88 @@ fn openapi_document(app: &App) -> String {
             out.push_str(&json_string(&route.method.to_ascii_lowercase()));
             out.push_str(":{\"operationId\":");
             out.push_str(&json_string(&route.handler));
-            if !route.params.is_empty() {
+            let mut parameters = Vec::new();
+            parameters.extend(route.params.iter().map(|name| {
+                format!(
+                    "{{\"name\":{},\"in\":\"path\",\"required\":true,\"schema\":{{\"type\":\"string\"}}}}",
+                    json_string(name)
+                )
+            }));
+            parameters.extend(route.query_params.iter().map(|name| {
+                format!(
+                    "{{\"name\":{},\"in\":\"query\",\"required\":false,\"schema\":{{\"type\":\"string\"}}}}",
+                    json_string(name)
+                )
+            }));
+            parameters.extend(route.header_params.iter().map(|name| {
+                format!(
+                    "{{\"name\":{},\"in\":\"header\",\"required\":false,\"schema\":{{\"type\":\"string\"}}}}",
+                    json_string(name)
+                )
+            }));
+            parameters.extend(route.session_params.iter().map(|name| {
+                format!(
+                    "{{\"name\":{},\"in\":\"cookie\",\"required\":false,\"schema\":{{\"type\":\"string\"}}}}",
+                    json_string(name)
+                )
+            }));
+            if !parameters.is_empty() {
                 out.push_str(",\"parameters\":[");
-                for (param_index, param) in route.params.iter().enumerate() {
-                    if param_index > 0 {
-                        out.push(',');
-                    }
-                    out.push_str("{\"name\":");
-                    out.push_str(&json_string(param));
-                    out.push_str(
-                        ",\"in\":\"path\",\"required\":true,\"schema\":{\"type\":\"string\"}}",
-                    );
-                }
+                out.push_str(&parameters.join(","));
                 out.push(']');
             }
-            out.push_str(",\"responses\":{\"200\":{\"description\":\"Success\"}}}");
+            if let Some(body_type) = &route.body_type {
+                out.push_str(",\"requestBody\":{\"required\":true,\"content\":{\"application/json\":{\"schema\":{\"$ref\":");
+                out.push_str(&json_string(&format!("#/components/schemas/{body_type}")));
+                out.push_str("}}}}");
+            }
+            if app.auth_header.is_some() {
+                out.push_str(",\"security\":[{\"apiAuth\":[]}]");
+            }
+            out.push_str(",\"responses\":{\"200\":{\"description\":\"Success\"},\"400\":{\"description\":\"Bad request\"},\"401\":{\"description\":\"Unauthorized\"},\"404\":{\"description\":\"Not found\"}}}");
         }
         out.push('}');
     }
-    out.push_str("}}");
+    out.push_str("},\"components\":{\"schemas\":{");
+    let mut body_types = app
+        .routes
+        .iter()
+        .filter_map(|route| route.body_type.as_deref())
+        .collect::<Vec<_>>();
+    body_types.sort_unstable();
+    body_types.dedup();
+    for (index, body_type) in body_types.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(&json_string(body_type));
+        out.push_str(":{\"type\":\"object\",\"additionalProperties\":true}");
+    }
+    out.push_str("},\"securitySchemes\":{");
+    if app.auth_header.is_some() {
+        out.push_str("\"apiAuth\":{\"type\":\"apiKey\",\"in\":\"header\",\"name\":");
+        out.push_str(&json_string(
+            app.auth_header.as_deref().unwrap_or("Authorization"),
+        ));
+        out.push('}');
+    }
+    out.push_str("}}}");
     out
+}
+
+fn openapi_path(path: &str) -> String {
+    path.split('/')
+        .map(|segment| {
+            if segment.starts_with('{') && segment.ends_with('}') {
+                segment.to_string()
+            } else if let Some(name) = segment.strip_prefix('*') {
+                format!("{{{name}}}")
+            } else {
+                segment.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 struct JsonLiteralParser<'a> {
@@ -976,7 +1050,7 @@ mod tests {
         assert_eq!(app.port, 8080);
         assert_eq!(app.routes.len(), 3);
         assert!(generated.contains("health(request)"));
-        assert!(generated.contains("show_item(request, str.drop(request.path"));
+        assert!(generated.contains("show_item(request, http.path_param(request.path"));
         assert!(generated.contains("http.serve_handler(8080u16, __ax_api_dispatch)"));
         assert!(generated.contains("request.path == \"/openapi.json\""));
         assert!(generated.contains("openapi\\\":\\\"3.1.0"));

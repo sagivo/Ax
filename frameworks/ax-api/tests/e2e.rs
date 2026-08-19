@@ -46,10 +46,13 @@ fn standalone_build_routes_real_http_requests() {
 // ax-api GET /users/{{user}}/posts/{{post_id}} -> nested query=expand header=X-Trace
 // ax-api GET /stream -> stream
 // ax-api POST /items -> create
+// ax-api POST /typed -> create_typed body=Item
+type Item = {{name: String, count: u64}};
 fn show(request: http.Request, id: String) -> http.Response = api.ok(id);
 fn nested(request: http.Request, user: String, post_id: String, expand: String, trace: String) -> http.Response = api.ok(expand);
 fn stream(request: http.Request) -> http.Response = api.stream("hello");
 fn create(request: http.Request) -> http.Response = api.created(request.body);
+fn create_typed(request: http.Request, item: Item) -> http.Response = api.ok(item.name);
 "#
         ),
     )
@@ -91,16 +94,22 @@ fn create(request: http.Request) -> http.Response = api.created(request.body);
     assert!(shown.starts_with("HTTP/1.1 200 OK\r\n"), "{shown}");
     assert!(shown.ends_with("\r\n\r\n42"), "{shown}");
 
+    let decoded = request(
+        port,
+        "GET /items/a%2Fb?expand=hello+world HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(decoded.ends_with("\r\n\r\na/b"), "{decoded}");
+
     let nested = request(
         port,
-        "GET /users/alice/posts/7?expand=comments HTTP/1.1\r\nHost: localhost\r\nX-Trace: e2e\r\nConnection: close\r\n\r\n",
+        "GET /users/alice/posts/7?expand=hello+world HTTP/1.1\r\nHost: localhost\r\nX-Trace: e2e\r\nConnection: close\r\n\r\n",
     );
     assert!(nested.starts_with("HTTP/1.1 200 OK\r\n"), "{nested}");
     assert!(
         nested.contains("Access-Control-Allow-Origin: *\r\n"),
         "{nested}"
     );
-    assert!(nested.ends_with("\r\n\r\ncomments"), "{nested}");
+    assert!(nested.ends_with("\r\n\r\nhello world"), "{nested}");
 
     let streamed = request(
         port,
@@ -129,6 +138,22 @@ fn create(request: http.Request) -> http.Response = api.created(request.body);
     assert!(chunked.starts_with("HTTP/1.1 201 Created\r\n"), "{chunked}");
     assert!(chunked.ends_with("\r\n\r\n{\"name\":\"x\"}"), "{chunked}");
 
+    let typed = request(
+        port,
+        "POST /typed HTTP/1.1\r\nHost: localhost\r\nContent-Length: 25\r\nConnection: close\r\n\r\n{\"name\":\"typed\",\"count\":1}",
+    );
+    assert!(typed.starts_with("HTTP/1.1 200 OK\r\n"), "{typed}");
+    assert!(typed.ends_with("\r\n\r\n\"typed\""), "{typed}");
+
+    let invalid_typed = request(
+        port,
+        "POST /typed HTTP/1.1\r\nHost: localhost\r\nContent-Length: 29\r\nConnection: close\r\n\r\n{\"name\":\"typed\",\"extra\":1}",
+    );
+    assert!(
+        invalid_typed.starts_with("HTTP/1.1 422 Unprocessable Content\r\n"),
+        "{invalid_typed}"
+    );
+
     let missing = request(
         port,
         "GET /missing HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
@@ -146,6 +171,8 @@ fn create(request: http.Request) -> http.Response = api.created(request.body);
     assert!(schema.starts_with("HTTP/1.1 200 OK\r\n"), "{schema}");
     assert!(schema.contains("\"openapi\":\"3.1.0\""), "{schema}");
     assert!(schema.contains("\"/items/{id}\""), "{schema}");
+    assert!(schema.contains("\"in\":\"query\""), "{schema}");
+    assert!(schema.contains("\"in\":\"header\""), "{schema}");
 
     let _ = server.0.kill();
     let _ = server.0.wait();
