@@ -1,4 +1,4 @@
-//! Attempts-to-green harness: does the compiler protocol actually save an agent
+//! Development-only attempts-to-green harness: does the protocol save an agent
 //! work?
 //!
 //! **What this measures.** Both arms face the same task: a program with one hole

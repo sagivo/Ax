@@ -7,18 +7,18 @@ Open items from spec v0.3 §2. These MUST be a CI report, not a judgment call.
 Status: **K1's numeric condition is met; the language proceeds on other
 grounds, which are now measured rather than asserted.**
 
-The earlier entry here cited `ax eval-loop` as "the in-repo evidence that
+The earlier entry here cited `ax-dev eval-loop` as "the in-repo evidence that
 shipping the language is not the K1 case". That citation was wrong, and the
 reason it was wrong matters more than the number: `eval-loop` compares
 **ax + protocol** against **rust − protocol**, which is one diagonal of a
 two-factor design. The language and the protocol are perfectly confounded in
 it, so its result is *equally* consistent with "the protocol was the whole
 value" — the K1 hypothesis. A diagonal cannot refute K1; it cannot address it
-at all. `ax k1` now runs all four cells.
+at all. `ax-dev k1` now runs all four cells.
 
 | ID | Condition | Status | Notes |
 |---|---|---|---|
-| K1 | `rust + tooling` improves attempts-to-green ≥ 35% over bare Rust | **YES, fires** (harness: `ax k1`) | 3.0 → 1.0 median attempts, a 67% improvement. See E1 below |
+| K1 | `rust + tooling` improves attempts-to-green ≥ 35% over bare Rust | **YES, fires** (harness: `ax-dev k1`) | 3.0 → 1.0 median attempts, a 67% improvement. See E1 below |
 | K2 | `ax-mock` improves < 10% over `rust + tooling` | **open** | needs n=200 model completions |
 | K3 | Model pass@1 on `ax-mock` prompts < 60% of its Rust pass@1 | **open** | needs a model |
 | K4 | Human reviewers rate `ax-mock` diffs harder to review than Rust | **open** | needs a review panel |
@@ -37,7 +37,7 @@ not as a licence to ignore it: the replacement condition should be **"a protocol
 over Rust closes the silent-wrongness and mechanism-coverage gap in E2"**, which
 is the claim that would actually make the language redundant.
 
-### E1 — attempts-to-green, all four cells (`ax k1`)
+### E1 — attempts-to-green, all four cells (`ax-dev k1`)
 
 Medians over 4 seeds, n=12 each. An attempt is one build-and-run cycle; a probe
 is a static query that builds nothing. The `rust + proto` arm verifies each
@@ -83,7 +83,7 @@ Ax protocol is built for. Both protocol arms now benefit from that equally, so
 the comparison is fair *within* the shape — but no task here can exercise the
 semantics, which is why E2 exists.
 
-### E2 — silent-wrongness and tier divergence (`ax silent-wrongness`)
+### E2 — silent-wrongness and tier divergence (`ax-dev silent-wrongness`)
 
 The axis E1 cannot reach. 11 hand-written hazards; for each, the same intent in
 both languages, run on every tier. Nothing here depends on `ax check` being
@@ -240,8 +240,8 @@ from first principles, for a program that writes programs:
 
 **What stays Rust, and why.** The compiler is still a Rust program.
 The conventional / terse / verbose parsers stay so the four backends
-keep proving the same IR against the existing corpus, `ax k1`, and
-`ax silent-wrongness`. Those measurements are about *semantics*, not
+keep proving the same IR against the existing corpus, `ax-dev k1`, and
+`ax-dev silent-wrongness`. Those measurements are about *semantics*, not
 syntax, and rewriting 120 conformance files in the same change would
 confound them. Rust is the implementation language and the corpus
 dialect. It is not the identity of Ax.
@@ -268,11 +268,11 @@ proving the IR. `--surface ax` is the name; `dense` remains an alias.
 ## R-15 — accept-and-elide is frozen (2026-08-18)
 
 No agent-facing command emits the conventional dialect. `ax fmt`,
-`ax hole --fills`, `ax types`, `ax complete`, `ax translate`, and
+`ax hole --fills`, `ax types`, `ax complete`, `ax-dev translate`, and
 `ax patch` speak tree when the source is tree. Accept-and-elide
 (`pub`, `unsafe`, `.clone()`, Rust `struct`/`enum`/`impl`) stays in
-the corpus parser so `conformance/`, `ax k1`'s rust cell, and
-`ax silent-wrongness` keep measuring *semantics*. It is not extended.
+the corpus parser so `conformance/`, `ax-dev k1`'s rust cell, and
+`ax-dev silent-wrongness` keep measuring *semantics*. It is not extended.
 A new elision is a language change and needs an entry here.
 
 `std/core/lib.ax` and `ax-mock` remain conventional on purpose: they
@@ -286,14 +286,27 @@ historical kernel continuity. The public use-case corpus compares TypeScript,
 Python, C, Rust, and compiler-checked Ax; a test fails if Ax is no longer the
 smallest corpus total in either vocabulary.
 
+The exact tokenizer, corpus, report generator, and density gate live in the
+non-publishable `tools/ax-density` workspace crate. They are not Ax library
+APIs, are not exposed by the shipped `ax` CLI, and are excluded from the
+workspace's default build. The core package has no model-tokenizer dependency.
+
 Accepted surface changes:
 
 - omitted parameter/result types are `I`: `#add(a,b)=a+b`;
 - `a,b:T` shares a non-default type across parameters and result;
 - `c??t:e` replaces two-arm `$c{t}{e}` in printed Ax (`$c{t}` remains);
 - `!a` is `!alloc[a]`;
+- nullary functions may omit `()` (`#f=...`);
+- `M` is the default `Map[String,i32]` shape;
+- dense omitted effect rows infer allocation when map literals require it;
+- bare interpolation quotes, bare simple map keys, and bare `?` (meaning `?0`)
+  are packed forms with checked conventional expansions;
+- a map-literal binding permits bare string-key indexing (`m[e]`), expanded to
+  the quoted conventional key before type checking;
 - `%{literal:literal}` is a homogeneous inferred map literal and lowers to the
   existing allocation/insertion operations;
+- `name%{...}` binds a map literal without a separate `=` token;
 - `e|d` expands through `attempt`, so a handled error does not falsely escape;
 - the printer removes optional whitespace and declaration terminators.
 
@@ -302,9 +315,21 @@ vocabularies; common ASCII pairs such as `??`, `+/`, `:=`, and `<-` are one.
 The language adopts K/BQN/Jelly's semantic density—reductions, inferred
 structure, implicit defaults—without adopting byte-golf code pages.
 
+## R-23 — shipped compiler and repository tools are separate packages (2026-08-18)
+
+`crates/ax` contains the language implementation and agent-facing compiler
+protocol only. Repository validation, experiments, benchmarking, fuzzing,
+corpus harvesting, and translation live in the non-publishable `tools/ax-dev`
+crate. Model-token measurement remains separately isolated in
+`tools/ax-density`.
+
+Both tool crates depend on Ax; Ax never depends on either tool crate. They are
+excluded from the workspace's `default-members`, their commands are absent from
+`ax help`, and their source trees are absent from the packaged `ax` crate.
+
 ## R-16 — measure the tree, not the coat (2026-08-18)
 
-`ax eval-loop` / `ax k1` hidden tasks now start as trees
+`ax-dev eval-loop` / `ax-dev k1` hidden tasks now start as trees
 (`(+ a ?)`, `(block (let x i32 n) ?)`). Attempts-to-green on
 `examples/holes.ax` is a tree file. Silent-wrongness stays on the
 corpus dialect because E2 is a *semantic* comparison with Rust; a

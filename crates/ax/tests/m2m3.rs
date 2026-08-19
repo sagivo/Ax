@@ -53,12 +53,6 @@ fn dense_loop_and_bind_same_value() {
     let va = ax::driver::run_main(&a.intern, &oa, 0).unwrap();
     let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
     assert_eq!(va.display(), vb.display());
-    let ax_t = ax::tokens::count(conv).tokens;
-    let d_t = ax::tokens::count(&dense).tokens;
-    assert!(
-        d_t < ax_t,
-        "dense {d_t} should be < conventional {ax_t}\n{dense}"
-    );
 }
 
 #[test]
@@ -141,10 +135,6 @@ fn dense_compound_assign_same_value() {
     let vb = ax::driver::run_main(&b.intern, &ob, 0).unwrap();
     assert_eq!(va.display(), vb.display());
     assert_eq!(va.display(), "3i32");
-    assert!(
-        ax::tokens::count("s += i").tokens < ax::tokens::count("s = s + i").tokens,
-        "+= must be cheaper than s = s + i"
-    );
 }
 
 #[test]
@@ -187,9 +177,6 @@ fn dense_packer_removes_optional_signature_types_and_space() {
     s.surface = Surface::Dense;
     s.compile("packed.ax", &dense)
         .unwrap_or_else(|d| panic!("{dense}\n{d:?}"));
-    assert!(
-        ax::tokens::count("#add(a,b)=a+b").tokens < ax::tokens::count("#add(a I,b I)I=a+b").tokens
-    );
 }
 
 #[test]
@@ -224,7 +211,7 @@ fn dense_inferred_map_literal_matches_expanded_form() {
 
     let conventional = "module t;\nfn main() -> i64 !{alloc[a]} = { let mut m: Map[String, i64] = map.new(test.alloc); m.insert(\"e\", 2i64); m.insert(\"o\", 3i64); match m.get(\"e\") { Some(v) => v; None => 0; } + match m.get(\"o\") { Some(v) => v; None => 0; } };\n";
     let packed = to_dense(conventional);
-    assert!(packed.contains("%{\"e\":2L,\"o\":3L}"), "{packed}");
+    assert!(packed.contains("%{e:2L,o:3L}"), "{packed}");
 }
 
 #[test]
@@ -261,7 +248,6 @@ fn dense_k_reduce_sum_same_value() {
         .unwrap_or_else(|err| panic!("bare={bare}\n{err:?}"));
     let vd = ax::driver::run_main(&d.intern, &od, 0).unwrap();
     assert_eq!(vd.display(), "45usz");
-    assert_eq!(ax::tokens::count("+/n").tokens, 2);
 }
 
 #[test]
@@ -299,14 +285,6 @@ fn dense_inc_and_len_same_value() {
         .unwrap_or_else(|d| panic!("written={written}\n{d:?}"));
     let vc = ax::driver::run_main(&c.intern, &oc, 0).unwrap();
     assert_eq!(vc.display(), va.display());
-    assert!(
-        ax::tokens::count("xs#").tokens < ax::tokens::count("xs.len()").tokens,
-        "xs# must be cheaper than xs.len()"
-    );
-    assert!(
-        ax::tokens::count("s++").tokens < ax::tokens::count("s += 1").tokens,
-        "s++ must be cheaper than s += 1"
-    );
 }
 
 #[test]
@@ -357,7 +335,6 @@ fn dense_vec_reduce_and_empty() {
         .unwrap_or_else(|err| panic!("prod={prod}\n{err:?}"));
     let ve = ax::driver::run_main(&e.intern, &oe, 0).unwrap();
     assert_eq!(ve.display(), "6usz");
-    assert_eq!(ax::tokens::count("+/xs#").tokens, 3);
 }
 
 #[test]
@@ -398,7 +375,7 @@ fn main() -> i64 !{alloc[a]} = {
 "#;
     let dense = to_dense(conv);
     assert!(
-        dense.contains("%{\"k\":7L}"),
+        dense.contains("%{k:7L}"),
         "expected map-literal pack, got {dense}"
     );
     assert!(
@@ -431,8 +408,6 @@ fn main() -> i64 !{alloc[a]} = {
         .unwrap_or_else(|err| panic!("push={push}\n{err:?}"));
     let vd = ax::driver::run_main(&d.intern, &od, 0).unwrap();
     assert_eq!(vd.display(), "5usz");
-    assert!(ax::tokens::count("xs<-e").tokens < ax::tokens::count("xs.push(e)").tokens);
-    assert!(ax::tokens::count("m[k]<-v").tokens < ax::tokens::count("m.insert(k, v)").tokens);
 }
 
 #[test]

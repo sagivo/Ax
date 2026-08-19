@@ -64,6 +64,7 @@ name--              assign `name = name - 1`
 #name(a T, b U) R = body
 #name(a T) R !err[E] = body
 #name() R !alloc[a] = body
+#f=body
 #add(a,b)=a+b
 #same(a,b:L)=a+b
 ```
@@ -123,18 +124,27 @@ by construction.
 []                  empty vec
 %                   empty map
 %{"k":2L}           inferred homogeneous map literal (`M[S,L]` here)
+%{k:2}               same literal with a bare identifier key
+name%{k:2}           bind a map literal to `name`
+M                    default `Map[String,i32]` in dense signatures
 xs#                 length of `xs`
 xs[i]               element `i` (aborts if out of range, unless proven)
 xs<-e               append `e`
 xs[i]<-v            store `v` at `i`
 m[k]<-v             insert `k → v`
 m[k]?d              get `k`, or `d` if missing
+m[k]?               get `k`, or zero if missing
+m[e]                bare string-key get after a map-literal binding
 ```
 
 `[]`, `%`, and `%{k:v}` allocate from the test allocator. Literal key
 and value types are inferred from homogeneous literals. `xs[i]` and
 `xs[i]<-v` use a numeric index. `m[k]<-v` / `m[k]?d` use a key
 (usually a string).
+
+Simple identifier keys may omit quotes in a literal. A bare `?` is the
+zero-default form; use `?d` for any other fallback. After `m%{...}` binds a
+map, a simple bare key such as `m[e]` expands to `m["e"]` before checking.
 
 ## Errors
 
@@ -157,7 +167,9 @@ Inferred from the body, checked against the signature.
 #f() I !io[c] = …
 ```
 
-`!a` is the compact spelling of the common `!alloc[a]` row.
+`!a` is the compact spelling of the common `!alloc[a]` row. Dense functions may
+omit allocation metadata when a map literal makes it inferable; conventional
+syntax remains explicit.
 
 Omit the row and `diverge` is reconstructed from `@` / `loop`. An
 explicit empty row claims termination.

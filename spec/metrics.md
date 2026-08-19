@@ -1,6 +1,6 @@
 # Ax metrics
 
-Measured on this machine (Apple arm64, Darwin 25.5), `ax bench metrics`. Every
+Measured on this machine (Apple arm64, Darwin 25.5), `ax-dev bench metrics`. Every
 row is the *same algorithm* in each language, and the harness refuses to report a
 time unless all backends printed the same value. Times include process spawn.
 
@@ -129,7 +129,7 @@ the four loop kernels remain the honest measure of code generation.
 
 ### Why compute parity is the ceiling, not a shortfall
 
-`ax bench metrics` runs a roofline check: the same LCG loop as one dependent
+`ax-dev bench metrics` runs a roofline check: the same LCG loop as one dependent
 chain, then as **four independent chains** doing four times the multiplies.
 
 ```
@@ -308,7 +308,7 @@ The C tier stays for release, where 200 ms buys `-O3 -flto`.
 
 `ax check` being ~10⁴× faster than `rustc` is the number that matters for the
 agent loop: it is what makes verifying fifty candidate hole fills cheaper than
-compiling once (see `ax eval-loop`).
+compiling once (see `ax-dev eval-loop`).
 
 ## Interpreter
 
@@ -322,7 +322,7 @@ running.
 The goal this serves is that a model pays less. Two different questions hide
 behind "low token usage", and only one of them favours Ax.
 
-**Tokens per source file** (`ax bench tokens`, six kernels, proxy tokenizer
+**Tokens per source file** (`ax-dev bench tokens`, six kernels, proxy tokenizer
 applied identically to every language, verified same-program):
 
 | language | tokens | vs ax-terse |
@@ -356,7 +356,7 @@ are what changed it.
 
 **Tokens to a working program**, which is what an agent is actually billed for:
 every candidate written out plus every byte of compiler output read back. Measured
-across five seeds (`ax eval-loop --seed S --n 6` for S in 1, 7, 13, 42, 99),
+across five seeds (`ax-dev eval-loop --seed S --n 6` for S in 1, 7, 13, 42, 99),
 because a single seed is misleading here:
 
 | seed | ax attempts | rust attempts | ax tokens | rust tokens | ax wall | rust wall |
@@ -388,10 +388,10 @@ not a model, and should not be quoted as an LLM benchmark.
 ## Reproducing
 
 ```sh
-ax bench metrics      # writes target/bench/RESULTS.md
-ax bench io           # IO only
-ax bench http         # keep-alive HTTP GET
-ax eval-loop --n 8    # agent loop, both arms
+cargo run -p ax-dev -- bench metrics   # writes target/bench/RESULTS.md
+cargo run -p ax-dev -- bench io        # IO only
+cargo run -p ax-dev -- bench http      # keep-alive HTTP GET
+cargo run -p ax-dev -- eval-loop --n 8 # agent loop, both arms
 ```
 
 Go and Rust columns are omitted rather than estimated when the toolchain is

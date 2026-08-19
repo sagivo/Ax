@@ -6,6 +6,7 @@
 //! once — failing fast would hide how much is broken.
 
 use ax::conform::{self, Outcome};
+use ax_dev as ax;
 
 #[test]
 fn conformance_suite_passes_on_every_tier() {
@@ -16,10 +17,17 @@ fn conformance_suite_passes_on_every_tier() {
         "conformance corpus looks truncated: {} cases",
         cases.len()
     );
-    // The JIT tier runs in a child process, so it needs a real `ax` binary.
-    // Cargo builds one for integration tests and tells us where it is; without
-    // this the tier would silently not run.
-    std::env::set_var("AX_JIT_BIN", env!("CARGO_BIN_EXE_ax"));
+    // The JIT tier runs in a child process, so explicitly build the separately
+    // packaged compiler rather than relying on same-package integration-test
+    // environment variables.
+    let workspace = root.parent().expect("workspace root");
+    let status = std::process::Command::new("cargo")
+        .args(["build", "-q", "-p", "ax"])
+        .current_dir(workspace)
+        .status()
+        .expect("build ax binary");
+    assert!(status.success(), "failed to build ax binary");
+    std::env::set_var("AX_JIT_BIN", workspace.join("target/debug/ax"));
     let results = conform::run_suite(&root, None).expect("run conformance suite");
     let failures: Vec<String> = results
         .iter()

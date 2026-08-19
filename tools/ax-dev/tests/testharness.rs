@@ -8,6 +8,7 @@
 use ax::caps::{self, ReadCap};
 use ax::driver::Session;
 use ax::testharness::{self, Outcome};
+use ax_dev as ax;
 use std::path::PathBuf;
 
 fn root() -> PathBuf {
@@ -179,8 +180,8 @@ fn formatter_is_idempotent_on_hello() {
 
 #[test]
 fn gbnf_generator_parses() {
-    assert_eq!(ax::gbnf::check_generator_parses(64, 1), 0);
-    assert_eq!(ax::gbnf::check_parser_subset(64, 2), 0);
+    assert_eq!(ax::gbnf_check::check_generator_parses(64, 1), 0);
+    assert_eq!(ax::gbnf_check::check_parser_subset(64, 2), 0);
 }
 
 #[test]

@@ -195,43 +195,6 @@ fn main() -> i64 = checksum_no_alloc(2);
 }
 
 #[test]
-fn gbnf_generated_strings_parse() {
-    let fails = ax::gbnf::check_generator_parses(200, 42);
-    assert_eq!(fails, 0, "generator produced {fails} unparsable strings");
-    let fails = ax::gbnf::check_parser_subset(200, 7);
-    assert_eq!(fails, 0, "format round-trip failed on {fails} strings");
-}
-
-#[test]
-fn translate_strips_rust_noise() {
-    let rust = r#"
-pub fn add<'a>(x: &'a i32, y: &'a i32) -> i32 {
-    let z = Box::new(*x);
-    z.clone() + *y
-}
-"#;
-    let r = ax::translate::translate_rust(rust);
-    assert!(!r.source.contains("Box::new"), "{}", r.source);
-    assert!(!r.source.contains(".clone()"), "{}", r.source);
-    assert!(!r.source.contains("'a"), "{}", r.source);
-    assert!(r
-        .notes
-        .iter()
-        .any(|n| n.contains("lifetime") || n.contains("Box") || n.contains("clone")));
-}
-
-#[test]
-fn translate_rejects_unknown_macros() {
-    let rust = r#"fn f() { println!("hi"); todo!("no"); }"#;
-    let r = ax::translate::translate_rust(rust);
-    assert!(
-        r.rejected.iter().any(|x| x.contains("todo")),
-        "{:?}",
-        r.rejected
-    );
-}
-
-#[test]
 fn caps_reports_shortest_path() {
     let src = r#"
 module t;
@@ -372,12 +335,6 @@ fn main() -> u64 !{io[fs], abort} = io.bytesum_file("x");
 }
 
 #[test]
-fn gbnf_equivalence_1k() {
-    let (a, b) = ax::gbnf::check_equivalence(1000);
-    assert_eq!((a, b), (0, 0));
-}
-
-#[test]
 fn fs_read_returns_untrusted() {
     let src = "module t;\nfn main() -> i32 = 0;\n";
     let (s, out) = compile(src);
@@ -422,35 +379,6 @@ fn unique_and_rc_ops_exist() {
     let r = ax::ir::Op::RcRetain(1);
     assert!(format!("{u:?}").contains("UniqueAlloc"));
     assert!(format!("{r:?}").contains("RcRetain"));
-}
-
-#[test]
-fn ax_mock_accepts_restricted_rust() {
-    assert!(ax::axmock::PROMPT.contains("no lifetimes"));
-    let src = "module t;\nfn main() -> i32 = 1 + 2;\n";
-    assert!(ax::axmock::validity(src));
-    assert!(ax::axmock::score_corpus(&[src]) > 0.9);
-    assert!(ax::axmock::m12_sample_score() >= 0.8);
-}
-
-#[test]
-fn ax_mock_n200_validity() {
-    let corpus = ax::axmock::generated_corpus(200, 42);
-    assert_eq!(corpus.len(), 200);
-    let score = ax::axmock::score_corpus(&corpus);
-    assert!(score >= 0.95, "M12 sample score {score}");
-}
-
-#[test]
-fn fuzz_oracle_vs_native_small() {
-    let r = ax::fuzz::differential_report(32, 7);
-    assert_eq!(
-        r.fails,
-        0,
-        "{} disagreements:\n{}",
-        r.fails,
-        r.details.join("\n")
-    );
 }
 
 #[test]

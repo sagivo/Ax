@@ -11,6 +11,6 @@ Moved to `tests/rust_ported/divergence/` (Test Spec v1.0 §3.4).
 | A0105 | `RefCell` | Identity |
 | A0106 | `unsafe { … }` | Runs normally; warns that it is meaningless |
 | A0107 | `move \|x\|` | Accepted; warned |
-| A0108 | `println!` / `format!` / `vec!` | `ax translate` (pending emit in `ax check`) |
+| A0108 | `println!` / `format!` / `vec!` | `ax-dev translate` (pending emit in `ax check`) |
 | P1010 | use after move of a non-affine value | Insert a copy, report the cost |
 | A2020 | use after move of `own T` | Hard error |

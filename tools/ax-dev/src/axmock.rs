@@ -1,4 +1,4 @@
-//! ax-mock: restricted-Rust prompt + validity check (spec §2.2, M12).
+//! Development-only ax-mock validity experiment (spec §2.2, M12).
 //!
 //! The prompt instructs a model to write Rust without lifetimes, borrows,
 //! clones, macros, or unsafe. Completions that parse as Ax after `repair`

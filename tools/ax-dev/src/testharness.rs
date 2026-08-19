@@ -1,4 +1,4 @@
-//! Test & conformance harness (Ax Test Spec v1.0).
+//! Development-only test and conformance harness (Ax Test Spec v1.0).
 //!
 //! Every test under `tests/` carries a machine-parseable `//@` header
 //! ([T-1.2.1]). Discovery, execution, determinism ([T-1.3.1]), requirement
@@ -709,7 +709,7 @@ pub fn catalog_codes_pending_emit() -> &'static [&'static str] {
         "E0502", // --strict-det: Session flag, not a file-level expect yet
         "E0700", // trusted-ffi strict: no `trusted extern` surface yet
         "A0102", // lifetime tokens are stripped in the lexer, no span left
-        "A0108", // macro rewrite lives in `ax translate`, not `ax check`
+        "A0108", // macro rewrite lives in `ax-dev translate`, not `ax check`
         "E0102", // unknown named type is currently treated as an unbound Named
         "A5001", // ax.toml capability budget — CLI, not a file expect
         "A5002", // lockfile widen — reach::cap_widened, not a file expect
@@ -932,7 +932,7 @@ pub fn generate_aliasing(n: usize, seed: u64) -> Vec<String> {
 
 /// Semantics generator ([T-9.2.1]): small self-checking programs.
 pub fn generate_semantics(n: usize, seed: u64) -> Vec<String> {
-    crate::gbnf::generate_accepted(n, seed)
+    crate::gbnf_check::generate_accepted(n, seed)
 }
 
 /// Run generated programs on the interpreter. Returns failure count.
@@ -1174,7 +1174,7 @@ pub fn insert_elisions(src: &str, seed: u64) -> Vec<String> {
     out
 }
 
-/// Pretty-print a suite summary for `ax testharness`.
+/// Pretty-print a suite summary for `ax-dev testharness`.
 pub fn render_summary(results: &[CaseResult], cases: &[Case]) -> String {
     let mut o = String::new();
     let mut failed = 0;
@@ -1501,7 +1501,7 @@ pub fn fmt_idempotent(src: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Provenance header `ax translate` must emit ([T-11.4]).
+/// Provenance header `ax-dev translate` must emit ([T-11.4]).
 pub fn provenance_header(origin: &str, license: &str, commit: &str) -> String {
     format!(
         "//@ origin:    {origin}\n//@ upstream:  {commit}\n//@ license:   {license}\n//@ port:      mechanical\n"

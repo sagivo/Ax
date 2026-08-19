@@ -75,18 +75,26 @@ disjointness is proven. Capturing closures remain out of v1.
 ax check [--json] [--allow-holes] [--strict-det] [--surface ax|tree|conventional|terse|verbose]
 ax hole [--fills] [--json]      ranked fills, each verified by compiling it
 ax fix [--apply]                applies only semantics_preserving fixes
-ax test [--attempts-to-green]   the north-star metric
+ax test                         run language-level tests
 ax run --seed N --trace f       records a transcript (oracle)
 ax jit <file> [args]            Cranelift: compile and run, no cc, ~0.3 ms
 ax replay f source.ax           replays from the transcript, performing no IO
 ax ir | types | effs | search | errs --into | fmt | patch --tx | deps --affected
-ax conform [filter]             conformance suite, every tier
 ax build [-o bin] [--tier dev|release|portable]
-ax bench io|http|metrics|tokens|software|all  |  ax eval-loop [--seed N] [--n K]
 ax merge --semantic | label | card | pkg list | pkg write
 ax perf [--json] [--diff baseline.json] | complete | context | repair
-ax bench gate | gate-check
-ax caps | translate | gbnf --check N | daemon | kill-criteria
+ax caps | gbnf [--conventional] | daemon
+```
+
+Repository validation and experiments are deliberately separate from the
+shipped compiler. They run through the non-publishable `ax-dev` workspace tool:
+
+```sh
+cargo run -p ax-dev -- conform [filter]
+cargo run -p ax-dev -- attempts-to-green [--json] <file>
+cargo run -p ax-dev -- bench metrics|tokens|software|gate|gate-check|all
+cargo run -p ax-dev -- k1|silent-wrongness|eval-loop|kill-criteria
+cargo run -p ax-dev -- translate|harvest|testharness|gbnf-check
 ```
 
 `ax hole --fills` is the piece that matters. It synthesises candidate
@@ -104,7 +112,7 @@ hole examples.holes::fn:distance  expects: f32
 ```
 
 ```
-$ ax test --attempts-to-green distance.ax
+$ cargo run -p ax-dev -- attempts-to-green distance.ax
 green  distance.ax  holes filled 1  attempts 3  probes 2  2.5 ms
   applied: math.hypot(v.x, v.y)
 ```
@@ -114,7 +122,7 @@ green  distance.ax  holes filled 1  attempts 3  probes 2  2.5 ms
 Same algorithm, identical output — the harness refuses to report a time unless
 every backend printed the same value. **Fastest of 21 runs** (raised from 9 after a
 single outlier in Rust's `gcd` time moved that row's verdict by 8% between runs).
-`ax bench metrics`.
+`cargo run -p ax-dev -- bench metrics`.
 
 Where Ax wins, a language guarantee is doing the work. Where the work is a plain
 loop, Ax lands on clang's output and clang's result is what you get.
@@ -169,7 +177,8 @@ Conformance pins that the oracle and the Cranelift tier — neither of which cac
 — return the same values as the C tiers, and that a function with `io` in its row
 is never cached.
 
-**On the LCG row, parity is the ceiling for everyone.** `ax bench metrics` runs a
+**On the LCG row, parity is the ceiling for everyone.** The `ax-dev bench
+metrics` development command runs a
 roofline check: the same loop as four independent chains, doing four times the
 multiplies, costs **1.06× the wall time**. The single chain leaves the multiplier
 three-quarters idle waiting on its own previous result, so the program sets the
@@ -194,19 +203,18 @@ the shipped `ax` package or default workspace build.
 
 | encoding | TypeScript | Python | C | Rust | **Ax** | Ax vs best mainstream |
 |---|---:|---:|---:|---:|---:|---:|
-| `o200k_base` | 156 | 116 | 193 | 179 | **111** | **4% fewer** |
-| `cl100k_base` | 153 | 115 | 192 | 174 | **111** | **3% fewer** |
+| `o200k_base` | 156 | 116 | 193 | 179 | **90** | **22% fewer** |
+| `cl100k_base` | 153 | 115 | 192 | 174 | **90** | **22% fewer** |
 
-Ax is the smallest overall corpus in both vocabularies and wins or ties six of
-eight individual cases. The [full side-by-side source](docs/usecases.md) also
-shows the two losses; a controlled corpus is evidence, not proof for every
+Ax is the smallest overall corpus in both vocabularies and wins or ties all
+eight individual cases. A controlled corpus is evidence, not proof for every
 possible program.
 
-The measured changes are structural: omitted `i32` signatures, shared non-i32
-signatures (`#sum(n:Z)=+/n`), the one-token `??` conditional, `!a` for the common
-allocator effect, inferred typed map literals, and a formatter that removes
-BPE-costing whitespace and terminators. Shortening `fn` to `f` would not help—both
-are already one token. Removing syntax does.
+The measured changes are structural: omitted `i32` signatures, nullary `#f=...`
+declarations, default map type `M`, `name%{...}` map binding, inferred allocation effects, bare map keys,
+implicit zero-default lookup, map-bound bare keys, marker-free interpolation, the one-token `??`
+conditional, and a formatter that removes BPE-costing whitespace and
+terminators. Shortening `fn` to `f` would not help—both are already one token.
 
 **Cost to reach a working program.** An earlier version of this section compared
 Ax-with-its-protocol against bare `rustc` and reported ~600× less wall time,
@@ -214,7 +222,7 @@ fewer cycles, and up to 8.6× fewer tokens. That was the wrong control, and not
 by a little: it varied the language and the protocol at the same time, so it
 could not tell which one produced the result. Since the whole question is
 whether the language is needed or only the protocol, that comparison answered
-nothing. `ax k1` runs all four cells; medians over four seeds, n=12:
+nothing. `ax-dev k1` runs all four cells; medians over four seeds, n=12:
 
 | cell | median attempts | median wall | median tokens |
 |---|---:|---:|---:|
@@ -244,7 +252,7 @@ rust-analyzer's expected-type completion does for free.
 
 So this section is evidence for the protocol, and — read honestly — evidence
 *against* the language on this axis. The language's own case is measured
-separately, by `ax silent-wrongness`:
+separately, by `ax-dev silent-wrongness`:
 
 | | ax | rust |
 |---|---:|---:|
@@ -263,9 +271,9 @@ now **fires**.
 ## Tests
 
 ```sh
-cargo test --workspace   # unit, kernel, protocol, differential, conformance, testharness
-ax conform               # the conformance corpus alone
-ax testharness           # Test Spec v1.0 tree under tests/
+cargo test --workspace                  # core plus development suites
+cargo run -p ax-dev -- conform          # conformance corpus, every tier
+cargo run -p ax-dev -- testharness      # Test Spec v1.0 tree under tests/
 ```
 
 The conformance corpus (`conformance/`) is 128 cases ported by scenario from Go's
@@ -292,14 +300,14 @@ value, where substituting `1` for the divisor gives the same answer by
 coincidence. Three cases were added, and that mutation now fails.
 
 ```sh
-ax k1 --seed 42 --n 12          # attempts-to-green, all four cells
-ax silent-wrongness             # hazard corpus, every tier, both languages
-ax eval-loop --seed 42 --n 8    # the original two-arm diagonal, kept for history
+cargo run -p ax-dev -- k1 --seed 42 --n 12
+cargo run -p ax-dev -- silent-wrongness
+cargo run -p ax-dev -- eval-loop --seed 42 --n 8
 ```
 
-`ax k1` is the four-cell version and the one to quote: `eval-loop`'s two arms
+`ax-dev k1` is the four-cell version and the one to quote: `eval-loop`'s two arms
 vary the language and the protocol together, so its ratio cannot be attributed
-to either. `ax silent-wrongness` is the axis neither can reach, because every
+to either. `ax-dev silent-wrongness` is the axis neither can reach, because every
 `eval-loop` task is a hole-fill task and no hole-fill task exercises semantics.
 
 No model is involved in any of the three. They measure the protocol and the

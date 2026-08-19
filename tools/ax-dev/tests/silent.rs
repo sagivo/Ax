@@ -2,6 +2,7 @@
 //! can embarrass Ax and the harness can fail, so both are pinned here.
 
 use ax::silent::{self, Expect, Verdict};
+use ax_dev as ax;
 
 /// The control program is correct and both languages must get it right on every
 /// tier that can run. This is the check that caught the first version of the

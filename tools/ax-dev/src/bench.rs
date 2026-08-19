@@ -1,7 +1,7 @@
-//! Head-to-head benches: Ax native / C / Rust / Ax interpreter.
+//! Development-only head-to-head benches: Ax native / C / Rust / Ax interpreter.
 //!
-//! `ax bench io|http` keep the original runtime-vs-idiomatic-Rust claims
-//! (fail if Ax is not faster). `ax bench metrics` is the broader report:
+//! `ax-dev bench io|http` keep the original runtime-vs-idiomatic-Rust claims
+//! (fail if Ax is not faster). `ax-dev bench metrics` is the broader report:
 //! it never fails on speed, checks outputs match, and prints ratios.
 
 use crate::ast::File as AxFile;
@@ -2430,7 +2430,7 @@ fn content_len(h: &[u8]) -> usize {
 
 /// §5.6 performance gates: 12 programs, C / Rust / Ax, median ratios.
 ///
-/// Sizes are the *verification* sizes so `cargo test` and `ax bench gate`
+/// Sizes are the *verification* sizes so `cargo test` and `ax-dev bench gate`
 /// finish in seconds. Full-size runs use `AX_GATE_FULL=1`.
 ///
 /// Gates (after the perf loop; before it, 1.5× C is allowed):

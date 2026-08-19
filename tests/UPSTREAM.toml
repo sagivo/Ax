@@ -16,7 +16,7 @@ url = "https://github.com/rust-lang/rust"
 commit = "4d91de4e48198da2e33413efdcd9cd2cc0c46688"
 license = "MIT OR Apache-2.0"
 port = "mechanical"
-notes = "Via ax translate. Target ≥70% by M5 ([T-2.4.3])."
+notes = "Via ax-dev translate. Target ≥70% by M5 ([T-2.4.3])."
 
 [suite.go_test]
 name = "golang/go test/"

@@ -1,4 +1,4 @@
-//! `ax translate` — mechanical Rust → Ax (spec v0.3 §11).
+//! Development-only mechanical Rust → Ax translator (spec v0.3 §11).
 //!
 //! Strip lifetimes and references, rewrite `Rc`/`Arc`/`Box`/`RefCell` to
 //! plain values, rewrite `as` to explicit conversions, rewrite `format!` /
@@ -131,9 +131,11 @@ pub fn translate_rust(src: &str) -> TranslateReport {
 /// Prefix a translated file with the provenance header required by [T-11.4].
 pub fn with_provenance(translated: &str, origin: &str, license: &str, commit: &str) -> String {
     format!(
-        "{}{}",
-        crate::testharness::provenance_header(origin, license, commit),
-        translated
+        "//@ origin:    {origin}\n\
+         //@ upstream:  {commit}\n\
+         //@ license:   {license}\n\
+         //@ port:      mechanical\n\
+         {translated}"
     )
 }
 

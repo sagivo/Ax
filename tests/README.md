@@ -29,8 +29,8 @@ tests/
 Run:
 
 ```
-cargo test -p ax --test testharness
-ax testharness
+cargo test -p ax-dev --test testharness
+cargo run -p ax-dev -- testharness
 ```
 
 Do not vendor GPL ([T-11.3]). See `DECISIONS.md` for recorded gaps.

@@ -1,0 +1,12 @@
+[package]
+name = "ax-dev"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Repository-only validation, experiment, and benchmark tools for Ax"
+
+[dependencies]
+ax_core = { package = "ax", path = "../../crates/ax" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

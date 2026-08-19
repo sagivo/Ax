@@ -30,6 +30,7 @@ boundary is explicit.
 #maxv(xs V[Z])Z=|/xs#
 #pick(b B)=b??1:0
 #get(m M[S,L],k S)L=m[k]?0
+#f={m=%{e:2,o:3};m["e"]?+m["o"]?}
 #main()Z={s Z:=1;i~n{s=s*6364136223846793005+i};s}
 ```
 
@@ -47,8 +48,9 @@ is the element (check drops inside `i~xs#`). `%{"k":2L}` is an inferred
 homogeneous map literal. `+/n` / `*/n` sum /
 product of a range as `Z`. `+/xs#` / `*/xs#` / `|/xs#` / `&/xs#`
 sum / product / max / min of a `Z`-vec. `[]` empty vec. `%` empty
-map. `xs<-e` append. `xs[i]<-v` store. `m[k]<-v` insert. `m[k]?d`
-get-or.
+map. `M` is the default string-to-`I` map shape. `xs<-e` append.
+`xs[i]<-v` store. `m[k]<-v` insert. `m[k]?d` gets with fallback `d`;
+bare `m[k]?` defaults to zero. Simple literal keys may omit quotes.
 
 A file that opens with `(` is the tree: `(fn add ((a i32) (b i32)) i32 (+ a b))`.
 
@@ -99,7 +101,8 @@ and labelled as such. Strict mode forbids raw FFI.
 `ax hole` `ax types` `ax effs` `ax search` `ax errs --into T`
 `ax fmt` `ax patch --tx` `ax deps --affected`
 `ax test` `ax run --seed N --trace f` `ax replay f` `ax jit <file>`
-`ax merge --semantic` `ax label` `ax card` `ax ir` `ax conform`
+`ax merge --semantic` `ax label` `ax card` `ax ir`
+Repository-only conformance: `cargo run -p ax-dev -- conform`.
 Fixes: only `semantics_preserving` auto-applied.
 
 ## Dicts

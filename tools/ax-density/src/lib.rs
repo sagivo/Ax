@@ -96,7 +96,7 @@ const CASES: &[Case] = &[
             python: "def get(m,k):return m.get(k,0)",
             c: "long get(AxMap*m,AxStr*k){long v=0;ax_map_get(m,k,&v);return v;}",
             rust: "fn get(m:&HashMap<String,i64>,k:&str)->i64{*m.get(k).unwrap_or(&0)}",
-            ax: "fn get(m: Map[String, i64], k: String) -> i64 = match m.get(k) { Some(v) => v; None => 0; };",
+            ax: "fn get(m: Map[String, i32], k: String) -> i32 = match m.get(k) { Some(v) => v; None => 0; };",
         },
     },
     Case {
@@ -108,7 +108,7 @@ const CASES: &[Case] = &[
             python: "def f():m={\"e\":2,\"o\":3};return m.get(\"e\",0)+m.get(\"o\",0)",
             c: "long f(){AxMap*m=ax_map_new();ax_map_put(m,\"e\",2);ax_map_put(m,\"o\",3);return ax_map_get0(m,\"e\")+ax_map_get0(m,\"o\");}",
             rust: "fn f()->i64{let mut m=HashMap::new();m.insert(\"e\",2);m.insert(\"o\",3);m.get(\"e\").unwrap_or(&0)+m.get(\"o\").unwrap_or(&0)}",
-            ax: "fn main() -> i64 !{alloc[a]} = { let mut m: Map[String, i64] = map.new(test.alloc); m.insert(\"e\", 2i64); m.insert(\"o\", 3i64); match m.get(\"e\") { Some(v) => v; None => 0; } + match m.get(\"o\") { Some(v) => v; None => 0; } };",
+            ax: "fn f() -> i32 !{alloc[a]} = { let mut m: Map[String, i32] = map.new(test.alloc); m.insert(\"e\", 2i32); m.insert(\"o\", 3i32); match m.get(\"e\") { Some(v) => v; None => 0; } + match m.get(\"o\") { Some(v) => v; None => 0; } };",
         },
     },
     Case {
@@ -254,7 +254,7 @@ pub fn render_doc() -> String {
          - Counter: `tiktoken-rs`, using the actual OpenAI vocabulary files.\n\
          - Scope: method bodies/signatures only. Imports, tests, comments, and executable wrappers are excluded for every language.\n\
          - Formatting: optional whitespace is removed in every language. Required Python indentation remains.\n\
-         - Ax is generated mechanically from the conventional corpus form with `to_dense`, then compiled by the conformance test.\n\n\
+         - Ax is generated mechanically from the conventional corpus form with `to_dense`, then compiled by this tool's regression tests.\n\n\
          This is a controlled corpus, not proof that Ax is shortest for every possible program or tokenizer. \
          Cases live in `tools/ax-density/src/lib.rs`; counterexamples should be added there.\n\n\
          ## Regenerate\n\n```sh\ncargo run -p ax-density -- --write\n```\n",
@@ -318,29 +318,5 @@ mod tests {
                 .compile(&format!("{}_dense.ax", case.id), &dense_src)
                 .unwrap_or_else(|d| panic!("{}:\n{dense_src}\n{d:?}", case.id));
         }
-    }
-
-    #[test]
-    fn print_candidate_costs() {
-        let candidates = [
-            "#main()L!a={m:=%{\"e\":2L,\"o\":3L};m[\"e\"]?0+m[\"o\"]?0}",
-            "#f()={m:%{\"e\":2,\"o\":3};m[\"e\"]?0+m[\"o\"]?0}",
-            "#f()L={m:%{\"e\":2L,\"o\":3L};m[\"e\"]?0+m[\"o\"]?0}",
-            "#f()!a={m:%{\"e\":2,\"o\":3};m[\"e\"]?0+m[\"o\"]?0}",
-            "#f()={m:%{\"e\":2,\"o\":3};m[\"e\"]+m[\"o\"]}",
-            "#f()={%{\"e\":2,\"o\":3}[\"e\"]?0+%{\"e\":2,\"o\":3}[\"o\"]?0}",
-        ];
-        for src in candidates {
-            println!(
-                "{} {} {:?}",
-                count_bpe(src, BpeEncoding::O200kBase),
-                count_bpe(src, BpeEncoding::Cl100kBase),
-                src
-            );
-        }
-        let src = "module t; export { main }; #main()={m:%{\"e\":2,\"o\":3};m[\"e\"]?0+m[\"o\"]?0}";
-        let mut session = Session::new();
-        session.surface = ax::frontend::Surface::Dense;
-        println!("compile ok={}", session.compile("candidate.ax", src).is_ok());
     }
 }

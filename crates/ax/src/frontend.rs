@@ -865,8 +865,12 @@ fn dense_put_sugar(src: &str) -> bool {
 ///   `m[k]?d`                       → `m.get(k)?d`
 pub fn rewrite_dense_to_terse(src: &str) -> String {
     let mut s = expand_dense_shared_signatures(src);
+    s = expand_dense_default_map_alias(&s);
+    s = expand_dense_zero_arg_fns(&s);
     s = expand_dense_i32_defaults(&s);
+    s = expand_dense_interpolation_alias(&s);
     s = expand_dense_effect_aliases(&s);
+    s = expand_dense_map_indices(&s);
     s = expand_dense_map_literals(&s);
     s = expand_dense_mapnew(&s);
     s = expand_dense_lits(&s);
@@ -880,11 +884,185 @@ pub fn rewrite_dense_to_terse(src: &str) -> String {
     s = expand_dense_returns(&s);
     s = expand_dense_while(&s);
     s = expand_dense_if(&s);
+    s = expand_dense_string_map_gets(&s);
     s = expand_dense_index_get(&s);
     s = expand_dense_result_or(&s);
     s = expand_dense_option_or_real(&s);
     s = expand_dense_fns(&s);
-    expand_dense_types(&s)
+    s = expand_dense_types(&s);
+    expand_dense_inferred_alloc_effects(&s)
+}
+
+/// Interpolated strings do not need a marker on the dense surface: braces make
+/// the intent unambiguous. The parser still receives the conventional `f"…"`
+/// form after this expansion.
+fn expand_dense_interpolation_alias(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 8);
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' {
+            let start = i;
+            i += 1;
+            let mut braces = false;
+            while i < b.len() {
+                if b[i] == b'\\' {
+                    i = (i + 2).min(b.len());
+                    continue;
+                }
+                if b[i] == b'{' || b[i] == b'}' {
+                    braces = true;
+                }
+                if b[i] == b'"' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            let prefixed = start > 0 && b[start - 1] == b'f';
+            if braces && !prefixed {
+                out.push('f');
+            }
+            out.push_str(&src[start..i]);
+            continue;
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// A nullary dense declaration may use `#name=body`; the parser receives the
+/// ordinary `#name()=body` form.
+fn expand_dense_zero_arg_fns(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 8);
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'#'
+            && (i == 0 || b[i - 1].is_ascii_whitespace() || matches!(b[i - 1], b';' | b'}'))
+            && i + 1 < b.len()
+            && is_ident_char(b[i + 1])
+        {
+            let mut end = i + 2;
+            while end < b.len() && is_ident_char(b[end]) {
+                end += 1;
+            }
+            if end < b.len() && b[end] == b'=' {
+                out.push_str(&src[i..end]);
+                out.push_str("()=");
+                i = end + 1;
+                continue;
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// `M` is the default string-to-i32 map type on the dense surface. Generic
+/// maps keep the explicit `M[K,V]` spelling; the alias targets the common
+/// dictionary shape used by agent-generated code.
+fn expand_dense_default_map_alias(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 16);
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' || b[i] == b'`' {
+            let q = b[i];
+            out.push(q as char);
+            i += 1;
+            while i < b.len() {
+                out.push(b[i] as char);
+                if b[i] == q {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if b[i] == b'M'
+            && (i == 0 || (!is_ident_char(b[i - 1]) && b[i - 1] != b'#'))
+            && (i + 1 == b.len() || !is_ident_char(b[i + 1]))
+            && b.get(i + 1) != Some(&b'[')
+        {
+            out.push_str("Map[String,i32]");
+            i += 1;
+            continue;
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Dense functions may omit an effect row when the body makes allocation
+/// obvious.  The conventional surface keeps explicit rows mandatory, but an
+/// agent-facing spelling should not pay for metadata the compiler can derive.
+/// This pass runs after map literals have expanded to `map.new(test.alloc)` so
+/// the inferred row is still the ordinary checked `alloc[a]` capability.
+fn expand_dense_inferred_alloc_effects(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 16);
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'f'
+            && src[i..].starts_with("fn ")
+            && (i == 0 || !b[i - 1].is_ascii_alphanumeric() && b[i - 1] != b'_')
+        {
+            let start = i;
+            let Some(open_rel) = src[i..].find('(') else {
+                out.push(b[i] as char);
+                i += 1;
+                continue;
+            };
+            let open = i + open_rel;
+            let Some(close) = find_matching_ascii(b, open, b'(', b')') else {
+                out.push(b[i] as char);
+                i += 1;
+                continue;
+            };
+            let mut eq = close + 1;
+            while eq < b.len() && b[eq].is_ascii_whitespace() {
+                eq += 1;
+            }
+            while eq + 1 < b.len() && b[eq] != b'=' {
+                if b[eq] == b'!' {
+                    break;
+                }
+                eq += 1;
+            }
+            if eq >= b.len() || b[eq] != b'=' {
+                out.push_str(&src[start..=close]);
+                i = close + 1;
+                continue;
+            }
+            let body_start = eq + 1;
+            let mut body_end = body_start;
+            while body_end < b.len() && b[body_end].is_ascii_whitespace() {
+                body_end += 1;
+            }
+            let has_alloc = if body_end < b.len() && b[body_end] == b'{' {
+                find_matching_ascii(b, body_end, b'{', b'}')
+                    .map(|close_body| src[body_end..=close_body].contains("map.new(test.alloc)"))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            if has_alloc {
+                out.push_str(&src[start..eq]);
+                out.push_str(" !{alloc[a]}");
+                out.push('=');
+                i = eq + 1;
+                continue;
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
 }
 
 fn expand_dense_types(src: &str) -> String {
@@ -1828,6 +2006,73 @@ fn close_open_inserts(src: &str) -> String {
     out
 }
 
+/// A string literal cannot be a vector index, so `m["key"]` is an implicit
+/// zero-default map read on the dense surface. The explicit `m[k]?d` spelling
+/// remains for variable keys and nonzero fallbacks.
+fn expand_dense_string_map_gets(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len() + 8);
+    let mut i = 0;
+    while i < b.len() {
+        if matches!(b[i], b'"' | b'`') {
+            let q = b[i];
+            out.push(q as char);
+            i += 1;
+            while i < b.len() {
+                out.push(b[i] as char);
+                if b[i] == b'\\' {
+                    if i + 1 < b.len() {
+                        i += 1;
+                        out.push(b[i] as char);
+                    }
+                } else if b[i] == q {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        if b[i] == b']' && !out.is_empty() {
+            let mut k = out.len() - 1;
+            let mut depth = 0i32;
+            while k > 0 {
+                match out.as_bytes()[k] {
+                    b']' => depth += 1,
+                    b'[' => {
+                        if depth == 0 {
+                            break;
+                        }
+                        depth -= 1;
+                    }
+                    _ => {}
+                }
+                k -= 1;
+            }
+            if depth == 0 && out.as_bytes()[k] == b'[' {
+                let key = out[k + 1..].trim();
+                let mut next = i + 1;
+                while next < b.len() && b[next].is_ascii_whitespace() {
+                    next += 1;
+                }
+                let is_get = key.len() >= 2
+                    && key.starts_with('"')
+                    && key.ends_with('"')
+                    && !matches!(b.get(next).copied(), Some(b'?') | Some(b'<') | Some(b'='));
+                out.push(']');
+                if is_get {
+                    out.push('?');
+                }
+                i += 1;
+                continue;
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
 /// `recv[k]?` → `recv.get(k)?` so the existing option-or rewrite applies.
 fn expand_dense_index_get(src: &str) -> String {
     let b = src.as_bytes();
@@ -1883,6 +2128,32 @@ fn expand_dense_index_get(src: &str) -> String {
                     out.push_str(&key);
                     out.push(')');
                     out.push('?');
+                    // A bare postfix `?` is the dense zero-default lookup;
+                    // the explicit `?d` form remains available for any other
+                    // fallback. This saves the repeated `0` in map-heavy code.
+                    let mut next = i + 1;
+                    let mut newline = false;
+                    while next < b.len() && b[next].is_ascii_whitespace() {
+                        newline |= b[next] == b'\n';
+                        next += 1;
+                    }
+                    if newline
+                        || matches!(
+                            b.get(next).copied(),
+                            None | Some(b';')
+                                | Some(b'}')
+                                | Some(b')')
+                                | Some(b']')
+                                | Some(b'+')
+                                | Some(b'-')
+                                | Some(b'*')
+                                | Some(b'/')
+                                | Some(b',')
+                                | Some(b':')
+                        )
+                    {
+                        out.push('0');
+                    }
                     i += 1;
                     continue;
                 }
@@ -2122,6 +2393,25 @@ fn expand_dense_map_literals(src: &str) -> String {
                                     name = format!("__axm{serial}");
                                 }
                                 serial += 1;
+                                if out.ends_with('=') && !out.ends_with(":=") {
+                                    out.pop();
+                                    out.push_str(":=");
+                                } else if out.as_bytes().last().is_some_and(|c| is_ident_char(*c)) {
+                                    let mut name_start = out.len() - 1;
+                                    while name_start > 0
+                                        && is_ident_char(out.as_bytes()[name_start - 1])
+                                    {
+                                        name_start -= 1;
+                                    }
+                                    if name_start == 0
+                                        || matches!(
+                                            out.as_bytes()[name_start - 1],
+                                            b'{' | b';' | b'\n'
+                                        )
+                                    {
+                                        out.push_str(":=");
+                                    }
+                                }
                                 out.push_str("{ ");
                                 out.push_str(&name);
                                 out.push_str(" M[");
@@ -2132,7 +2422,7 @@ fn expand_dense_map_literals(src: &str) -> String {
                                 for (key, value) in &entries {
                                     out.push_str(&name);
                                     out.push('[');
-                                    out.push_str(key);
+                                    out.push_str(&dense_map_key_expr(key));
                                     out.push_str("]<-");
                                     out.push_str(value);
                                     out.push_str("; ");
@@ -2219,6 +2509,12 @@ fn dense_atom_type(atom: &str) -> Option<&'static str> {
     if atom.starts_with('"') && atom.ends_with('"') {
         return Some("S");
     }
+    if !atom.is_empty()
+        && atom.as_bytes().iter().all(|c| is_ident_char(*c))
+        && atom.as_bytes()[0].is_ascii_alphabetic()
+    {
+        return Some("S");
+    }
     if !atom
         .trim_end_matches(|c: char| c.is_ascii_alphabetic())
         .chars()
@@ -2233,6 +2529,123 @@ fn dense_atom_type(atom: &str) -> Option<&'static str> {
         Some(b'I') | Some(b'0'..=b'9') => Some("I"),
         _ => None,
     }
+}
+
+fn dense_map_key_spelling(key: &str) -> String {
+    let key = key.trim();
+    if key.len() >= 2 && key.starts_with('"') && key.ends_with('"') {
+        let inner = &key[1..key.len() - 1];
+        if !inner.is_empty()
+            && inner.as_bytes()[0].is_ascii_alphabetic()
+            && inner.as_bytes().iter().all(|c| is_ident_char(*c))
+        {
+            return inner.to_string();
+        }
+    }
+    key.to_string()
+}
+
+fn dense_map_key_expr(key: &str) -> String {
+    let key = key.trim();
+    if key.len() >= 2 && key.starts_with('"') && key.ends_with('"') {
+        key.to_string()
+    } else {
+        format!("\"{key}\"")
+    }
+}
+
+fn map_literal_bindings(src: &str) -> Vec<String> {
+    let b = src.as_bytes();
+    let mut names = Vec::new();
+    let mut scan = 0;
+    while let Some(rel) = src[scan..].find("%{") {
+        let at = scan + rel;
+        let mut start = at;
+        while start > 0 && is_ident_char(b[start - 1]) {
+            start -= 1;
+        }
+        if start < at
+            && (start == 0 || matches!(b[start - 1], b'{' | b';' | b'\n'))
+            && !names.iter().any(|n| n == &src[start..at])
+        {
+            names.push(src[start..at].to_string());
+        }
+        scan = at + 2;
+    }
+    names
+}
+
+fn rewrite_known_map_indices(src: &str, pack: bool) -> String {
+    let mut out = src.to_string();
+    for name in map_literal_bindings(src) {
+        out = rewrite_one_map_indices(&out, &name, pack);
+    }
+    out
+}
+
+fn rewrite_one_map_indices(src: &str, name: &str, pack: bool) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < b.len() {
+        if matches!(b[i], b'"' | b'`') {
+            let q = b[i];
+            let start = i;
+            i += 1;
+            while i < b.len() {
+                if b[i] == b'\\' {
+                    i = (i + 2).min(b.len());
+                } else {
+                    i += 1;
+                    if b[i - 1] == q {
+                        break;
+                    }
+                }
+            }
+            out.push_str(&src[start..i]);
+            continue;
+        }
+        if src[i..].starts_with(name)
+            && (i == 0 || !is_ident_char(b[i - 1]))
+            && i + name.len() < b.len()
+            && b[i + name.len()] == b'['
+        {
+            let open = i + name.len();
+            let Some(close) = find_matching_ascii(b, open, b'[', b']') else {
+                out.push(b[i] as char);
+                i += 1;
+                continue;
+            };
+            let key = src[open + 1..close].trim();
+            let replacement = if pack {
+                dense_map_key_spelling(key)
+            } else if key.len() >= 1
+                && key.as_bytes()[0].is_ascii_alphabetic()
+                && key.as_bytes().iter().all(|c| is_ident_char(*c))
+            {
+                format!("\"{key}\"")
+            } else {
+                key.to_string()
+            };
+            out.push_str(name);
+            out.push('[');
+            out.push_str(&replacement);
+            out.push(']');
+            i = close + 1;
+            continue;
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+fn expand_dense_map_indices(src: &str) -> String {
+    rewrite_known_map_indices(src, false)
+}
+
+fn pack_dense_map_indices(src: &str) -> String {
+    rewrite_known_map_indices(src, true)
 }
 
 /// Fuse a compact typed map construction produced by `to_dense` back into a
@@ -2299,11 +2712,15 @@ fn pack_dense_map_literals(src: &str) -> String {
         }
         out.push_str(&src[cursor..stmt_start]);
         out.push_str(name);
-        out.push_str(":=%{");
+        out.push_str("%{");
         out.push_str(
             &entries
                 .iter()
-                .map(|(k, v)| format!("{k}:{v}"))
+                .map(|(k, v)| {
+                    let key = dense_map_key_spelling(k);
+                    let value = v.strip_suffix('I').unwrap_or(v);
+                    format!("{key}:{value}")
+                })
                 .collect::<Vec<_>>()
                 .join(","),
         );
@@ -2701,7 +3118,110 @@ pub fn to_dense(src: &str) -> String {
     s = pack_dense_put(&s);
     s = pack_dense_semis(&s);
     let s = minify_dense(&s);
-    pack_dense_map_literals(&s)
+    let s = pack_dense_interpolation_alias(&s);
+    let s = pack_dense_map_literals(&s);
+    let s = pack_dense_map_indices(&s);
+    let s = pack_dense_default_map_alias(&s);
+    let s = pack_dense_inferred_alloc_effects(&s);
+    pack_dense_zero_arg_fns(&s)
+}
+
+/// Inverse of [`expand_dense_default_map_alias`], applied after map-literal
+/// packing so the explicit type is still available to that recognizer.
+fn pack_dense_default_map_alias(src: &str) -> String {
+    src.replace("M[S,I]", "M")
+}
+
+/// Inverse of [`expand_dense_interpolation_alias`].
+fn pack_dense_interpolation_alias(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < b.len() {
+        if i + 1 < b.len() && b[i] == b'f' && b[i + 1] == b'"' {
+            let start = i + 1;
+            let mut j = start + 1;
+            let mut braces = false;
+            while j < b.len() {
+                if b[j] == b'\\' {
+                    j = (j + 2).min(b.len());
+                    continue;
+                }
+                if b[j] == b'{' || b[j] == b'}' {
+                    braces = true;
+                }
+                if b[j] == b'"' {
+                    j += 1;
+                    break;
+                }
+                j += 1;
+            }
+            if braces {
+                out.push_str(&src[start..j]);
+                i = j;
+                continue;
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Inverse of [`expand_dense_zero_arg_fns`].
+fn pack_dense_zero_arg_fns(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'#'
+            && i + 3 < b.len()
+            && (i == 0 || b[i - 1].is_ascii_whitespace() || matches!(b[i - 1], b';' | b'}'))
+        {
+            let mut end = i + 1;
+            while end < b.len() && is_ident_char(b[end]) {
+                end += 1;
+            }
+            if end + 2 < b.len() && &b[end..end + 3] == b"()=" {
+                out.push_str(&src[i..end]);
+                out.push('=');
+                i = end + 3;
+                continue;
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Omit `!a` when the dense body contains an inferred map literal.  The
+/// conventional source has already declared allocation explicitly, so this is
+/// a semantics-preserving inverse of `expand_dense_inferred_alloc_effects`.
+fn pack_dense_inferred_alloc_effects(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < b.len() {
+        if i + 3 <= b.len() && &b[i..i + 3] == b"!a=" {
+            let body_start = i + 3;
+            let has_map = if body_start < b.len() && b[body_start] == b'{' {
+                find_matching_ascii(b, body_start, b'{', b'}')
+                    .map(|close| src[body_start..=close].contains("%{"))
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+            if has_map {
+                out.push('=');
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i] as char);
+        i += 1;
+    }
+    out
 }
 
 /// Collapse layout, then remove every space or newline that is not a lexical
@@ -3172,8 +3692,13 @@ fn pack_dense_option_or(src: &str) -> String {
                     let d = d.trim().trim_end_matches(';');
                     if !scrut.is_empty() && !d.is_empty() && !d.contains("match ") {
                         out.push_str(scrut.strip_prefix("attempt ").unwrap_or(scrut));
-                        out.push('?');
-                        out.push_str(d);
+                        let bare_string_get = d == "0" && scrut.contains(".get(\"");
+                        if !bare_string_get {
+                            out.push('?');
+                        }
+                        if d != "0" {
+                            out.push_str(d);
+                        }
                         rest = &after[i..];
                         continue;
                     }

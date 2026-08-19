@@ -7,5 +7,5 @@ B-tree insert/lookup, LZ4-style compress.
 Each language implementation must be algorithmically equivalent. Comparing
 different algorithms is self-deception.
 
-Existing kernels live in `ax bench metrics` / `ax bench gate`. This directory
+Existing kernels live in `ax-dev bench metrics` / `ax-dev bench gate`. This directory
 is the T-spec home for reviewed four-language sources as they land.

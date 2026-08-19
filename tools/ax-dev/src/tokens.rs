@@ -1,4 +1,4 @@
-//! Token accounting for source text.
+//! Development-only proxy token accounting for source text.
 //!
 //! This is the historical proxy used by protocol experiments. Exact model-BPE
 //! measurement is development tooling and lives in `tools/ax-density`, keeping

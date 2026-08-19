@@ -1,4 +1,4 @@
-//! Conformance suite runner.
+//! Development-only conformance suite runner.
 //!
 //! A case is one `.ax` file under `conformance/` whose header states what must
 //! happen. Every case runs on every tier — oracle, native dev, native release,

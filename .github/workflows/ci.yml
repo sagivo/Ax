@@ -43,10 +43,10 @@ jobs:
           /tmp/loader
 
       - name: oracle agrees with both native tiers and cranelift on every case
-        run: cargo run -p ax -- conform
+        run: cargo run -p ax-dev -- conform
 
       - name: T-spec testharness (headers, coverage, oracles, fault injection)
-        run: cargo test -p ax --test testharness
+        run: cargo test -p ax-dev --test testharness
 
       # The dev tier compiles in-process. Running the two worked examples through
       # it is the same bar the C backend has to clear.
@@ -58,7 +58,7 @@ jobs:
       - name: hole fills compile and the agent loop reaches green
         run: |
           cargo run -p ax -- hole --fills examples/holes.ax
-          cargo run -p ax -- test --attempts-to-green examples/holes.ax
+          cargo run -p ax-dev -- attempts-to-green examples/holes.ax
 
       - name: only semantics-preserving fixes are auto-applied
         run: |
@@ -77,13 +77,13 @@ jobs:
           cargo run -p ax -- label examples/io_sum.ax | grep -q ambient-io
 
       - name: agent loop measurement runs
-        run: cargo run -p ax -- eval-loop --seed 42 --n 4
+        run: cargo run -p ax-dev -- eval-loop --seed 42 --n 4
 
       # This also verifies that the terse surface round-trips: each kernel is
       # rewritten mechanically, recompiled through the terse parser, and run, and
       # the harness fails unless it produces the same value.
       - name: terse surface is the same program, and token counts are reported
-        run: cargo run -p ax -- bench tokens
+        run: cargo run -p ax-dev -- bench tokens
 
       - name: the card is emittable
         run: cargo run -p ax -- card
@@ -95,15 +95,15 @@ jobs:
           cargo run -p ax -- context examples/hello.ax
 
       - name: §5.6 gate programs compile and agree with C and Rust
-        run: cargo run -p ax -- bench gate-check
+        run: cargo run -p ax-dev -- bench gate-check
 
       - name: GBNF generator/parser equivalence
-        run: cargo run -p ax -- gbnf --check 100000
+        run: cargo run -p ax-dev -- gbnf-check 100000
 
-      - name: rust-to-ax translate strips lifetimes
+      - name: development translator strips Rust lifetimes
         run: |
           printf 'fn add(x: i32) -> i32 { x }\n' > /tmp/t.rs
-          cargo run -p ax -- translate /tmp/t.rs
+          cargo run -p ax-dev -- translate /tmp/t.rs
 
       - name: capability reachability
         run: cargo run -p ax -- caps examples/io_sum.ax
@@ -114,4 +114,4 @@ jobs:
             | cargo run -p ax -- daemon | grep -q '"ok":true'
 
       - name: kill-criteria snapshot is printable
-        run: cargo run -p ax -- kill-criteria
+        run: cargo run -p ax-dev -- kill-criteria

@@ -1,4 +1,4 @@
-// Fixture for `ax harvest` (not a rustc checkout).
+// Fixture for `ax-dev harvest` (not a rustc checkout).
 fn main() {
     let mut i = 0;
     let x = &mut i;

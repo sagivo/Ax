@@ -1,4 +1,4 @@
-//! Differential fuzz: RC-everywhere oracle vs optimizing native backend.
+//! Development-only differential fuzz: interpreter vs optimizing native backend.
 //!
 //! Generates small typed programs (aliasing / branch / recursion pressure)
 //! and asserts interpreter and native print the same value.

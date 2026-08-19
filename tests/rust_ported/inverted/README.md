@@ -6,7 +6,7 @@ Pinned to rustc **1.85.0** (`4d91de4e48198da2e33413efdcd9cd2cc0c46688`).
 Acquire more with:
 
 ```
-ax harvest /path/to/rust/tests/ui
+cargo run -p ax-dev -- harvest /path/to/rust/tests/ui
 ```
 
 `unsafe` / unknown macros are recorded, not silently skipped. Cases that

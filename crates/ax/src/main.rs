@@ -38,24 +38,15 @@ fn main() -> ExitCode {
         "card" => cmd_card(&args),
         "ir" => cmd_ir(&args),
         "fix" => cmd_fix(&args),
-        "conform" => cmd_conform(&args),
         "build" => cmd_build(&args),
-        "bench" => cmd_bench(&args),
         "perf" => cmd_perf(&args),
         "complete" => cmd_complete(&args),
         "context" => cmd_context(&args),
         "repair" => cmd_repair(&args),
         "caps" => cmd_caps(&args),
-        "translate" => cmd_translate(&args),
-        "harvest" => cmd_harvest(&args),
         "gbnf" => cmd_gbnf(&args),
-        "testharness" => cmd_testharness(&args),
         "daemon" => cmd_daemon(&args),
-        "kill-criteria" => cmd_kill_criteria(&args),
-        "silent-wrongness" => cmd_silent(&args),
-        "k1" => cmd_k1(&args),
         "pkg" => cmd_pkg(&args),
-        "eval-loop" => cmd_eval_loop(&args),
         "help" | "-h" | "--help" => {
             print_help();
             ExitCode::SUCCESS
@@ -86,7 +77,7 @@ Usage:
   ax fmt <file>
   ax patch --tx <file>
   ax deps --affected <def_id> <file>
-  ax test [--attempts-to-green] <file>
+  ax test <file>
   ax run [--seed N] [--trace f] <file>
   ax jit <file> [args...]
   ax replay <trace>
@@ -94,25 +85,16 @@ Usage:
   ax label <file>
   ax card
   ax ir <file>
-  ax conform [filter]
   ax fix [--apply] [--json] <file>
   ax build [-o <bin>] [--tier dev|release|portable] <file>
-  ax bench io|http|metrics|tokens|software|gate|gate-check|all
   ax perf [--json] [--diff <baseline.json>] <file>
   ax complete --at <pos> [--json] <file>
   ax context [--limit=N] <file>
   ax repair [--apply] [--json] <file>
   ax caps [--json] <file>
-  ax translate <rust-file>
-  ax harvest <rust-tests-ui-dir>
-  ax gbnf [--check N]
-  ax testharness [filter]
+  ax gbnf [--conventional]
   ax daemon
-  ax kill-criteria
-  ax silent-wrongness [--json] [filter]
-  ax k1 [--json] [--seed N] [--n K]
   ax pkg list | ax pkg write
-  ax eval-loop [--seed N] [--n K]
 "
     );
 }
@@ -358,58 +340,6 @@ fn cmd_fix(args: &[String]) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
-    }
-}
-
-/// Run the conformance suite: every case on the oracle, both C tiers, and
-/// the Cranelift JIT.
-fn cmd_conform(args: &[String]) -> ExitCode {
-    let filter = args.iter().find(|a| !a.starts_with('-')).cloned();
-    let root = ax::conform::suite_dir();
-    match ax::conform::run_suite(&root, filter.as_deref()) {
-        Err(e) => {
-            eprintln!("{e}");
-            ExitCode::from(2)
-        }
-        Ok(results) => {
-            let mut failed = 0;
-            for r in &results {
-                match &r.outcome {
-                    ax::conform::Outcome::Pass => println!("ok    {}", r.name),
-                    ax::conform::Outcome::Fail { tier, detail } => {
-                        failed += 1;
-                        println!("FAIL  {}  [{tier}] {detail}", r.name);
-                    }
-                }
-            }
-            let jit = results.iter().filter(|r| r.jit_ran).count();
-            let runnable = results.iter().filter(|r| r.runnable).count();
-            println!(
-                "\n{} passed, {failed} failed, {} total",
-                results.len() - failed,
-                results.len()
-            );
-            // Stated, not assumed: a tier that did not run is not evidence.
-            // Stated per tier: the remaining cases are ones the checker must
-            // reject, which never reach a backend.
-            if jit == runnable {
-                println!(
-                    "tiers: oracle, cranelift, c dev, c release \
-                     ({runnable} executable cases, {} rejected at check time)",
-                    results.len() - runnable
-                );
-            } else {
-                println!(
-                    "tiers: oracle, c dev, c release; cranelift ran on \
-                     {jit}/{runnable} executable cases"
-                );
-            }
-            if failed > 0 {
-                ExitCode::from(1)
-            } else {
-                ExitCode::SUCCESS
-            }
-        }
     }
 }
 
@@ -667,47 +597,6 @@ fn cmd_deps(args: &[String]) -> ExitCode {
 }
 
 fn cmd_test(args: &[String]) -> ExitCode {
-    // `--attempts-to-green` is the north-star metric: how many compile-and-run
-    // cycles does it take to fill every hole in this file and leave its tests
-    // passing? Reported alongside the cheap static probes it used.
-    if args.iter().any(|a| a == "--attempts-to-green") {
-        let flags = parse_flags(args);
-        let Some(path) = flags.files.first() else {
-            eprintln!("usage: ax test --attempts-to-green [--json] <file>");
-            return ExitCode::from(2);
-        };
-        let src = match read_src(path) {
-            Ok(s) => s,
-            Err(c) => return c,
-        };
-        let surface = flags
-            .surface
-            .as_deref()
-            .and_then(ax::frontend::Surface::from_str)
-            .unwrap_or_else(|| ax::tree::detect_surface(&src, ax::frontend::Surface::Tree));
-        let r = ax::evalloop::attempts_to_green(path.to_str().unwrap_or("input.ax"), &src, surface);
-        if flags.json {
-            println!("{}", serde_json::to_string_pretty(&r).unwrap());
-        } else {
-            println!(
-                "{}  {}  holes filled {}  attempts {}  probes {}  {:.1} ms",
-                if r.green { "green" } else { "NOT GREEN" },
-                r.path,
-                r.holes,
-                r.attempts,
-                r.probes,
-                r.wall_ms
-            );
-            for a in &r.applied {
-                println!("  applied: {a}");
-            }
-        }
-        return if r.green {
-            ExitCode::SUCCESS
-        } else {
-            ExitCode::from(1)
-        };
-    }
     let flags = parse_flags(args);
     match compile_file(&flags) {
         Err(c) => c,
@@ -1069,17 +958,6 @@ fn cmd_build(args: &[String]) -> ExitCode {
     }
 }
 
-fn cmd_bench(args: &[String]) -> ExitCode {
-    let which = args.first().map(|s| s.as_str()).unwrap_or("io");
-    match ax::bench::run(which) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("{e}");
-            ExitCode::from(1)
-        }
-    }
-}
-
 fn cmd_perf(args: &[String]) -> ExitCode {
     let flags = parse_flags(args);
     match compile_file(&flags) {
@@ -1239,96 +1117,6 @@ fn cmd_caps(args: &[String]) -> ExitCode {
     }
 }
 
-fn cmd_translate(args: &[String]) -> ExitCode {
-    let Some(path) = args.iter().find(|a| !a.starts_with('-')) else {
-        eprintln!("usage: ax translate <rust-file>");
-        return ExitCode::from(2);
-    };
-    let src = match fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::from(1);
-        }
-    };
-    let r = ax::translate::translate_rust(&src);
-    // [T-11.4] translated corpora are unshippable without provenance.
-    let stamped =
-        ax::translate::with_provenance(&r.source, path, "MIT OR Apache-2.0", "unpinned-local");
-    print!("{stamped}");
-    for n in &r.notes {
-        eprintln!("note: {n}");
-    }
-    for n in &r.rejected {
-        eprintln!("rejected: {n}");
-    }
-    if r.rejected.is_empty() {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(1)
-    }
-}
-
-fn cmd_harvest(args: &[String]) -> ExitCode {
-    let Some(dir) = args.iter().find(|a| !a.starts_with('-')) else {
-        eprintln!("usage: ax harvest <rust-tests-ui-dir>");
-        return ExitCode::from(2);
-    };
-    let dest = ax::testharness::suite_dir().join("rust_ported/inverted/harvested");
-    match ax::harvest::harvest_into(
-        Path::new(dir),
-        &dest,
-        "4d91de4e48198da2e33413efdcd9cd2cc0c46688",
-    ) {
-        Err(e) => {
-            eprintln!("{e}");
-            ExitCode::from(1)
-        }
-        Ok(r) => {
-            println!(
-                "harvest  hits={}  written={}  skipped_unsafe_or_macro={}  skipped_other={}",
-                r.hits.len(),
-                r.written.len(),
-                r.skipped_unsafe_or_macro,
-                r.skipped_other.len()
-            );
-            for s in r.skipped_other.iter().take(20) {
-                eprintln!("skipped: {s}");
-            }
-            ExitCode::SUCCESS
-        }
-    }
-}
-
-fn cmd_testharness(args: &[String]) -> ExitCode {
-    let filter = args.iter().find(|a| !a.starts_with('-')).cloned();
-    let root = ax::testharness::suite_dir();
-    let cases = match ax::testharness::discover(&root) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::from(2);
-        }
-    };
-    match ax::testharness::run_suite(&root, filter.as_deref()) {
-        Err(e) => {
-            eprintln!("{e}");
-            ExitCode::from(2)
-        }
-        Ok(results) => {
-            print!("{}", ax::testharness::render_summary(&results, &cases));
-            if results
-                .iter()
-                .any(|r| matches!(r.outcome, ax::testharness::Outcome::Fail { .. }))
-            {
-                ExitCode::from(1)
-            } else {
-                ExitCode::SUCCESS
-            }
-        }
-    }
-}
-
 fn cmd_daemon(_args: &[String]) -> ExitCode {
     use std::io::{self, BufRead};
     let stdin = io::stdin();
@@ -1342,63 +1130,8 @@ fn cmd_daemon(_args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn cmd_k1(args: &[String]) -> ExitCode {
-    let flags = parse_flags(args);
-    let n = args
-        .windows(2)
-        .find_map(|w| {
-            if w[0] == "--n" {
-                w[1].parse().ok()
-            } else {
-                None
-            }
-        })
-        .unwrap_or(24);
-    let r = ax::evalloop::run_2x2(flags.seed, n, 12);
-    if flags.json {
-        println!("{}", serde_json::to_string_pretty(&r).unwrap());
-    } else {
-        print!("{}", ax::evalloop::render_2x2(&r));
-    }
-    ExitCode::SUCCESS
-}
-
-fn cmd_silent(args: &[String]) -> ExitCode {
-    let json = args.iter().any(|a| a == "--json");
-    let filter = args
-        .iter()
-        .find(|a| !a.starts_with("--"))
-        .map(|s| s.as_str());
-    let r = ax::silent::run(filter);
-    if json {
-        println!("{}", serde_json::to_string_pretty(&r).unwrap());
-    } else {
-        print!("{}", ax::silent::render(&r));
-    }
-    ExitCode::SUCCESS
-}
-
-fn cmd_kill_criteria(_args: &[String]) -> ExitCode {
-    let r = ax::evalloop::kill_criteria_report();
-    println!("{}", r);
-    ExitCode::SUCCESS
-}
-
 fn cmd_gbnf(args: &[String]) -> ExitCode {
-    if let Some(n) = args
-        .windows(2)
-        .find(|w| w[0] == "--check")
-        .and_then(|w| w[1].parse::<usize>().ok())
-    {
-        let a = ax::gbnf::check_generator_parses(n, 1);
-        let b = ax::gbnf::check_parser_subset(n, 2);
-        println!("gbnf check  n={n}  gen_parse_fail={a}  fmt_roundtrip_fail={b}");
-        if a == 0 && b == 0 {
-            ExitCode::SUCCESS
-        } else {
-            ExitCode::from(1)
-        }
-    } else if args.iter().any(|a| a == "--conventional") {
+    if args.iter().any(|a| a == "--conventional") {
         print!("{}", ax::gbnf::file_gbnf());
         ExitCode::SUCCESS
     } else {
@@ -1407,64 +1140,6 @@ fn cmd_gbnf(args: &[String]) -> ExitCode {
         print!("{}", ax::tree::file_gbnf());
         ExitCode::SUCCESS
     }
-}
-
-fn cmd_eval_loop(args: &[String]) -> ExitCode {
-    let flags = parse_flags(args);
-    let n = flags
-        .rest
-        .iter()
-        .find_map(|s| s.strip_prefix("n:").and_then(|x| x.parse().ok()))
-        .or_else(|| {
-            args.windows(2).find_map(|w| {
-                if w[0] == "--n" {
-                    w[1].parse().ok()
-                } else {
-                    None
-                }
-            })
-        })
-        .unwrap_or(24);
-    let seed = flags.seed;
-    // 12 attempts: enough to exhaust the candidate pool for these tasks, so a
-    // failure means the agent genuinely could not get there.
-    let report = ax::evalloop::run_eval_loop(seed, n, 12);
-    println!(
-        "hidden corpus  n={}  seed={}\n\
-         an attempt is one compile-and-run cycle; a probe is a static query\n\
-           ax    pass {}/{}  median attempts {:.1}  median probes {:.1}  median wall {:.1} ms\n",
-        report.n,
-        report.seed,
-        report.ax_pass,
-        report.n,
-        report.ax_median_attempts,
-        {
-            let mut ps: Vec<f64> = report.ax.iter().map(|r| r.probes as f64).collect();
-            ps.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            ps.get(ps.len() / 2).copied().unwrap_or(0.0)
-        },
-        report.ax_median_wall_ms,
-    );
-    println!(
-        "        median tokens written+read to green: {:.0}",
-        report.ax_median_tokens
-    );
-    if report.rust_skipped {
-        println!("  rust  skipped: no rustc on PATH, so there is no control to compare against");
-    } else {
-        println!(
-            "  rust  pass {}/{}  median attempts {:.1}  median wall {:.1} ms",
-            report.rust_pass, report.n, report.rust_median_attempts, report.rust_median_wall_ms
-        );
-        println!(
-            "        median tokens written+read to green: {:.0}",
-            report.rust_median_tokens
-        );
-    }
-    if flags.json {
-        println!("{}", serde_json::to_string_pretty(&report).unwrap());
-    }
-    ExitCode::SUCCESS
 }
 
 fn cmd_pkg(args: &[String]) -> ExitCode {

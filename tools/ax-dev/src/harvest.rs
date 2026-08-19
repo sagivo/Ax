@@ -1,4 +1,4 @@
-//! Inverted Rust-ui harvest ([T-3.2.1]).
+//! Development-only inverted Rust-ui harvest ([T-3.2.1]).
 //!
 //! Walk a pinned `rust-lang/rust` tree (or a directory of `.rs` files),
 //! extract `//~ ERROR` / `E0xxx` annotations, and emit Ax sources that

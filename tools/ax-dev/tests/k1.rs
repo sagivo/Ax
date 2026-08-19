@@ -4,6 +4,7 @@
 //! comparable, so a later change cannot quietly restore the diagonal.
 
 use ax::evalloop;
+use ax_dev as ax;
 
 fn report() -> evalloop::FactorialReport {
     evalloop::run_2x2(42, 4, 12)

@@ -35,12 +35,21 @@ This is why Ax is ASCII-dense rather than APL-shaped.
 
 - Omit module/export headers when the file path already supplies the identity.
 - Omitted function parameter and result types are `I`: `#add(a,b)=a+b`.
+- Nullary functions may omit `()`: `#f=...`.
 - A colon shares a non-default type across parameters and result:
   `#sum(n:Z)=+/n`.
+- Bare `M` means the common `Map[String,i32]` shape; generic maps keep
+  `M[K,V]`.
 - `c??t:e` is right-associative and uses a tokenizer-native operator.
 - `!a` is the common allocation effect `!alloc[a]`.
+- Dense map bodies infer allocation effects, so `#f={m%{e:2,o:3};...}` does
+  not repeat `!a`.
 - `%{"e":2L,"o":3L}` infers a homogeneous `M[S,L]` and lowers to ordinary
   checked allocation plus inserts.
+- Bare interpolation quotes (`"hello {name}"`) expand to checked `f"..."`.
+  A bare postfix map `?` means `?0`; simple identifier map keys may omit quotes.
+- A map literal binding also establishes its key vocabulary, so `m[e]` is the
+  compact checked spelling of `m["e"]`.
 - `e|d` performs `attempt e` and consumes the handled error, avoiding a false
   outward error row.
 - `ax fmt` removes optional whitespace and top-level terminators. Spaces are
@@ -55,12 +64,12 @@ vocabularies:
 
 | encoding | TypeScript | Python | C | Rust | **Ax** |
 |---|---:|---:|---:|---:|---:|
-| `o200k_base` | 156 | 116 | 193 | 179 | **111** |
-| `cl100k_base` | 153 | 115 | 192 | 174 | **111** |
+| `o200k_base` | 156 | 116 | 193 | 179 | **90** |
+| `cl100k_base` | 153 | 115 | 192 | 174 | **90** |
 
-Ax is 4% smaller than the best mainstream total on `o200k_base` and 3% smaller
-on `cl100k_base`. It wins or ties six of eight cases. The map cases remain the
-largest opportunity; the report deliberately retains those losses.
+Ax is 22% smaller than the best mainstream total on `o200k_base` and 22% smaller
+on `cl100k_base`. It wins or ties all eight cases in this corpus. This remains
+controlled-corpus evidence, not proof for every possible program.
 
 This establishes “smallest on the checked public corpus,” not “smallest for
 every program.” The development-tool gate fails if Ax ceases to be the smallest

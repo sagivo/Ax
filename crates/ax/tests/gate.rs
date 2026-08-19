@@ -3,55 +3,7 @@
 use ax::caps::{self, ReadCap};
 use ax::codegen::{self, Tier};
 use ax::driver::{run_main, Session};
-use ax::evalloop;
 use std::path::PathBuf;
-
-#[test]
-fn protocol_reduces_compile_and_run_cycles() {
-    // Both arms draw from the same candidate pool. The ax arm may ask the
-    // compiler which candidates typecheck (cheap probes); the rust arm has no
-    // such query and must compile each candidate to find out. The claim is only
-    // that this ordering-plus-prefilter saves expensive cycles.
-    //
-    // Fewer tasks than the CLI default: each rust attempt is a real rustc run.
-    let r = evalloop::run_eval_loop(42, 6, 12);
-    assert_eq!(
-        r.ax_pass, r.n,
-        "ax must green every hidden task: {:?}",
-        r.ax
-    );
-    if r.rust_skipped {
-        // No control available: assert what we can and say nothing about the
-        // comparison rather than inventing a number.
-        eprintln!("note: rustc not found, control arm skipped");
-        return;
-    }
-    assert_eq!(
-        r.rust_pass, r.n,
-        "the control must also green: {:?}",
-        r.rust
-    );
-    assert!(
-        r.ax_median_attempts <= r.rust_median_attempts,
-        "ax median attempts {} > rust median {}",
-        r.ax_median_attempts,
-        r.rust_median_attempts
-    );
-}
-
-#[test]
-fn hole_fill_uses_in_scope_binding() {
-    // The synthesiser should reach for a binding that already has the expected
-    // type before it tries anything constructed, so this task greens on the
-    // first compile-and-run cycle.
-    let t = evalloop::generate_hidden(7, 16)
-        .into_iter()
-        .find(|t| t.ax_starter.contains("(let x i32"))
-        .expect("ident task");
-    let r = evalloop::run_ax_loop(&t, 12);
-    assert!(r.green, "{:?}", r);
-    assert_eq!(r.attempts, 1, "expected one cycle, got {:?}", r);
-}
 
 /// Every fill `ax hole --fills` reports as compiling must actually compile.
 /// That is the whole promise of the command: an agent can paste the top fill
@@ -328,28 +280,6 @@ fn replay_is_hermetic_and_detects_divergence() {
     let err = ax::driver::run_traced(&s.intern, &out, 0, &[], Some(wrong))
         .expect_err("divergence must be reported");
     assert!(err.contains("divergence"), "{err}");
-}
-
-/// The north-star metric: how many compile-and-run cycles does it take to fill a
-/// hole so the module's own test passes?
-#[test]
-fn attempts_to_green_fills_a_hole_against_a_test() {
-    let src = r#"
-module t;
-type Vec2 = { x: f32, y: f32 };
-fn distance(v: Vec2) -> f32 = ?;
-test "3-4-5" = assert(distance(Vec2 { x: 3.0f32, y: 4.0f32 }) == 5.0f32);
-"#;
-    let r = ax::evalloop::attempts_to_green("t.ax", src, ax::frontend::Surface::Conventional);
-    assert!(r.green, "the loop should reach green: {r:?}");
-    assert_eq!(r.holes, 1);
-    assert!(
-        r.applied.iter().any(|a| a.contains("hypot")),
-        "expected the hypot fill, got {:?}",
-        r.applied
-    );
-    // The point of pre-verifying with a cheap checker: few expensive cycles.
-    assert!(r.attempts <= 6, "too many cycles: {r:?}");
 }
 
 /// The optimisations must not change what a program computes. Each of these was

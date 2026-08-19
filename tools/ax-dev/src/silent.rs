@@ -1,4 +1,4 @@
-//! E2: silent-wrongness and tier-divergence, measured per hazard family.
+//! Development-only E2 silent-wrongness and tier-divergence experiment.
 //!
 //! **The question this answers.** `eval-loop` measures the *protocol* — how
 //! cheaply an agent can find a program that works. It cannot separate the
