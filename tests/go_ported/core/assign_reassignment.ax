@@ -1,0 +1,14 @@
+//@ id:        T-GO-CORE-0001
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/assign.go (assignment scenario)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 15i32
+module tests.go_ported.core.assign_reassignment;
+fn main() -> i32 = {
+    let mut x = 3;
+    x = x + 4;
+    x = x * 2;
+    x + 1
+};

@@ -1,0 +1,10 @@
+//@ id:        T-GO-CORE-0013
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/closure.go (closure as a value)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 7i32
+module tests.go_ported.core.closure_value;
+fn apply(f: fn(i32) -> i32, x: i32) -> i32 = f(x);
+fn main() -> i32 = apply(fn(x: i32) -> i32 => x + 2, 5);

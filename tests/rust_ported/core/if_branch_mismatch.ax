@@ -1,0 +1,9 @@
+//@ id:        T-RUST-CORE-0016
+//@ requires:  R-2.1
+//@ origin:    rust-lang/rust tests/ui/expr/if/if-branch-types (branch type mismatch)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    error: E0101
+module tests.rust_ported.core.if_branch_mismatch;
+fn main() -> i32 = if true { 1 } else { false };

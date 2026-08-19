@@ -1,0 +1,10 @@
+//@ id:        T-RUST-CORE-0004
+//@ requires:  R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/closures/basic-closure-syntax (closure value; Ax elides captures)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 9i32
+module tests.rust_ported.core.closure_capture;
+fn apply(f: fn(i32, i32) -> i32, x: i32, base: i32) -> i32 = f(x, base);
+fn main() -> i32 = apply(fn(x: i32, base: i32) -> i32 => base + x, 5, 4);

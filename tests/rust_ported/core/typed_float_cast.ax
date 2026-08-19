@@ -1,0 +1,9 @@
+//@ id:        T-RUST-CORE-0014
+//@ requires:  R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/cast/supported-cast (float-to-integer cast)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: -3i32
+module tests.rust_ported.core.typed_float_cast;
+fn main() -> i32 = -3.75f64 as i32;

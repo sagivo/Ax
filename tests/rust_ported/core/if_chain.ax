@@ -1,0 +1,9 @@
+//@ id:        T-RUST-CORE-0003
+//@ requires:  R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/expr/if (if/else expression chain)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 30i32
+module tests.rust_ported.core.if_chain;
+fn main() -> i32 = if false { 10 } else if 3 > 2 { 30 } else { 40 };

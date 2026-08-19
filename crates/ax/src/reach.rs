@@ -32,6 +32,12 @@ const IO_CAPS: &[(&str, &str)] = &[
     ("io.write_file", "io"),
     ("http.get", "net"),
     ("http.get_bytesum", "net"),
+    ("http.serve", "net"),
+    ("http.listen", "net"),
+    ("http.accept", "net"),
+    ("http.respond", "net"),
+    ("http.close", "net"),
+    ("http.serve_handler", "net"),
     ("argv", "env"),
     ("print", "io"),
 ];

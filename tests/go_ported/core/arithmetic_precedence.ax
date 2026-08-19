@@ -1,0 +1,9 @@
+//@ id:        T-GO-CORE-0002
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/expr.go and test/const.go (operator precedence)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 14i32
+module tests.go_ported.core.arithmetic_precedence;
+fn main() -> i32 = 2 + 3 * 4;

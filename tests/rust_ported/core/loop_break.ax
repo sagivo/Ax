@@ -1,0 +1,13 @@
+//@ id:        T-RUST-CORE-0006
+//@ requires:  R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/loops/loop-break-value (loop control)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 4i32
+module tests.rust_ported.core.loop_break;
+fn main() -> i32 !{diverge} = {
+    let mut n = 0;
+    loop { n = n + 1; if n == 4 { break; }; };
+    n
+};

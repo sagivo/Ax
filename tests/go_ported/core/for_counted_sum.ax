@@ -1,0 +1,13 @@
+//@ id:        T-GO-CORE-0008
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/for.go (counted loop)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 45usz
+module tests.go_ported.core.for_counted_sum;
+fn main() -> usz = {
+    let mut sum = 0usz;
+    for i in range(0, 10) { sum = sum + i; };
+    sum
+};

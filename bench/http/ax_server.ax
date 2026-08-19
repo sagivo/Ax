@@ -1,0 +1,11 @@
+//! Benchmark server: a fixed JSON response at GET /.
+module bench.http.ax_server;
+
+fn handle(request: http.Request) -> http.Response =
+    if request.path == "/" {
+        http.response(200u16, "{\"ok\":true}")
+    } else {
+        http.response(404u16, "{\"error\":\"not_found\"}")
+    };
+
+fn main() -> unit !{io[net], abort} = http.serve_handler(18080u16, handle);

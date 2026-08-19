@@ -1,0 +1,9 @@
+//@ id:        T-RUST-CORE-0001
+//@ requires:  R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/block-result (block expression value)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 7i32
+module tests.rust_ported.core.block_value;
+fn main() -> i32 = { let a = 3; let b = 4; a + b };

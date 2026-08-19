@@ -1,0 +1,13 @@
+//@ id:        T-RUST-CORE-0007
+//@ requires:  R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/for-loop-while (break/continue control)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 12usz
+module tests.rust_ported.core.loop_continue;
+fn main() -> usz !{err[DivError]} = {
+    let mut total = 0usz;
+    for i in range(0, 6) { if i == 3 { continue; }; total = total + i; };
+    total
+};

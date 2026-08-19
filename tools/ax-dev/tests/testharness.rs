@@ -34,6 +34,43 @@ fn headers_parse_and_require_an_r_id() {
 }
 
 #[test]
+fn upstream_core_buckets_are_present_and_pinned() {
+    let cases = testharness::discover(&root()).expect("discover");
+    let go: Vec<_> = cases
+        .iter()
+        .filter(|c| c.name.starts_with("go_ported/core/"))
+        .collect();
+    let rust: Vec<_> = cases
+        .iter()
+        .filter(|c| c.name.starts_with("rust_ported/core/"))
+        .collect();
+    assert!(
+        go.len() >= 20,
+        "Go core bucket looks truncated: {}",
+        go.len()
+    );
+    assert!(
+        rust.len() >= 16,
+        "Rust core bucket looks truncated: {}",
+        rust.len()
+    );
+    for case in go {
+        assert_eq!(
+            case.header.upstream, "3e6ad2cd0a76b8b3db19249a14c55f845de8ec99",
+            "Go core case is not pinned: {}",
+            case.name
+        );
+    }
+    for case in rust {
+        assert_eq!(
+            case.header.upstream, "4d91de4e48198da2e33413efdcd9cd2cc0c46688",
+            "Rust core case is not pinned: {}",
+            case.name
+        );
+    }
+}
+
+#[test]
 fn authored_tests_justify_themselves() {
     let cases = testharness::discover(&root()).expect("discover");
     let unjust = testharness::authored_without_justification(&cases);

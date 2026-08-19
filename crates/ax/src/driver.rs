@@ -348,6 +348,11 @@ const AMBIENT_IO: &[&str] = &[
     "http.get",
     "http.get_bytesum",
     "http.serve",
+    "http.listen",
+    "http.accept",
+    "http.respond",
+    "http.close",
+    "http.serve_handler",
     "argv",
 ];
 

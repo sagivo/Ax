@@ -1,0 +1,10 @@
+//@ id:        T-GO-CORE-0007
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/if.go (conditional branches)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 17i32
+module tests.go_ported.core.if_else_value;
+fn choose(n: i32) -> i32 = if n > 10 { n + 1 } else { n - 1 };
+fn main() -> i32 = choose(16);

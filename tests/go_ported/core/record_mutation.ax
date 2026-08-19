@@ -1,0 +1,14 @@
+//@ id:        T-GO-CORE-0016
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/assign.go (mutable aggregate field)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 42i32
+module tests.go_ported.core.record_mutation;
+type Point = { x: i32, y: i32 };
+fn main() -> i32 = {
+    let mut p = Point { x: 1, y: 2 };
+    p.x = 40;
+    p.x + p.y
+};

@@ -992,7 +992,100 @@ pub fn core_fns(intern: &mut Interner, b: &Builtins) -> Vec<(String, FnSig)> {
                 (body, string_type(b), false),
             ],
             Type::unit(),
-            net_abort,
+            net_abort.clone(),
+        ),
+    ));
+    let request_ty = Type::Named {
+        def: intern.intern("http.Request"),
+        args: vec![],
+    };
+    let response_ty = Type::Named {
+        def: intern.intern("http.Response"),
+        args: vec![],
+    };
+    out.push((
+        "http.listen".into(),
+        sig(
+            intern,
+            "core::fn:http.listen",
+            "listen",
+            vec![(port, Type::Prim(Prim::U16), false)],
+            Type::unit(),
+            net_abort.clone(),
+        ),
+    ));
+    out.push((
+        "http.accept".into(),
+        sig(
+            intern,
+            "core::fn:http.accept",
+            "accept",
+            vec![],
+            request_ty.clone(),
+            net_abort.clone(),
+        ),
+    ));
+    let status = intern.intern("status");
+    out.push((
+        "http.respond".into(),
+        sig(
+            intern,
+            "core::fn:http.respond",
+            "respond",
+            vec![
+                (status, Type::Prim(Prim::U16), false),
+                (body, string_type(b), false),
+            ],
+            Type::unit(),
+            net_abort.clone(),
+        ),
+    ));
+    out.push((
+        "http.close".into(),
+        sig(
+            intern,
+            "core::fn:http.close",
+            "close",
+            vec![],
+            Type::unit(),
+            net_abort.clone(),
+        ),
+    ));
+    let handler = intern.intern("handler");
+    out.push((
+        "http.response".into(),
+        sig(
+            intern,
+            "core::fn:http.response",
+            "response",
+            vec![
+                (status, Type::Prim(Prim::U16), false),
+                (body, string_type(b), false),
+            ],
+            response_ty.clone(),
+            EffectSet::new(),
+        ),
+    ));
+    out.push((
+        "http.serve_handler".into(),
+        sig(
+            intern,
+            "core::fn:http.serve_handler",
+            "serve_handler",
+            vec![
+                (port, Type::Prim(Prim::U16), false),
+                (
+                    handler,
+                    Type::Fn {
+                        params: vec![request_ty],
+                        ret: Box::new(response_ty),
+                        effects: EffectSet::new(),
+                    },
+                    false,
+                ),
+            ],
+            Type::unit(),
+            net_abort.clone(),
         ),
     ));
     let mut argv_row = EffectSet::new();
@@ -1046,6 +1139,54 @@ pub fn extra_type_defs(intern: &mut Interner) -> Vec<TypeDef> {
             injections: vec![],
             span: Span::DUMMY,
             def_id: "std.fs::type:ReadCap".into(),
+        },
+        TypeDef {
+            name: intern.intern("http.Request"),
+            generics: vec![],
+            kind: TypeDefKind::Record(vec![
+                (
+                    intern.intern("method"),
+                    Type::Named {
+                        def: intern.intern("String"),
+                        args: vec![],
+                    },
+                ),
+                (
+                    intern.intern("path"),
+                    Type::Named {
+                        def: intern.intern("String"),
+                        args: vec![],
+                    },
+                ),
+                (
+                    intern.intern("body"),
+                    Type::Named {
+                        def: intern.intern("String"),
+                        args: vec![],
+                    },
+                ),
+            ]),
+            injections: vec![],
+            span: Span::DUMMY,
+            def_id: "std.net::type:Request".into(),
+        },
+        TypeDef {
+            name: intern.intern("http.Response"),
+            generics: vec![],
+            kind: TypeDefKind::Record(vec![
+                (intern.intern("status"), Type::Prim(Prim::U16)),
+                (
+                    intern.intern("body"),
+                    Type::Named {
+                        def: intern.intern("String"),
+                        args: vec![],
+                    },
+                ),
+                (intern.intern("static_body"), Type::Prim(Prim::Bool)),
+            ]),
+            injections: vec![],
+            span: Span::DUMMY,
+            def_id: "std.net::type:Response".into(),
         },
         TypeDef {
             name: intern.intern("str"),

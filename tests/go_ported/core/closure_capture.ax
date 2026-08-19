@@ -1,0 +1,10 @@
+//@ id:        T-GO-CORE-0014
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/closure.go (closure value; Ax elides captures)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 12i32
+module tests.go_ported.core.closure_capture;
+fn apply(f: fn(i32, i32) -> i32, x: i32, base: i32) -> i32 = f(x, base);
+fn main() -> i32 = apply(fn(y: i32, base: i32) -> i32 => base + y, 5, 7);

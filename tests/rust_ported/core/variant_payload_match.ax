@@ -1,0 +1,11 @@
+//@ id:        T-RUST-CORE-0010
+//@ requires:  R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/enum/struct-like-variant-match (variant payload)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 11i32
+module tests.rust_ported.core.variant_payload_match;
+type Message = | Quit | Move { x: i32, y: i32 };
+fn value(m: Message) -> i32 = match m { Quit => 0; Move { x, y } => x + y; };
+fn main() -> i32 = value(Move { x: 5, y: 6 });

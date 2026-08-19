@@ -1,0 +1,10 @@
+//@ id:        T-RUST-CORE-0011
+//@ requires:  R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/match/match-wildcards (Option match)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 8i32
+module tests.rust_ported.core.option_match;
+fn value(o: Option[i32]) -> i32 = match o { Some(x) => x; None => 0; };
+fn main() -> i32 = value(Some(8));

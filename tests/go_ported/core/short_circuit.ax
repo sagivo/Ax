@@ -1,0 +1,9 @@
+//@ id:        T-GO-CORE-0004
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/bool.go (short-circuit evaluation)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: true
+module tests.go_ported.core.short_circuit;
+fn main() -> bool !{err[DivError]} = false && (1 / 0 == 1) || true;

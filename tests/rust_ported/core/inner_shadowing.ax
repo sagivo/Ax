@@ -1,0 +1,9 @@
+//@ id:        T-RUST-CORE-0002
+//@ requires:  R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/shadowing (nested shadowing)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 6i32
+module tests.rust_ported.core.inner_shadowing;
+fn main() -> i32 = { let x = 1; let y = { let x = 5; x }; x + y };

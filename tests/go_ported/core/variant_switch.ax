@@ -1,0 +1,10 @@
+//@ id:        T-GO-CORE-0017
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/switch.go (switch-style selection)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 20i32
+module tests.go_ported.core.variant_switch;
+fn classify(n: i32) -> i32 = match n { 1 => 10; 2 => 20; _ => 99; };
+fn main() -> i32 = classify(2);

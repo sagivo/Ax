@@ -1,0 +1,10 @@
+//@ id:        T-GO-CORE-0015
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/complit.go (struct literal and field selection)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 13i32
+module tests.go_ported.core.record_fields;
+type Point = { x: i32, y: i32 };
+fn main() -> i32 = { let p = Point { x: 4, y: 9 }; p.x + p.y };

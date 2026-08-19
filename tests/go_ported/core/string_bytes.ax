@@ -1,0 +1,9 @@
+//@ id:        T-GO-CORE-0018
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/string.go (string byte length)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 6usz
+module tests.go_ported.core.string_bytes;
+fn main() -> usz = len("héllo");

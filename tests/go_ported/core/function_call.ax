@@ -1,0 +1,11 @@
+//@ id:        T-GO-CORE-0011
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/func.go (function calls and returns)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 42i32
+module tests.go_ported.core.function_call;
+fn add(a: i32, b: i32) -> i32 = a + b;
+fn twice(x: i32) -> i32 = add(x, x);
+fn main() -> i32 = twice(21);

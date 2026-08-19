@@ -1,0 +1,9 @@
+//@ id:        T-GO-CORE-0006
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/convert.go (explicit numeric conversion)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 3i32
+module tests.go_ported.core.explicit_conversion;
+fn main() -> i32 = 3.9f64 as i32;

@@ -5002,8 +5002,92 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     agg: Some(agg),
                 }))
             }
+            "http.accept" => {
+                let (ir, agg) = self.ir_of_node(e.id)?;
+                let agg = agg.ok_or("native backend: `http.accept` has no request layout")?;
+                let desc = self.fb.push(Op::TypeDescriptor(agg), IrTy::Ptr);
+                let out = self.fb.alloc_slot(SlotKind::Agg(agg), "request");
+                self.fb.push_void(Op::CallExt {
+                    name: "ax_rt_http_accept".into(),
+                    args: vec![desc, out],
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(LVal {
+                    v: out,
+                    ty: ir,
+                    agg: Some(agg),
+                }))
+            }
+            "http.response" => {
+                let (_, agg) = self.ir_of_node(e.id)?;
+                let agg = agg.ok_or("native backend: `http.Response` has no layout")?;
+                let status = self.expr(&args[0])?;
+                let body = self.expr(&args[1])?;
+                let out = self.fb.alloc_slot(SlotKind::Agg(agg), "response");
+                let status_field = self
+                    .l
+                    .prog
+                    .agg(agg)
+                    .field_index("status")
+                    .ok_or("native backend: `http.Response.status` missing")?;
+                let body_field = self
+                    .l
+                    .prog
+                    .agg(agg)
+                    .field_index("body")
+                    .ok_or("native backend: `http.Response.body` missing")?;
+                let static_field = self
+                    .l
+                    .prog
+                    .agg(agg)
+                    .field_index("static_body")
+                    .ok_or("native backend: `http.Response.static_body` missing")?;
+                self.store_field(out, agg, status_field, status)?;
+                self.store_field(out, agg, body_field, body)?;
+                let is_static = self
+                    .fb
+                    .const_bool(matches!(&args[1].kind, ExprKind::Lit(Lit::Str(_))));
+                let static_ptr = self.fb.field_ptr(agg, static_field, out);
+                self.fb.store(IrTy::Bool, static_ptr, is_static);
+                Ok(Some(LVal {
+                    v: out,
+                    ty: IrTy::Ptr,
+                    agg: Some(agg),
+                }))
+            }
+            "http.serve_handler" => {
+                let port = self.expr(&args[0])?;
+                let handler = self.expr(&args[1])?;
+                let request_ty = Type::Named {
+                    def: self.l.intern_sym("http.Request"),
+                    args: vec![],
+                };
+                let response_ty = Type::Named {
+                    def: self.l.intern_sym("http.Response"),
+                    args: vec![],
+                };
+                let request_agg = self
+                    .l
+                    .agg_of(&request_ty)?
+                    .ok_or("native backend: `http.Request` has no layout")?;
+                let response_agg = self
+                    .l
+                    .agg_of(&response_ty)?
+                    .ok_or("native backend: `http.Response` has no layout")?;
+                let request_desc = self.fb.push(Op::TypeDescriptor(request_agg), IrTy::Ptr);
+                let response_desc = self.fb.push(Op::TypeDescriptor(response_agg), IrTy::Ptr);
+                self.fb.push_void(Op::CallExt {
+                    name: "ax_rt_http_serve_handler".into(),
+                    args: vec![port.v, handler.v, request_desc, response_desc],
+                    ret: IrTy::Unit,
+                    fallible: false,
+                });
+                Ok(Some(unit(self)))
+            }
             "io.bytesum_file" | "io.read_file" | "io.write_file" | "http.get_bytesum"
-            | "http.get" | "http.serve" | "argv" => {
+            | "http.get" | "http.serve" | "http.listen" | "http.respond" | "http.close"
+            | "argv" => {
                 let mut argv = Vec::new();
                 for a in args {
                     argv.push(self.expr(a)?.v);
@@ -5016,6 +5100,9 @@ impl<'l, 'a> FnLower<'l, 'a> {
                     "http.get_bytesum" => "ax_rt_http_get_bytesum",
                     "http.get" => "ax_rt_http_get",
                     "http.serve" => "ax_rt_http_serve",
+                    "http.listen" => "ax_rt_http_listen",
+                    "http.respond" => "ax_rt_http_respond",
+                    "http.close" => "ax_rt_http_close",
                     _ => "ax_rt_argv",
                 };
                 if let Some(a) = agg {

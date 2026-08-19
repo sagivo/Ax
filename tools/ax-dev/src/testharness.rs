@@ -634,14 +634,6 @@ pub fn run_case(case: &Case, out_dir: &Path) -> CaseResult {
         // Both Ok already handled. Unreachable but keeps exhaustiveness if
         // we later compare artifacts.
     };
-    // A second successful run that disagreed would have been two Ok(()) —
-    // the inner runners already compare against a stated expectation, so a
-    // flake shows up as one Ok and one Err, or as two different Errs. If
-    // both fail with different messages, still a failure.
-    if let (Ok(()), Ok(())) = (run_case_once(case, out_dir), run_case_once(case, out_dir)) {
-        // third+fourth already covered by a/b; keep the first pair.
-        let _ = ();
-    }
     CaseResult {
         name: case.name.clone(),
         id: case.header.id.clone(),

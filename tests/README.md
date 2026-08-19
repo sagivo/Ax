@@ -7,7 +7,9 @@ Authoring by hand is last resort ([T-0.2.1]).
 tests/
   UPSTREAM.toml          pinned remotes + licenses ([T-1.5], [T-11])
   differential/          rustc oracle, backend cross-check
+  go_ported/core/        Go core-language scenario ports
   rust_ported/
+    core/                Rust core-language scenario ports
     subset/              shared subset, rustc-oracle
     inverted/            Rust rejects, Ax accepts ([T-3.2])
     elision/             accept-and-elide ([T-3.3])

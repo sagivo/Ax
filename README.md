@@ -69,6 +69,39 @@ affine; `Untrusted[T]` / `Secret[T]` are lattice annotations;
 `ax perf --json` reports the ownership ladder. `par` is rejected until
 disjointness is proven. Capturing closures remain out of v1.
 
+## API servers
+
+Ax handlers are ordinary typed functions. `http.serve_handler` runs them on a
+non-blocking kqueue/epoll reactor with keep-alive and pipelining:
+
+```ax
+fn handle(request: http.Request) -> http.Response =
+    if request.path == "/health" {
+        http.response(200u16, "{\"ok\":true}")
+    } else {
+        http.response(404u16, "{\"error\":\"not_found\"}")
+    };
+
+fn main() -> unit !{io[net], abort} = http.serve_handler(8080u16, handle);
+```
+
+Build with `ax build --tier release examples/api_server.ax`. Literal response
+bodies are serialized once; dynamic bodies remain request-local. The
+reproducible Rust/Go/Python/Node comparison is in `bench/http/`.
+
+### HTTP performance
+
+Ax reached **143,273 requests/second at 256 concurrent connections** in the
+included routed JSON benchmark, finishing ahead of the equivalent Go, Rust,
+Node.js, and Python implementations. The fast path combines a kqueue/epoll
+reactor, compiled typed handlers, reusable connection buffers, and
+compiler-proven static response caching, with no per-request allocation for
+literal responses.
+
+See [HTTP performance](docs/http-performance.md) for the complete results,
+methodology, architectural explanation, reproduction command, and precise
+scope of the performance claim.
+
 ## Protocol
 
 ```

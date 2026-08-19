@@ -1,0 +1,9 @@
+//@ id:        T-RUST-CORE-0013
+//@ requires:  R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/cast/supported-cast (integer cast semantics)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 44u8
+module tests.rust_ported.core.cast_wrap;
+fn main() -> u8 = 300i32 as u8;

@@ -21,10 +21,10 @@ notes = "Via ax-dev translate. Target ≥70% by M5 ([T-2.4.3])."
 [suite.go_test]
 name = "golang/go test/"
 url = "https://github.com/golang/go"
-commit = "unpinned-pending-acquisition"
+commit = "3e6ad2cd0a76b8b3db19249a14c55f845de8ec99"
 license = "BSD-3-Clause"
 port = "adapted"
-notes = "Scenario-ported into conformance/ and tests/conformance/."
+notes = "Core scenarios ported into tests/go_ported/core/ and conformance/; Go-only interfaces, channels, defer, and package/runtime tests are out of scope for Ax."
 
 [suite.zig_behavior]
 name = "ziglang/zig test/behavior"

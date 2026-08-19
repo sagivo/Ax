@@ -1,0 +1,10 @@
+//@ id:        T-RUST-CORE-0009
+//@ requires:  R-3.3.1
+//@ origin:    rust-lang/rust tests/ui/binding/expr-match (record value and field selection)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    value: 7i32
+module tests.rust_ported.core.record_pattern;
+type Pair = { left: i32, right: i32 };
+fn main() -> i32 = { let p = Pair { left: 3, right: 4 }; p.left + p.right };

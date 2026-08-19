@@ -1,0 +1,17 @@
+//@ id:        T-GO-CORE-0009
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/for.go (break and continue)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 16usz
+module tests.go_ported.core.for_break_continue;
+fn main() -> usz !{err[DivError]} = {
+    let mut sum = 0usz;
+    for i in range(0, 10) {
+        if i == 8 { break; };
+        if i % 2usz == 0usz { continue; };
+        sum = sum + i;
+    };
+    sum
+};

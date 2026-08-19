@@ -1065,6 +1065,30 @@ void ax_rt_http_serve(uint16_t port, const AxStr *body) {
         ax_abort("http.serve failed");
 }
 
+void ax_rt_http_listen(uint16_t port) {
+    if (ax_http_listen(port) != 0) ax_abort("http.listen failed");
+}
+
+void ax_rt_http_accept(const AxTypeDesc *desc, void *out) {
+    if (ax_http_accept(desc, out) != 0) ax_abort("http.accept failed");
+}
+
+void ax_rt_http_respond(uint16_t status, const AxStr *body) {
+    if (ax_http_respond(status, body->ptr, body->len) != 0)
+        ax_abort("http.respond failed");
+}
+
+void ax_rt_http_close(void) {
+    ax_http_close();
+}
+
+void ax_rt_http_serve_handler(uint16_t port, void *handler,
+                              const AxTypeDesc *request_desc,
+                              const AxTypeDesc *response_desc) {
+    if (ax_http_serve_handler(port, handler, request_desc, response_desc) != 0)
+        ax_abort("http.serve_handler failed");
+}
+
 void ax_rt_argv(int32_t i, AxStr *out) {
     if (i < 0 || i >= g_argc) {
         out->ptr = "";

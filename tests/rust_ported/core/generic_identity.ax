@@ -1,0 +1,12 @@
+//@ id:        T-RUST-CORE-0012
+//@ requires:  R-2.1
+//@ origin:    rust-lang/rust tests/ui/generics (monomorphic generic instantiation)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    error: E0109
+module tests.rust_ported.core.generic_identity;
+fn identity[T](x: T) -> T = x;
+// Ax requires an explicit generic binding at the call site; this Rust-positive
+// scenario is retained as a diagnostic regression until that surface exists.
+fn main() -> i32 = identity(9);

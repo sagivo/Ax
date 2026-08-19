@@ -378,10 +378,9 @@ fn main() -> i64 !{alloc[a]} = {
         dense.contains("%{k:7L}"),
         "expected map-literal pack, got {dense}"
     );
-    assert!(
-        dense.contains('[') && dense.contains('?'),
-        "expected m[k]? , got {dense}"
-    );
+    // String-key map reads use the dense surface's implicit zero default, so
+    // the packed spelling is `m[k]` rather than the explicit `m[k]?0` form.
+    assert!(dense.contains('['), "expected m[k], got {dense}");
     let mut a = Session::new();
     let mut b = Session::new();
     b.surface = Surface::Dense;

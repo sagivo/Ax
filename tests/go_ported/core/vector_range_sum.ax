@@ -1,0 +1,15 @@
+//@ id:        T-GO-CORE-0020
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/range.go (range-like collection traversal)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 15usz
+module tests.go_ported.core.vector_range_sum;
+fn main() -> usz !{alloc[a]} = {
+    let mut xs: Vec[usz] = vec.new(test.alloc);
+    xs.push(1usz); xs.push(2usz); xs.push(3usz); xs.push(4usz); xs.push(5usz);
+    let mut sum = 0usz;
+    for i in range(0, xs.len()) { sum = sum + xs.at(i); };
+    sum
+};

@@ -1,0 +1,9 @@
+//@ id:        T-RUST-CORE-0015
+//@ requires:  R-2.1
+//@ origin:    rust-lang/rust tests/ui/mismatched_types (return type mismatch)
+//@ upstream:  4d91de4e48198da2e33413efdcd9cd2cc0c46688
+//@ license:   MIT OR Apache-2.0
+//@ port:      adapted
+//@ expect:    error: E0101
+module tests.rust_ported.core.type_mismatch;
+fn main() -> i32 = true;

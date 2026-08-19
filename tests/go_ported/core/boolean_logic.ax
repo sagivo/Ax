@@ -1,0 +1,9 @@
+//@ id:        T-GO-CORE-0003
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/bool.go (boolean expressions)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: true
+module tests.go_ported.core.boolean_logic;
+fn main() -> bool = (3 < 4 && 4 <= 4) && !(5 == 6 || false);

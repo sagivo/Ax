@@ -1,0 +1,16 @@
+//! A small typed API server. Build with `ax build --tier release examples/api_server.ax`.
+//! The server listens on loopback:8080 and keeps one request per connection.
+module examples.api_server;
+
+fn handle(request: http.Request) -> http.Response =
+    if request.method == "POST" && request.path == "/echo" {
+        http.response(200u16, request.body)
+    } else if request.method == "GET" && request.path == "/health" {
+        http.response(200u16, "{\"ok\":true,\"service\":\"ax\"}")
+    } else if request.path == "/" {
+        http.response(200u16, "{\"message\":\"hello from Ax\"}")
+    } else {
+        http.response(404u16, "{\"error\":\"not_found\"}")
+    };
+
+fn main() -> unit !{io[net], abort} = http.serve_handler(8080u16, handle);

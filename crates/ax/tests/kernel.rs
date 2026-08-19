@@ -374,6 +374,15 @@ fn run_loader_example() {
 }
 
 #[test]
+fn api_server_lowers_typed_handler_to_native_reactor() {
+    let src = include_str!("../../../examples/api_server.ax");
+    let (s, out) = compile(src);
+    let generated = ax::codegen::emit_c(&s.intern, &out).expect("emit API server C");
+    assert!(generated.contains("ax_rt_http_serve_handler"));
+    assert!(generated.contains("ax_rt_str_eq"));
+}
+
+#[test]
 fn get_none_at_aborts() {
     let src = r#"
 module t;

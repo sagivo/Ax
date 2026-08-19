@@ -35,7 +35,8 @@ int ax_http_get(const char *url, AxStr *out);
 /* GET and checksum the body in one shot. */
 int ax_http_get_bytesum(const char *url, uint64_t *out);
 
-/* Serve `body` on 127.0.0.1:`port` in a background thread. */
+/* Serve `body` on 127.0.0.1:`port` until the process is stopped. Uses the same
+   non-blocking keep-alive reactor as typed handlers. */
 int ax_http_serve_static(uint16_t port, const void *body, size_t len);
 
 void ax_http_stop_server(void);
@@ -338,6 +339,17 @@ typedef struct {
     const AxFieldDesc *fields;
 } AxTypeDesc;
 
+/* Request/response server primitives. The descriptor is emitted by the
+   compiler for the typed `http.Request` aggregate, so this ABI remains valid
+   if another backend chooses different record padding. */
+int ax_http_listen(uint16_t port);
+int ax_http_accept(const AxTypeDesc *desc, void *out);
+int ax_http_respond(uint16_t status, const void *body, size_t len);
+void ax_http_close(void);
+int ax_http_serve_handler(uint16_t port, void *handler,
+                          const AxTypeDesc *request_desc,
+                          const AxTypeDesc *response_desc);
+
 /* ---- json -------------------------------------------------------------- */
 
 /* Decode `[{...}, ...]` into a Vec of records described by `desc`.
@@ -378,6 +390,13 @@ uint64_t ax_rt_io_write_file(const AxStr *path, const AxStr *data);
 uint64_t ax_rt_http_get_bytesum(const AxStr *url);
 uint64_t ax_rt_http_get(const AxStr *url);
 void ax_rt_http_serve(uint16_t port, const AxStr *body);
+void ax_rt_http_listen(uint16_t port);
+void ax_rt_http_accept(const AxTypeDesc *desc, void *out);
+void ax_rt_http_respond(uint16_t status, const AxStr *body);
+void ax_rt_http_close(void);
+void ax_rt_http_serve_handler(uint16_t port, void *handler,
+                              const AxTypeDesc *request_desc,
+                              const AxTypeDesc *response_desc);
 void ax_rt_argv(int32_t i, AxStr *out);
 
 /* ---- division by a loop-invariant divisor ------------------------------ */

@@ -1,0 +1,14 @@
+//@ id:        T-GO-CORE-0010
+//@ requires:  R-3.3.1
+//@ origin:    golang/go test/for.go (condition-only loop)
+//@ upstream:  3e6ad2cd0a76b8b3db19249a14c55f845de8ec99
+//@ license:   BSD-3-Clause
+//@ port:      adapted
+//@ expect:    value: 55i32
+module tests.go_ported.core.while_loop;
+fn main() -> i32 !{diverge} = {
+    let mut i = 1;
+    let mut sum = 0;
+    while i <= 10 { sum = sum + i; i = i + 1; };
+    sum
+};
