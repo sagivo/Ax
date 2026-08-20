@@ -1,0 +1,14 @@
+[package]
+name = "ax-db-mysql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Standalone MySQL database package and migration tool for Ax"
+
+[[bin]]
+name = "ax-db-mysql"
+path = "src/main.rs"
+
+[lib]
+name = "ax_db_mysql"
+path = "src/lib.rs"

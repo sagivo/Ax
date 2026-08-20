@@ -115,8 +115,19 @@ impl Runtime {
 fn build_runtime_dylib() -> Result<PathBuf, String> {
     let rt = crate::codegen::runtime_dir();
     let db_rt = crate::codegen::db_runtime_dir();
-    let sources = [rt.join("axrt.c"), rt.join("axlang.c"), db_rt.join("axdb.c")];
-    let headers = [rt.join("axrt.h"), db_rt.join("axdb.h")];
+    let driver = crate::codegen::db_driver()?;
+    let mysql_rt = crate::codegen::mysql_runtime_dir();
+    let db_source = if driver == "mysql" {
+        mysql_rt.join("axdb_mysql.c")
+    } else {
+        db_rt.join("axdb.c")
+    };
+    let sources = [rt.join("axrt.c"), rt.join("axlang.c"), db_source];
+    let headers = [
+        rt.join("axrt.h"),
+        db_rt.join("axdb.h"),
+        mysql_rt.join("axdb_mysql.h"),
+    ];
     let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/axrt");
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
     let ext = if cfg!(target_os = "macos") {
@@ -124,7 +135,7 @@ fn build_runtime_dylib() -> Result<PathBuf, String> {
     } else {
         "so"
     };
-    let lib = out_dir.join(format!("libaxrt.{ext}"));
+    let lib = out_dir.join(format!("libaxrt-{driver}.{ext}"));
 
     let newest_src = sources
         .iter()
@@ -145,7 +156,13 @@ fn build_runtime_dylib() -> Result<PathBuf, String> {
     for s in &sources {
         cmd.arg(s);
     }
-    cmd.arg("-lm").arg("-lsqlite3").arg("-o").arg(&lib);
+    cmd.arg("-lm");
+    if driver == "sqlite" {
+        cmd.arg("-lsqlite3");
+    } else if !cfg!(target_os = "macos") {
+        cmd.arg("-ldl");
+    }
+    cmd.arg("-o").arg(&lib);
     let out = cmd.output().map_err(|e| format!("spawn cc: {e}"))?;
     if !out.status.success() {
         return Err(format!(

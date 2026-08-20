@@ -114,7 +114,7 @@ fn packs_components_reserved() {
 fn packs_round_trip_manifest() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/packs");
     let written = packages::write_registry(&dir).unwrap();
-    assert_eq!(written.len(), 14);
+    assert_eq!(written.len(), 15);
     let core = packages::load_pack(&dir, "core").unwrap();
     assert_eq!(core.name, "core");
     assert_eq!(core.kind, PackKind::Builtin);

@@ -1,0 +1,141 @@
+{
+  "language": "Ax",
+  "version": "v0.3 / research-v1",
+  "extension": ".ax",
+  "audience": "agents-first",
+  "text_authoritative": true,
+  "surfaces": {
+    "default": "dense",
+    "dense": "#name, :=, c??t:e, i~n, +/n, type glyphs",
+    "tree": "file opens with '(' — prefix tree",
+    "corpus": "Rust-shaped fn/module/let parses for IR proof only; agents do not write it"
+  },
+  "axioms": [
+    "Minimize attempts-to-green.",
+    "One spelling per construct.",
+    "Interfaces expose all language-level observable behavior.",
+    "Pure core is deterministic; effectful runs are transcript-replayable.",
+    "Every trust boundary is explicit."
+  ],
+  "type_atoms": {
+    "I": "i32",
+    "L": "i64",
+    "Y": "isz",
+    "U": "u32",
+    "W": "u64",
+    "Z": "usz",
+    "B": "bool",
+    "F": "f64",
+    "f": "f32",
+    "S": "string",
+    "O": "option",
+    "R": "result",
+    "M": "map",
+    "V": "vec"
+  },
+  "syntax": {
+    "function": "#name(a T)R=body",
+    "default_param_type": "I",
+    "shared_type": "a,b:T",
+    "bind": "name T:=e",
+    "if": "c??t:e",
+    "while": "@c{body}",
+    "loop_n": "i~n",
+    "return": "^e",
+    "option_or": "e?d",
+    "result_or": "e|d",
+    "result_propagate": "e?",
+    "length": "xs#",
+    "append": "xs<-e",
+    "index_store": "xs[i]<-v",
+    "map_insert": "m[k]<-v",
+    "map_get_or": "m[k]?d",
+    "map_get_zero": "m[k]?",
+    "reduce_sum_range": "+/n",
+    "dot": "+/a*b"
+  },
+  "effects": {
+    "inferred": true,
+    "empty_row": "effect-free including termination",
+    "omitted_row": "reconstructs diverge",
+    "strict_det_rejects": ["io", "race", "nondet"],
+    "alloc_shorthand": "!a is !alloc[a]"
+  },
+  "errors": {
+    "ops": ["raise", "catch", "attempt"],
+    "max_err": 1,
+    "ok_or": "e|d"
+  },
+  "memory": {
+    "own": "affine",
+    "regions": "lexical bump arenas; name is Alloc",
+    "mut": "exclusive; no reborrow; no interior mut"
+  },
+  "trust": {
+    "Untrusted": "IO produces it; sinks reject it",
+    "Secret": "cannot be logged, formatted, serialized, or sent over FFI"
+  },
+  "concurrency": {
+    "par": "rejected until disjointness is proven; not in v1 native backend"
+  },
+  "protocol": [
+    "ax check [--json] [--allow-holes] [--strict-det] [--surface ax|tree]",
+    "ax hole [--fills] [--json]",
+    "ax fix [--apply]",
+    "ax test",
+    "ax run --seed N --trace f",
+    "ax jit <file> [args]",
+    "ax replay f source.ax",
+    "ax ir",
+    "ax types",
+    "ax effs",
+    "ax search",
+    "ax errs --into",
+    "ax fmt",
+    "ax patch --tx",
+    "ax deps --affected",
+    "ax build [-o bin] [--tier dev|release|portable]",
+    "ax merge --semantic",
+    "ax label",
+    "ax card",
+    "ax perf [--json] [--diff baseline.json]",
+    "ax complete",
+    "ax context",
+    "ax repair",
+    "ax caps",
+    "ax gbnf",
+    "ax daemon"
+  ],
+  "rules": {
+    "hole_fills": "only candidates that compile after substitution",
+    "fix_apply": "only semantics_preserving",
+    "numeric_conversion": "as is the only one"
+  },
+  "http": {
+    "handler": "fn(http.Request) -> http.Response",
+    "serve": "http.serve_handler(port, handle)",
+    "framework": {
+      "name": "ax-api",
+      "in_compiler": false,
+      "run": "ax-api run app.ax",
+      "do_not_define": "fn main"
+    }
+  },
+  "measured": {
+    "check_us": 176,
+    "jit_compile_and_run_us": 417,
+    "protocol_wall_ms": { "ax": [0.6, 1.0], "rust": [361, 612] },
+    "tokens_o200k_base": { "ax": 107, "python": 133, "typescript": 185, "rust": 226, "c": 237 },
+    "silent_wrongness": { "ax": 0.36, "rust": 0.64 },
+    "tier_divergent": { "ax": 0.0, "rust": 0.18 },
+    "http_rps": {
+      "ax": 143273,
+      "go": 140841,
+      "rust": 140189,
+      "node": 96762,
+      "python": 28996,
+      "p99_ms": { "ax": 2.34, "go": 9.38, "rust": 3.41 },
+      "setup": "wrk 4 threads, 256 connections, 10s, Darwin arm64, GET / -> {\"ok\":true}"
+    }
+  }
+}

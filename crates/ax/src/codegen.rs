@@ -61,6 +61,21 @@ pub fn db_runtime_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/ax-db/runtime")
 }
 
+pub fn mysql_runtime_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/ax-db-mysql/runtime")
+}
+
+pub fn db_driver() -> Result<&'static str, String> {
+    match std::env::var("AX_DB_DRIVER").as_deref() {
+        Ok("") | Err(std::env::VarError::NotPresent) | Ok("sqlite") => Ok("sqlite"),
+        Ok("mysql") => Ok("mysql"),
+        Ok(value) => Err(format!(
+            "unsupported AX_DB_DRIVER `{value}` (expected sqlite or mysql)"
+        )),
+        Err(error) => Err(format!("read AX_DB_DRIVER: {error}")),
+    }
+}
+
 pub fn build_native(
     intern: &Interner,
     checked: &CheckOutput,
@@ -90,7 +105,14 @@ pub fn build_tier(
 
     let rt = runtime_dir();
     let db_rt = db_runtime_dir();
-    let sources = [rt.join("axrt.c"), rt.join("axlang.c"), db_rt.join("axdb.c")];
+    let driver = db_driver()?;
+    let mysql_rt = mysql_runtime_dir();
+    let db_source = if driver == "mysql" {
+        mysql_rt.join("axdb_mysql.c")
+    } else {
+        db_rt.join("axdb.c")
+    };
+    let sources = [rt.join("axrt.c"), rt.join("axlang.c"), db_source];
     for s in &sources {
         if !s.exists() {
             return Err(format!("missing runtime {}", s.display()));
@@ -126,7 +148,13 @@ pub fn build_tier(
     for s in &sources {
         cmd.arg(s);
     }
-    cmd.arg("-lm").arg("-lsqlite3").arg("-o").arg(&bin_path);
+    cmd.arg("-lm");
+    if driver == "sqlite" {
+        cmd.arg("-lsqlite3");
+    } else if !cfg!(target_os = "macos") {
+        cmd.arg("-ldl");
+    }
+    cmd.arg("-o").arg(&bin_path);
     let out = cmd.output().map_err(|e| format!("spawn cc: {e}"))?;
     if !out.status.success() {
         if tier == Tier::Portable {

@@ -70,7 +70,27 @@ pub fn component_stubs() -> Vec<PackManifest> {
 }
 
 pub fn component_packs() -> Vec<PackManifest> {
-    vec![component("db", "0.1.0")]
+    vec![
+        component("db", "0.1.0"),
+        PackManifest {
+            api: PACK_API,
+            name: "db-mysql".into(),
+            version: "0.1.0".into(),
+            kind: PackKind::Component,
+            source_hash: hash::sha256_hex(b"db-mysql@0.1.0"),
+            files: BTreeMap::new(),
+            deps: vec![
+                PackDep {
+                    name: "core".into(),
+                    version: "0.1.0".into(),
+                },
+                PackDep {
+                    name: "db".into(),
+                    version: "0.1.0".into(),
+                },
+            ],
+        },
+    ]
 }
 
 fn component(name: &str, version: &str) -> PackManifest {

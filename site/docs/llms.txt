@@ -1,0 +1,15 @@
+# Ax docs (agent)
+
+Ingest in this order:
+
+1. [card.md](card.md) — language card, ≤ agent context
+2. [card.json](card.json) — same facts, structured
+3. [protocol.md](protocol.md) — compiler loop
+4. [api.md](api.md) — standalone REST generator
+
+Rendered human view: [index.html](index.html)
+Site root: [../llms.txt](../llms.txt)
+
+Do not write Rust-shaped Ax. Write `#name(a,b)=a+b` or a `(` tree.
+`ax hole --fills` returns compiling candidates only.
+`ax-api` is not in the compiler; do not define `fn main` in an ax-api file.

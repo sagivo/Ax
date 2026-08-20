@@ -1,6 +1,9 @@
 # Ax DB
 
-Ax DB is the standalone database component for Ax. The first driver is SQLite.
+Ax DB is the standalone database component for Ax. SQLite is the default
+driver. The companion [`ax-db-mysql`](../ax-db-mysql/README.md) package uses
+the same driver-neutral `db.Pool` surface for MySQL.
+
 It provides parameter binding, typed row decoding, explicit transactions, and
 an idempotent migration CLI without putting database policy into the language
 or the REST framework.
@@ -53,11 +56,13 @@ The complete surface is:
 - `db.tx_query0[T]`, `db.tx_query[T]`, `db.tx_query_values[T]`
 - `db.commit`, `db.rollback`
 
-`db.Pool` is a synchronized shared SQLite connection in this release. The type
-name is the stable driver-neutral API; a later PostgreSQL driver can back it
-with multiple physical connections without changing handlers. The timeout is a
-statement progress deadline in milliseconds and also bounds lock acquisition;
-`0` disables the progress deadline. A timed-out statement returns `db.Error`.
+`db.Pool` is a synchronized shared connection. SQLite is selected by default;
+set `AX_DB_DRIVER=mysql` when building or running to select the MySQL package.
+MySQL connections use `mysql://user:password@host:3306/database` DSNs and load
+`libmysqlclient` dynamically. Handlers do not change between drivers. SQLite's
+timeout is a statement progress deadline in milliseconds; MySQL uses the same
+configuration point for driver connection policy. A timed-out or failed
+statement returns `db.Error`.
 
 ## Migrations
 
@@ -78,6 +83,12 @@ ax-db migrate app.sqlite migrations
 Applied file names are recorded in `_ax_migrations`. Re-running the command
 skips files already recorded. Each new file runs in its own immediate
 transaction.
+
+For MySQL migrations, install the MySQL client and run:
+
+```sh
+ax-db-mysql migrate mysql://user:password@host:3306/app migrations
+```
 
 ## Ax API integration
 

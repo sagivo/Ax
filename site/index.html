@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ax — compiled for agents</title>
+    <meta
+      name="description"
+      content="Ax is a compiled systems language whose primary consumer is a program. Check in 176 µs. 143,273 HTTP req/s. Built-in typed API path."
+    />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Karla:wght@400;600&family=Oxanium:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="alternate" type="text/plain" href="llms.txt" title="Ax for agents" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">AX</span>
+        <span class="brand-meta">v0.3 · systems</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="#agents">Agents</a>
+        <a href="#speed">Speed</a>
+        <a href="#api">API</a>
+        <a href="#docs" class="agent-link">Docs for agents</a>
+        <a href="docs/index.html">Card</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero">
+        <aside class="spine chamfer" aria-label="Compilation spine">
+          <p class="kicker">Pipeline</p>
+          <ol>
+            <li>
+              <span class="n">01</span>
+              <span
+                >.ax
+                <span class="why">dense source, or a tree if it opens with (</span></span
+              >
+            </li>
+            <li>
+              <span class="n">02</span>
+              <span
+                >check
+                <span class="why">types, effects, regions, Untrusted / Secret / own</span></span
+              >
+            </li>
+            <li>
+              <span class="n">03</span>
+              <span
+                >IR
+                <span class="why">typed SSA. backends see only this</span></span
+              >
+            </li>
+            <li>
+              <span class="n">04</span>
+              <span
+                >Cranelift · C11 · oracle
+                <span class="why">three answers. disagreement is a bug</span></span
+              >
+            </li>
+          </ol>
+        </aside>
+
+        <div class="hero-main">
+          <div class="audience">
+            <span>for agents</span>
+            <span class="second">humans second</span>
+          </div>
+          <pre
+            class="program"
+            data-type="#add(a,b)=a+b
+#sum(n:Z)=+/n
+#main() I = 1 + 2"
+          >#add(a,b)=a+b
+#sum(n:Z)=+/n
+#main() I = 1 + 2</pre>
+          <h1 class="thesis">A compiler that answers in microseconds.</h1>
+          <p class="lede">
+            Ax is a compiled systems language whose primary consumer is a program,
+            not a person. You write <code>#add(a,b)=a+b</code>. The checker
+            returns in 176&nbsp;µs. Hole fills are known to compile. Fixes that
+            change meaning are refused.
+          </p>
+          <div class="actions">
+            <a class="btn btn-hot chamfer" href="docs/card.md">Ingest the card</a>
+            <a class="btn btn-ghost chamfer" href="llms.txt">llms.txt</a>
+            <a class="btn btn-ghost chamfer" href="#install">Install</a>
+          </div>
+          <div class="ruler-label">
+            <span>check a module</span>
+            <span>same work, wall time</span>
+          </div>
+          <div class="ruler" aria-label="Check latency comparison">
+            <div class="bar">
+              <span>Ax</span>
+              <div class="track"><div class="fill fill-ax"></div></div>
+              <span>176 µs</span>
+            </div>
+            <div class="bar">
+              <span>rustc</span>
+              <div class="track"><div class="fill fill-rust"></div></div>
+              <span>1.18 s</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="agents">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Built for agents first</h2>
+            <p class="section-note">
+              Humans can read it. The protocol is what the language is for.
+            </p>
+          </div>
+          <div class="claims">
+            <article class="claim chamfer">
+              <p class="stat">0.6–1.0 ms · ax + protocol</p>
+              <h3>Attempts-to-green is the loop</h3>
+              <p>
+                <code>ax check --json</code> is in-process.
+                <code>ax hole --fills</code> synthesises candidates, substitutes
+                each one, and only returns fills that type-check. A protocol over
+                rustc still pays 361–612&nbsp;ms. Process launch is the floor
+                there; <code>--emit=metadata</code> alone is 37&nbsp;ms.
+              </p>
+            </article>
+            <article class="claim chamfer">
+              <p class="stat">20% fewer tokens vs best mainstream</p>
+              <h3>Dense on purpose</h3>
+              <p>
+                Nine common methods, exact o200k_base BPE: Ax 107, Python 133,
+                TypeScript 185, Rust 226, C 237. One spelling per construct.
+                A formatter that strips BPE-costing whitespace. Shortening
+                <code>fn</code> to <code>f</code> would not help — both are
+                already one token.
+              </p>
+            </article>
+            <article class="claim chamfer">
+              <p class="stat">silent wrongness 36% vs Rust 64%</p>
+              <h3>The language says no</h3>
+              <p>
+                Effects live in the signature. Pure functions may be cached;
+                <code>io</code> never is. <code>own T</code> is affine.
+                <code>Untrusted[T]</code> cannot reach sinks.
+                <code>Secret[T]</code> cannot be logged. Three backends must
+                agree. Tier-divergent: Ax 0%, Rust 18%. A protocol over Rust
+                cannot copy this table.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="speed">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Fast where a guarantee does the work</h2>
+            <p class="section-note">
+              Same algorithm, identical output. The harness refuses a time unless
+              every backend printed the same value. Fastest of 21 runs.
+            </p>
+          </div>
+          <div class="table-wrap chamfer">
+            <table class="metrics">
+              <thead>
+                <tr>
+                  <th>workload</th>
+                  <th>ax</th>
+                  <th>rust</th>
+                  <th>ax / rust</th>
+                  <th>why</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>check a module</td>
+                  <td class="win">176 µs</td>
+                  <td>1.18 s</td>
+                  <td class="win">~10⁻⁴×</td>
+                  <td>the checker is what an agent calls in a loop</td>
+                </tr>
+                <tr>
+                  <td>compile and run</td>
+                  <td class="win">417 µs</td>
+                  <td>1.18 s compile only</td>
+                  <td class="win">~10⁻⁴×</td>
+                  <td>Cranelift, in-process. cc alone is 74 ms</td>
+                </tr>
+                <tr>
+                  <td>fib(40) from argv</td>
+                  <td class="win">1.88 ms</td>
+                  <td>166.9 ms</td>
+                  <td class="win">0.011×</td>
+                  <td>proven pure, so results are cached</td>
+                </tr>
+                <tr>
+                  <td>1e6 short-lived buffers</td>
+                  <td class="win">10.54 ms</td>
+                  <td>21.28 ms</td>
+                  <td class="win">0.50×</td>
+                  <td>region arena: no per-object free</td>
+                </tr>
+                <tr>
+                  <td>IO 64 MiB bytesum</td>
+                  <td class="win">11.49 ms</td>
+                  <td>16.92 ms</td>
+                  <td class="win">0.68×</td>
+                  <td>axrt mmaps in place</td>
+                </tr>
+                <tr>
+                  <td>invariant-divisor % 8e7</td>
+                  <td class="win">37.1 ms</td>
+                  <td>43.7 ms</td>
+                  <td class="win">0.85×</td>
+                  <td>reciprocal hoisted; rustc leaves a udiv</td>
+                </tr>
+                <tr>
+                  <td>Euclid gcd 3e6</td>
+                  <td>115.5 ms</td>
+                  <td>114.6 ms</td>
+                  <td>1.01×</td>
+                  <td>parity. the loop is the ceiling</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="fineprint">
+            Where the work is a plain loop, Ax lands on clang and clang’s result
+            is what you get. Go wins <code>primes</code> by ~15% with the same
+            instruction class — scheduling, not work. “Faster than any other
+            language on identical machine-level work” is not a claim this table
+            supports except where a language guarantee does the work, or on the
+            agent loop itself.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="http">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>143,273 HTTP requests / second</h2>
+            <p class="section-note">
+              Routed JSON, wrk 4 threads × 256 connections × 10 s, Darwin arm64.
+              Same 11-byte <code>{"ok":true}</code> body. Zero socket errors.
+            </p>
+          </div>
+          <div class="split">
+            <div class="panel chamfer">
+              <h3>Reference run</h3>
+              <div class="http-bars">
+                <div class="http-row">
+                  <span>Ax</span>
+                  <div class="http-track"><div class="http-fill lead" style="width:100%"></div></div>
+                  <span>143,273 · p99 2.34 ms</span>
+                </div>
+                <div class="http-row">
+                  <span>Go</span>
+                  <div class="http-track"><div class="http-fill" style="width:98.3%"></div></div>
+                  <span>140,841 · p99 9.38 ms</span>
+                </div>
+                <div class="http-row">
+                  <span>Rust</span>
+                  <div class="http-track"><div class="http-fill" style="width:97.8%"></div></div>
+                  <span>140,189 · p99 3.41 ms</span>
+                </div>
+                <div class="http-row">
+                  <span>Node</span>
+                  <div class="http-track"><div class="http-fill" style="width:67.5%"></div></div>
+                  <span>96,762</span>
+                </div>
+                <div class="http-row">
+                  <span>Python</span>
+                  <div class="http-track"><div class="http-fill" style="width:20.2%"></div></div>
+                  <span>28,996</span>
+                </div>
+              </div>
+              <p class="fineprint">
+                The 1.7% lead over Go is inside host-scheduling noise. Ax’s p99
+                is the number that is not. Reproduce with
+                <code>sh bench/http/run.sh</code>.
+              </p>
+            </div>
+            <div class="panel chamfer">
+              <h3>Hot path</h3>
+              <p>
+                One kqueue / epoll reactor. Keep-alive and pipelining. Connection
+                buffers reused. Literal bodies serialized once and proven static
+                by lowering. <code>fn(http.Request) -> http.Response</code>
+                compiled to native code. No reflection, no middleware, no
+                per-request allocation on the static path.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="api">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>API framework in the language</h2>
+            <p class="section-note">
+              Handlers are ordinary typed functions. <code>ax-api</code> is a
+              standalone source generator — the compiler has no router.
+            </p>
+          </div>
+          <div class="split">
+            <div class="code-block">
+              <div class="copy-row">
+                <button class="btn btn-ghost" type="button" data-copy="#api-src">Copy</button>
+              </div>
+              <pre class="code" id="api-src"><span class="c">// ax-api port 8080</span>
+<span class="c">// ax-api GET /health -> health</span>
+<span class="c">// ax-api GET /v1/items/{id} -> show</span>
+<span class="c">// ax-api POST /v1/items -> create</span>
+
+<span class="k">fn</span> health(request: http.Request) -> http.Response =
+    api.ok({ok: <span class="p">true</span>});
+
+<span class="k">fn</span> show(request: http.Request, id: String) -> http.Response =
+    api.ok(id);
+
+<span class="k">fn</span> create(request: http.Request) -> http.Response =
+    api.created(request.body);</pre>
+            </div>
+            <div class="panel chamfer">
+              <h3>What you get</h3>
+              <p>
+                Verb routes, path / query / header / cookie extraction, typed
+                JSON bodies, <code>api.ok</code> / <code>created</code> /
+                <code>no_content</code>, generated <code>/openapi.json</code>
+                and <code>/docs</code>, optional SQLite or MySQL pool, TLS,
+                watch mode.
+              </p>
+              <p>
+                Expand, then compile. Inspect with <code>ax-api expand</code>.
+                Framework routing measured 145,382 req/s against 145,044 for
+                hand-written Ax — 0.23%, noise.
+              </p>
+              <pre class="code" style="margin-top:0.9rem">ax-api new my-api
+ax-api run my-api/app.ax</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="density">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Token density, nine tasks</h2>
+            <p class="section-note">o200k_base. Lower is cheaper to generate.</p>
+          </div>
+          <div class="token-grid">
+            <div class="token best chamfer"><b>107</b><span>Ax</span></div>
+            <div class="token chamfer"><b>133</b><span>Python</span></div>
+            <div class="token chamfer"><b>185</b><span>TypeScript</span></div>
+            <div class="token chamfer"><b>226</b><span>Rust</span></div>
+            <div class="token chamfer"><b>237</b><span>C</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="docs">
+        <div class="wrap">
+          <div class="docs-ingest chamfer">
+            <p class="kicker">Machine-readable</p>
+            <h2>Docs built for agents to consume</h2>
+            <p class="section-note">
+              Fetch <code>llms.txt</code>, then the card. Markdown and JSON.
+              No chrome required. Humans can open the rendered page.
+            </p>
+            <div class="file-list">
+              <a class="file chamfer" href="llms.txt">
+                <code>llms.txt</code>
+                <p>Entry point. Facts, protocol, ingest order.</p>
+              </a>
+              <a class="file chamfer" href="docs/card.md">
+                <code>docs/card.md</code>
+                <p>Language card. Syntax, effects, memory, commands.</p>
+              </a>
+              <a class="file chamfer" href="docs/card.json">
+                <code>docs/card.json</code>
+                <p>Same card, structured. Prefer this if you parse.</p>
+              </a>
+              <a class="file chamfer" href="docs/protocol.md">
+                <code>docs/protocol.md</code>
+                <p>Check / hole / fix / jit / replay loop.</p>
+              </a>
+              <a class="file chamfer" href="docs/api.md">
+                <code>docs/api.md</code>
+                <p>ax-api directives, helpers, handler shape.</p>
+              </a>
+              <a class="file chamfer" href="docs/index.html">
+                <code>docs/index.html</code>
+                <p>Rendered view of the same documents.</p>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="install">
+        <div class="wrap">
+          <div class="section-head">
+            <h2>Install</h2>
+            <p class="section-note">Rust 1.94+ and a C11 compiler. Go optional.</p>
+          </div>
+          <div class="code-block">
+          <div class="copy-row">
+            <button class="btn btn-ghost" type="button" data-copy="#install-src">Copy</button>
+          </div>
+          <pre class="code" id="install-src">cargo install --path crates/ax
+ax jit hello.ax
+ax-api new my-api && ax-api run my-api/app.ax</pre>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Ax · compiled systems language · agents first</span>
+      <span>Site is not part of the compiler.</span>
+    </footer>
+    <script src="app.js"></script>
+  </body>
+</html>

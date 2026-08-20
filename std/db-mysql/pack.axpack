@@ -1,0 +1,12 @@
+{
+  "api": 1,
+  "name": "db-mysql",
+  "version": "0.1.0",
+  "kind": "component",
+  "source_hash": "b98be68b1d44ac623dbac8a6a3c612f7618c422e943659f9f0839b300c882906",
+  "files": {},
+  "deps": [
+    { "name": "core", "version": "0.1.0" },
+    { "name": "db", "version": "0.1.0" }
+  ]
+}

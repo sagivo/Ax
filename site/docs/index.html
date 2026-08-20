@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ax docs — agent card</title>
+    <meta
+      name="description"
+      content="Agent-facing Ax documentation. Prefer card.md, card.json, protocol.md, and api.md."
+    />
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Karla:wght@400;600&family=Oxanium:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="alternate" type="text/plain" href="llms.txt" title="Docs ingest order" />
+  </head>
+  <body class="docs-page">
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="../index.html">
+        <span class="brand-mark">AX</span>
+        <span class="brand-meta">docs · agents</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="../index.html">Site</a>
+        <a href="card.md">card.md</a>
+        <a href="card.json">card.json</a>
+        <a href="protocol.md">protocol</a>
+        <a href="api.md">api</a>
+        <a href="llms.txt" class="agent-link">llms.txt</a>
+      </nav>
+    </header>
+
+    <div class="docs-banner">
+      <div class="docs-ingest chamfer">
+        <p class="kicker">Do not scrape this page first</p>
+        <p class="section-note" style="margin:0">
+          Agents: fetch <a href="llms.txt">docs/llms.txt</a>, then
+          <a href="card.md">card.md</a> or <a href="card.json">card.json</a>.
+          This HTML is a human rendering of those files.
+        </p>
+      </div>
+    </div>
+
+    <div class="docs-layout">
+      <nav class="toc" aria-label="On this page">
+        <a href="#card">Card</a>
+        <a href="#axioms">Axioms</a>
+        <a href="#syntax">Syntax</a>
+        <a href="#protocol">Protocol</a>
+        <a href="#http">HTTP</a>
+        <a href="#api">Ax API</a>
+        <a href="#measured">Measured</a>
+      </nav>
+
+      <main id="main" class="prose">
+        <h1 id="card">Ax card (v0.3 / research-v1)</h1>
+        <p>
+          <strong>This is Ax.</strong> <code>#name</code>, <code>:=</code>,
+          <code>c??t:e</code>, <code>i~n</code>, <code>+/n</code>, type glyphs.
+          Default parse and <code>ax fmt</code>. A file that opens with
+          <code>(</code> is the prefix tree. Rust-shaped <code>fn</code> /
+          <code>module</code> / <code>let</code> still parses so the corpus
+          keeps proving the IR. An agent does not write it.
+        </p>
+        <p>
+          <code>own T</code> is affine. <code>Untrusted[T]</code> /
+          <code>Secret[T]</code> cannot reach sinks / logs.
+          <code>ax perf --json</code> is the second diagnostic loop.
+        </p>
+        <p>
+          Compiled systems language for LLM agents. Extension <code>.ax</code>.
+          Text is authoritative. Primary consumer: a program. Humans are second.
+        </p>
+
+        <h2 id="axioms">Axioms</h2>
+        <ul>
+          <li>Minimize attempts-to-green.</li>
+          <li>One spelling per construct.</li>
+          <li>Interfaces expose all language-level observable behavior.</li>
+          <li>Pure core is deterministic; effectful runs are transcript-replayable.</li>
+          <li>Every trust boundary is explicit.</li>
+        </ul>
+
+        <h2 id="syntax">File</h2>
+        <pre class="code">#add(a,b)=a+b
+#sum(n:Z)=+/n
+#sumv(xs V[Z])Z=+/xs#
+#dot(a,b:V[W])W=+/a*b
+#maxv(xs V[Z])Z=|/xs#
+#pick(b B)=b??1:0
+#get(m M[S,L],k S)L=m[k]?0
+#f={m:={e:2,o:3};m[e]?+m[o]?}
+#main()Z={s Z:=1;i~n{s=s*6364136223846793005+i};s}</pre>
+        <p>
+          <code>#name(a T)R=body</code> is a function. Omitted signature types
+          are <code>I</code>. <code>a,b:T</code> shares <code>T</code>.
+          <code>name T:=e</code> binds. <code>i~n</code> loops 0..n.
+          <code>c??t:e</code> is if/else. <code>@c{body}</code> is while.
+          <code>^e</code> returns. <code>e?d</code> option-or.
+          <code>e|d</code> result-or.
+        </p>
+        <p>
+          Type atoms: <code>I</code> i32 · <code>L</code> i64 ·
+          <code>Y</code> isz · <code>U</code> u32 · <code>W</code> u64 ·
+          <code>Z</code> usz · <code>B</code> bool · <code>F</code> f64 ·
+          <code>f</code> f32 · <code>S</code> string · <code>O</code> option ·
+          <code>R</code> result · <code>M</code> map · <code>V</code> vec.
+        </p>
+        <p>
+          A file that opens with <code>(</code> is the tree:
+          <code>(fn add ((a i32) (b i32)) i32 (+ a b))</code>.
+        </p>
+
+        <h3>Effects, errors, memory, trust</h3>
+        <p>
+          Effects inferred in the body, checked against the declaration.
+          Empty row = effect-free, including termination.
+          <code>raise</code> / <code>catch</code> / <code>attempt</code> become
+          a result. At most one <code>err[E]</code>. Regions are lexical bump
+          arenas. Exclusive mut. No reborrow. <code>own T</code> use-once.
+          IO produces <code>Untrusted</code>; sinks reject it.
+          <code>Secret</code> cannot be logged, formatted, serialized, or sent
+          over FFI. <code>par</code> is rejected in v1.
+        </p>
+
+        <h2 id="protocol">Protocol</h2>
+        <pre class="code">ax check [--json] [--allow-holes] [--strict-det] [--surface ax|tree]
+ax hole [--fills] [--json]
+ax fix [--apply]
+ax test
+ax run --seed N --trace f
+ax jit <file> [args]
+ax replay f source.ax
+ax ir | types | effs | search | errs --into | fmt | patch --tx | deps --affected
+ax build [-o bin] [--tier dev|release|portable]
+ax merge --semantic | label | card | pkg list | pkg write
+ax perf [--json] [--diff baseline.json] | complete | context | repair
+ax caps | gbnf | daemon</pre>
+        <p>
+          <code>ax hole --fills</code> returns only candidates that compile after
+          substitution. <code>ax fix --apply</code> applies only
+          <code>semantics_preserving</code> edits. Full loop:
+          <a href="protocol.md">protocol.md</a>.
+        </p>
+
+        <h2 id="http">HTTP</h2>
+        <pre class="code">fn handle(request: http.Request) -> http.Response =
+    if request.path == "/health" {
+        http.response(200u16, "{\"ok\":true}")
+    } else {
+        http.response(404u16, "{\"error\":\"not_found\"}")
+    };
+
+fn main() -> unit !{io[net], abort} = http.serve_handler(8080u16, handle);</pre>
+        <p>Build: <code>ax build --tier release app.ax</code>.</p>
+
+        <h2 id="api">Ax API (standalone)</h2>
+        <p>
+          Not in the compiler. Do not define <code>fn main</code>. See
+          <a href="api.md">api.md</a>.
+        </p>
+        <pre class="code">// ax-api port 8080
+// ax-api GET /v1/items/{id} -> show
+fn show(request: http.Request, id: String) -> http.Response = api.ok(id);</pre>
+        <table>
+          <thead>
+            <tr>
+              <th>command</th>
+              <th>does</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>ax-api new</code></td>
+              <td>starter app</td>
+            </tr>
+            <tr>
+              <td><code>ax-api run app.ax</code></td>
+              <td>expand, check, build, serve</td>
+            </tr>
+            <tr>
+              <td><code>ax-api expand</code></td>
+              <td>print generated core Ax</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2 id="measured">Measured (quote with scope)</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>metric</th>
+              <th>value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>check a module</td>
+              <td>176 µs (rustc 1.18 s)</td>
+            </tr>
+            <tr>
+              <td>compile and run</td>
+              <td>417 µs Cranelift; cc alone 74 ms</td>
+            </tr>
+            <tr>
+              <td>ax + protocol wall</td>
+              <td>0.6–1.0 ms vs rust + protocol 361–612 ms</td>
+            </tr>
+            <tr>
+              <td>tokens o200k_base</td>
+              <td>Ax 107 / Python 133 / TS 185 / Rust 226 / C 237</td>
+            </tr>
+            <tr>
+              <td>silent wrongness</td>
+              <td>Ax 36% / Rust 64%. tier-divergent Ax 0% / Rust 18%</td>
+            </tr>
+            <tr>
+              <td>HTTP routed JSON</td>
+              <td>Ax 143,273 r/s p99 2.34 ms · wrk 4×256×10s Darwin arm64</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Where the work is a plain loop, Ax lands on clang. HTTP lead over
+          Go/Rust is ~2% on the reference machine. Faster-than-Rust is claimed
+          only where a language guarantee does the work, or on the agent loop.
+        </p>
+      </main>
+    </div>
+
+    <footer class="site-footer">
+      <span>Prefer card.md and card.json over this HTML.</span>
+      <a href="../index.html">Back to site</a>
+    </footer>
+  </body>
+</html>

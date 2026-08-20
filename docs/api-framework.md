@@ -180,9 +180,13 @@ This expands to `env.get_or("AX_DATABASE_PATH", "app.sqlite")`, and the
 generated main function declares `io[env]` in addition to its database and
 network effects.
 
-`// ax-api database_timeout N` configures the SQLite statement and lock-wait
-deadline in milliseconds. It must be used with `database` or `database_env`;
-`0` disables the statement progress deadline.
+`// ax-api database_timeout N` configures the database timeout in milliseconds.
+It must be used with `database` or `database_env`; `0` disables the SQLite
+statement progress deadline. SQLite is the default driver. To use MySQL, set
+`AX_DB_DRIVER=mysql` before invoking `ax-api` and use a
+`mysql://user:password@host:3306/database` DSN. The MySQL driver is the
+standalone [`db-mysql`](../packages/ax-db-mysql/README.md) component and loads
+`libmysqlclient` dynamically.
 
 ## Defining routes
 

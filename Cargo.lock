@@ -83,6 +83,10 @@ name = "ax-db"
 version = "0.1.0"
 
 [[package]]
+name = "ax-db-mysql"
+version = "0.1.0"
+
+[[package]]
 name = "ax-density"
 version = "0.1.0"
 dependencies = [

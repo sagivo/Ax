@@ -124,13 +124,16 @@ example.
 
 The standalone **Ax DB** component provides SQLite connections, bound
 parameters, typed record decoding, explicit transactions, statement timeouts,
-and idempotent migrations. Ax API can open one application database and pass it
-explicitly to handlers with `// ax-api database app.sqlite`. The core language
-only owns the opaque-resource and stateful-handler ABI; SQL and migration policy
-stay in `packages/ax-db`.
+and idempotent migrations. The companion `db-mysql` component provides the same
+ABI for MySQL. Ax API can open one application database and pass it explicitly
+to handlers with `// ax-api database app.sqlite`. The core language only owns
+the opaque-resource and stateful-handler ABI; SQL and migration policy stay in
+standalone packages.
 
 See [Ax DB](packages/ax-db/README.md) and the executable
 [`examples/db_sqlite.ax`](examples/db_sqlite.ax).
+For MySQL, set `AX_DB_DRIVER=mysql` and use a `mysql://user:password@host:3306/database`
+DSN; see [`packages/ax-db-mysql`](packages/ax-db-mysql/README.md).
 
 ## Protocol
 

@@ -4,6 +4,7 @@
 *.pdb
 .ax-cache/
 .ax-api/
+.playwright-cli/
 dist/
 
 # Build products `ax build` leaves next to a source file. The C is a build

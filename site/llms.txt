@@ -1,0 +1,69 @@
+# Ax
+
+> Compiled systems language whose primary consumer is a program, not a person.
+> Extension `.ax`. Text is authoritative. v0.3 / research-v1.
+
+Agents: start with the card, then the protocol. Do not write Rust-shaped `fn` /
+`module` / `let` unless expanding generated code. Write Ax (`#name`, `:=`,
+`c??t:e`, `i~n`, `+/n`) or a prefix tree if the file opens with `(`.
+
+## Ingest these first
+
+- [Agent card (markdown)](docs/card.md)
+- [Agent card (json)](docs/card.json)
+- [Compiler protocol](docs/protocol.md)
+- [Ax API framework](docs/api.md)
+- [Rendered docs](docs/index.html)
+
+## Language facts
+
+- Check: 176 µs. Compile and run (Cranelift, in-process, no cc): 417 µs.
+- Token density (9-task corpus, o200k_base): Ax 107 vs Python 133 / TS 185 / Rust 226 / C 237. 20% fewer than the best mainstream total.
+- HTTP/1.1 routed JSON bench (wrk, 256 conn, Darwin arm64): Ax 143,273 req/s, p99 2.34 ms. Ahead of Go 140,841 / Rust 140,189 / Node 96,762 / Python 28,996.
+- `ax hole --fills` returns only candidates that compile.
+- `ax fix --apply` applies only `semantics_preserving` fixes.
+- Effects live in the signature. Pure functions may be cached. `Untrusted[T]` / `Secret[T]` cannot reach sinks / logs. `own T` is affine.
+- Ax API (`ax-api`) is a standalone source generator. It expands comment directives into an ordinary `http.serve_handler` program. The compiler has no router.
+
+## Install
+
+```
+cargo install --path crates/ax
+```
+
+Requires Rust 1.94+ and a C11 compiler.
+
+## Protocol (shipped)
+
+```
+ax check [--json] [--allow-holes] [--strict-det] [--surface ax|tree]
+ax hole [--fills] [--json]
+ax fix [--apply]
+ax test
+ax run --seed N --trace f
+ax jit <file> [args]
+ax replay f source.ax
+ax ir | types | effs | search | errs --into | fmt | patch --tx | deps --affected
+ax build [-o bin] [--tier dev|release|portable]
+ax merge --semantic | label | card | pkg list | pkg write
+ax perf [--json] [--diff baseline.json] | complete | context | repair
+ax caps | gbnf | daemon
+```
+
+## Minimal file
+
+```
+#add(a,b)=a+b
+#sum(n:Z)=+/n
+#main() I = 1 + 2
+```
+
+## Minimal API
+
+```
+// ax-api port 8080
+// ax-api GET /health -> health
+fn health(request: http.Request) -> http.Response = api.ok({ok: true});
+```
+
+Run with `ax-api run app.ax`.
